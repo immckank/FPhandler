@@ -1,0 +1,301 @@
+saber -leak memcached.bc
+
+*********General Stats***************
+################ (program : memcached.bc)###############
+AddrsNum            2858
+BBWith2Succ         2831
+BBWith3Succ         78
+CallsNum            4000
+ConstArrayObj       9
+ConstStructObj      5
+ConstantObj         0
+CopysNum            1956
+FIObjNum            624
+FSObjNum            471
+FunctionObjs        554
+GepsNum             6702
+GlobalObjs          144
+HeapObjs            128
+IndCallSites        118
+LoadsNum            5625
+MaxStructSize       120
+NonPtrObj           1000
+ReturnsNum          583
+StackObjs           269
+StoresNum           3716
+TotalCallSite       4446
+TotalFieldObjects   930
+TotalObjects        2026
+TotalPTASVFStmts    15464
+TotalPointers       49414
+TotalSVFStmts       39115
+VarArrayObj         89
+VarStructObj        124
+----------------Time and memory stats--------------------
+LLVMIRTime          0.904
+SVFIRTime           1.714
+SymbolTableTime     0.107
+#######################################################
+
+*********PTACallGraph Stats (Andersen analysis)***************
+################ (program : memcached.bc)###############
+----------------Numbers stats----------------------------
+CalRetPairInCycle   36
+MaxNodeInCycle      11
+NodeInCycle         12
+TotalCycle          2
+TotalEdge           4594
+TotalNode           554
+#######################################################
+
+*********Andersen Pointer Analysis Stats***************
+################ (program : memcached.bc)###############
+----------------Time and memory stats--------------------
+AvgIn/OutAddrEdge   0.171433
+AvgIn/OutCopyEdge   0.872021
+AvgIn/OutEdge       1.27931
+AvgIn/OutLoadEdge   0.155942
+AvgIn/OutStoreEdge  0.0799174
+AvgPtsSetSize       4.20931
+AvgTopLvlPtsSize    17.2928
+CollapseTime        0
+CopyGepTime         0
+LoadStoreTime       0
+MemoryUsageVmrss    53888
+MemoryUsageVmsize   53128
+SCCDetectTime       0
+SCCMergeTime        0
+TotalTime           1.813
+UpdateCGTime        0
+----------------Numbers stats----------------------------
+AddrProcessed       2224
+CopyProcessed       10254
+DummyFieldPtrs      215
+FieldObjs           930
+GepProcessed        18416
+IndCallSites        118
+IndEdgeSolved       247
+LoadProcessed       76608
+LocalVarInRecur     0
+MaxInAddrEdge       1
+MaxInCopyEdge       191
+MaxInLoadEdge       267
+MaxInStoreEdge      40
+MaxNodesInSCC       102
+MaxOutAddrEdge      1130
+MaxOutCopyEdge      1345
+MaxOutLoadEdge      381
+MaxOutStoreEdge     259
+MaxPtsSetSize       62
+MemObjects          2026
+NodesInCycles       329
+NullPointer         384
+NumOfAddrs          2158
+NumOfCGEdge         13946
+NumOfCGNode         13640
+NumOfCopys          4551
+NumOfFieldExpand    0
+NumOfGeps           6426
+NumOfLoads          1963
+NumOfSCCDetect      12
+NumOfSFRs           0
+NumOfStores         1006
+NumOfValidNode      12588
+NumOfValidObjNode   1277
+Pointers            49414
+PointsToBlkPtr      0
+PointsToConstPtr    2326
+SolveIterations     12
+StoreProcessed      45146
+TotalCycleNum       57
+TotalObjects        2026
+TotalPWCCycleNum    10
+TotalPointers       49414
+#######################################################
+
+****Persistent Points-To Cache Statistics: Andersen's analysis bitvector****
+################ (program : memcached.bc)###############
+UniquePointsToSets       2879
+TotalUnions              35115
+PropertyUnions           15963
+UniqueUnions             876
+LookupUnions             16673
+PreemptiveUnions         1603
+TotalComplements         169127
+PropertyComplements      152835
+UniqueComplements        735
+LookupComplements        14822
+PreemptiveComplements    735
+TotalIntersections       10297
+PropertyIntersections    8605
+UniqueIntersections      45
+LookupIntersections      158
+PreemptiveIntersections  1489
+#######################################################
+
+*********Memory SSA Statistics***************
+################ (program : memcached.bc)###############
+----------------Time and memory stats--------------------
+AverageRegSize      7.16812
+GenMUCHITime        0.082
+GenRegionTime       0.717
+InsertPHITime       0.029
+SSARenameTime       0.045
+TotalMSSATime       0.877
+----------------Numbers stats----------------------------
+BBHasMSSAPhi        817
+CSChiNode           3130
+CSHasChi            1207
+CSHasMu             1445
+CSMuNode            5667
+FunEntryChi         1990
+FunHasEntryChi      305
+FunHasRetMu         400
+FunRetMu            1927
+LoadHasMu           2013
+LoadMuNode          2773
+MSSAPhi             3868
+MaxRegSize          76
+MemRegions          690
+StoreChiNode        1206
+StoreHasChi         876
+#######################################################
+
+*********SVFG Statistics***************
+################ (program : memcached.bc)###############
+----------------Time and memory stats--------------------
+ATNodeTime          0.122
+AvgWeight           8.34672
+ConnDirEdgeTime     0
+ConnIndEdgeTime     0.249
+OptTime             0
+TLNodeTime          0
+TotalTime           0.429
+----------------Numbers stats----------------------------
+ActualIn            5667
+ActualOut           3130
+ActualParam         6610
+ActualRet           241
+Addr                2224
+AvgInDegree         1
+AvgIndInDeg         1
+AvgIndOutDeg        1
+AvgOutDegree        1
+Copy                14
+DirectCallEdge      2682
+DirectEdge          18462
+DirectRetEdge       224
+FormalIn            1990
+FormalOut           1927
+FormalParam         526
+FormalRet           67
+Gep                 6702
+IndCallEdge         6497
+IndRetEdge          3424
+IndirectEdge        30976
+IndirectEdgeLabels  258548
+Load                2013
+MSSAPhi             3868
+MaxInDegree         191
+MaxIndInDeg         191
+MaxIndOutDeg        191
+MaxOutDegree        695
+PHI                 542
+Store               1063
+TotalEdge           49438
+TotalNode           36585
+#######################################################
+
+*********SVFG Statistics***************
+################ (program : memcached.bc)###############
+----------------Time and memory stats--------------------
+ATNodeTime          0.122
+AvgWeight           8.27756
+ConnDirEdgeTime     0
+ConnIndEdgeTime     0.249
+OptTime             0
+TLNodeTime          0
+TotalTime           0.487
+----------------Numbers stats----------------------------
+ActualIn            5667
+ActualOut           3130
+ActualParam         6610
+ActualRet           241
+Addr                2224
+AvgInDegree         1
+AvgIndInDeg         1
+AvgIndOutDeg        2
+AvgOutDegree        1
+Copy                14
+DirectCallEdge      3158
+DirectEdge          18938
+DirectRetEdge       224
+FormalIn            1990
+FormalOut           1927
+FormalParam         526
+FormalRet           67
+Gep                 6702
+IndCallEdge         7581
+IndRetEdge          4107
+IndirectEdge        32743
+IndirectEdgeLabels  271032
+Load                2013
+MSSAPhi             3868
+MaxInDegree         191
+MaxIndInDeg         191
+MaxIndOutDeg        191
+MaxOutDegree        695
+PHI                 542
+Store               1063
+TotalEdge           51681
+TotalNode           36585
+#######################################################
+         NeverFree : memory allocation at : (CallICFGNode: { "ln": 118, "cl": 11, "fl": "stats_prefix.c" })
+         PartialLeak : memory allocation at : (CallICFGNode: { "ln": 44, "cl": 24, "fl": "slab_automove_extstore.c" })
+                 conditional free path:
+                  --> ({ "ln": 54, "cl": 9, "fl": "slab_automove_extstore.c" }|True)
+
+         PartialLeak : memory allocation at : (CallICFGNode: { "ln": 37, "cl": 24, "fl": "slab_automove.c" })
+                 conditional free path:
+                  --> ({ "ln": 43, "cl": 9, "fl": "slab_automove.c" }|True)
+
+         NeverFree : memory allocation at : (CallICFGNode: { "ln": 93, "cl": 11, "fl": "stats_prefix.c" })
+         NeverFree : memory allocation at : (CallICFGNode: { "ln": 47, "cl": 22, "fl": "slab_automove_extstore.c" })
+         PartialLeak : memory allocation at : (CallICFGNode: { "ln": 1557, "cl": 9, "fl": "items.c" })
+                 conditional free path:
+                  --> ({ "ln": 1565, "cl": 9, "fl": "items.c" }|False)
+                  --> ({ "ln": 1573, "cl": 5, "fl": "items.c" }|True)
+
+         NeverFree : memory allocation at : (CallICFGNode: { "ln": 107, "cl": 11, "fl": "stats_prefix.c" })
+         NeverFree : memory allocation at : (CallICFGNode: { "ln": 40, "cl": 22, "fl": "slab_automove.c" })
+         PartialLeak : memory allocation at : (CallICFGNode: { "ln": 225, "cl": 22, "fl": "restart.c" })
+                 conditional free path:
+                  --> ({ "ln": 238, "cl": 9, "fl": "restart.c" }|False)
+                  --> ({ "ln": 238, "cl": 9, "fl": "restart.c" }|True)
+                  --> ({ "ln": 248, "cl": 5, "fl": "restart.c" }|False)
+                  --> ({ "ln": 248, "cl": 5, "fl": "restart.c" }|True)
+                  --> ({ "ln": 251, "cl": 13, "fl": "restart.c" }|False)
+                  --> ({ "ln": 251, "cl": 13, "fl": "restart.c" }|True)
+                  --> ({ "ln": 248, "cl": 5, "fl": "restart.c" }|False)
+
+         PartialLeak : memory allocation at : (CallICFGNode: { "ln": 820, "cl": 20, "fl": "storage.c" })
+                 conditional free path:
+                  --> ({ "ln": 824, "cl": 5, "fl": "storage.c" }|True)
+                  --> ({ "ln": 865, "cl": 9, "fl": "storage.c" }|True)
+                  --> ({ "ln": 867, "cl": 34, "fl": "storage.c" }|True)
+                  --> ({ "ln": 867, "cl": 13, "fl": "storage.c" }|True)
+
+         PartialLeak : memory allocation at : (CallICFGNode: { "ln": 517, "cl": 18, "fl": "crawler.c" })
+                 conditional free path:
+                  --> ({ "ln": 531, "cl": 5, "fl": "crawler.c" }|True)
+
+         NeverFree : memory allocation at : (CallICFGNode: { "ln": 4866, "cl": 24, "fl": "memcached.c" })
+         NeverFree : memory allocation at : (CallICFGNode: { "ln": 164, "cl": 13, "fl": "crawler.c" })
+         PartialLeak : memory allocation at : (CallICFGNode: { "ln": 76, "cl": 22, "fl": "restart.c" })
+                 conditional free path:
+                  --> ({ "ln": 86, "cl": 9, "fl": "restart.c" }|False)
+                  --> ({ "ln": 86, "cl": 9, "fl": "restart.c" }|True)
+                  --> ({ "ln": 98, "cl": 9, "fl": "restart.c" }|False)
+                  --> ({ "ln": 105, "cl": 9, "fl": "restart.c" }|False)
+
+         NeverFree : memory allocation at : (CallICFGNode: { "ln": 1524, "cl": 50, "fl": "storage.c" })
