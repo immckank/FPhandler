@@ -40,7 +40,7 @@ class MemoryLeakHandler(AlterHandler):
 
     def read_alter_file(self, alter_file_path, alter_file_name):
         memory_leak_list = []
-        project_name = alter_file_name.split("_")[0]
+        project_name = alter_file_name.split("_")[0].split(".")[0]
         full_path = os.path.join(alter_file_path, alter_file_name)
 
         if not os.path.exists(full_path):
@@ -98,5 +98,5 @@ class MemoryLeakHandler(AlterHandler):
 
 if __name__ == '__main__':
     handler = MemoryLeakHandler()
-    handler.read_alter_file(r"SARIF", "memcached_alter.txt")
+    handler.read_alter_file(r"SARIF", "memcached.txt")
     handler.handle_memory_leak()

@@ -49,6 +49,10 @@ class NeverFree(MemoryLeak):
         return self.source_location
 
     def to_prompt(self):
+        Type_prompt = f"Type of bug: {self.leak_type}. \n"
+        # TODO: Guidance on triaging this type of bug:
+        Guidance_prompt = f"Guidance on triaging this type of bug: The warning at a specific source line is a false positive if \n"
+        Location_prompt = f"Source location: {self.source_location}  \n"
         return f"{self.leak_type} at {self.source_location}"
 
 class PartialLeak(MemoryLeak):
