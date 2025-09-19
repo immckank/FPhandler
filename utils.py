@@ -6,7 +6,39 @@ PUT_ROOT_PATH = "PUT"
 def find_file_path(project_name, file_name):
     for root, dirs, files in os.walk(os.path.join(PUT_ROOT_PATH, project_name)):
         if file_name in files:
-            return os.path.join(root, file_name)
+            # 路径中不包含PUT_ROOT_PATH
+            full_path = os.path.join(root, file_name)
+            return full_path.replace(PUT_ROOT_PATH, "").replace("\\", "/").lstrip("/")
+    return None
+
+# 根据指定scource_location找到对应的代码行
+def find_code_line(source_location):
+    file_path = source_location.split(":")[0]
+    # replace \ with /
+    file_path = file_path.replace("\\", "/").lstrip("/")
+    file_path = os.path.join(PUT_ROOT_PATH, file_path).replace("\\", "/").lstrip("/")
+    print(file_path)
+    if not file_path:
+        return None
+    with open(file_path, 'r') as f:
+        lines = f.readlines()
+        line_number = int(source_location.split(":")[1]) - 1
+        if line_number < 0 or line_number >= len(lines):
+            return None
+        return lines[line_number].strip()
+
+# 提取赋值表达式的左值变量名
+def extract_lhs_variable(assignment):
+    assignment = assignment.strip()
+    if '=' in assignment:
+        lhs = assignment.split('=')[0].strip()
+        # 变量名通常是LHS（左手边）的最后一个词
+        parts = lhs.split()
+        if not parts:
+            return None
+        # 移除所有前缀的星号和后缀的方括号
+        variable_name = parts[-1].lstrip('*').rstrip('[]')
+        return variable_name
     return None
 
 # 提取SARIF文件中的alter部分
