@@ -21,7 +21,7 @@ class MemoryDefect:
         return self.source_location
 
     def to_prompt(self):
-        return f""
+        return f"{self.defect_type} at {self.source_location}"
     
 class MemoryLeak(MemoryDefect):
     def __init__(self, leak_type=None, source_location=None):
@@ -36,7 +36,7 @@ class MemoryLeak(MemoryDefect):
         return self.source_location
 
     def to_prompt(self):
-        return ""
+        return super().to_prompt()
 
 class NeverFree(MemoryLeak):
     def __init__(self, source_location=None):
@@ -49,7 +49,7 @@ class NeverFree(MemoryLeak):
         return self.source_location
 
     def to_prompt(self):
-        return ""
+        return f"{self.leak_type} at {self.source_location}"
 
 class PartialLeak(MemoryLeak):
     class conditional_path:
@@ -74,7 +74,11 @@ class PartialLeak(MemoryLeak):
         return self.source_location
 
     def to_prompt(self):
-        return ""
+        basic_info = f"{self.leak_type} at {self.source_location} with {len(self.conditional_free_paths)} conditional free paths"
+        cond_info = ""
+        for idx, cond_path in enumerate(self.conditional_free_paths):
+            cond_info += f"\n  Path {idx+1}: Condition '{cond_path.get_condition()}' at {cond_path.get_condition_location()}"
+        return basic_info + cond_info
 
 
 class DoubleFree(MemoryDefect):
@@ -82,7 +86,8 @@ class DoubleFree(MemoryDefect):
         super().__init__("DoubleFree", source_location)
 
     def to_prompt(self):
-        return f"Double free detected at {self.source_location}"
+        return super().to_prompt()
+
 
 
 class UseAfterFree(MemoryDefect):
@@ -90,4 +95,4 @@ class UseAfterFree(MemoryDefect):
         super().__init__("UseAfterFree", source_location)
 
     def to_prompt(self):
-        return f"Use after free detected at {self.source_location}"
+        return super().to_prompt()

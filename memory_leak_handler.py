@@ -1,61 +1,102 @@
 import os
+import re
+import json
 
 import utils
 from memory_defect import NeverFree
 from memory_defect import PartialLeak
 from memory_defect import MemoryLeak
+from alter_handler import AlterHandler
 
+class MemoryLeakHandler(AlterHandler):
+    def __init__(self):
+        super().__init__()
+    # TODO: 设定分析元语
+    # Regex to parse the main leak line, capturing type and JSON-like details.
+    LEAK_RE = re.compile(
+        r"^\s*(NeverFree|PartialLeak)\s*:\s*memory allocation at\s*:\s*\(CallICFGNode:\s*({.*})\)"
+    )
+    # Regex to parse conditional free path lines, capturing condition and JSON-like details.
+    COND_PATH_RE = re.compile(
+        r"^\s*-->\s*\(\s*({.*?})\s*\|\s*(.*?)\s*\)"
+    )
 
+    def _parse_location(self, project_name, node_detail_str):
+        """Parses location details from a JSON-like string and returns a formatted location string."""
+        try:
+            # The detail string is not a valid JSON object, needs enclosing braces.
+            details = json.loads(node_detail_str)
+            file_name = details.get("fl")
+            line_number = details.get("ln")
 
-def read_alter_file(alter_file_path, alter_file_name):
-    memory_leak_list = []
-    project_name = alter_file_name.split("_")[0]
-    with open(os.path.join(alter_file_path, alter_file_name), 'r') as f:
-        total_lines = len(f.readlines())
-        f.seek(0)
-        for i in range(total_lines):
-            # 获取第i行
-            line = f.readline().strip()
-            if line.startswith("NeverFree"):
-                # NeverFree : memory allocation at : (CallICFGNode: { "ln": 118, "cl": 11, "fl": "stats_prefix.c" })
-                node_detail = line.split("{")[1].split("}")[0]
-                file_name = node_detail.split("\"fl\": ")[1].strip().replace("\"", "")
-                file_path = utils.find_file_path(project_name, file_name)
-                line_number = node_detail.split("\"ln\": ")[1].strip().split(",")[0].strip().replace("\"", "")
-                memory_leak_list.append(NeverFree(file_path+":"+line_number))
-                # show the file path and line number
-                # print(memory_leak_list[-1].get_source_location())
-            elif line.startswith("PartialLeak"):
-                # TODO: 处理PartialLeak
-                node_detail = line.split("{")[1].split("}")[0]
-                file_name = node_detail.split("\"fl\": ")[1].strip().replace("\"", "")
-                file_path = utils.find_file_path(project_name, file_name)
-                line_number = node_detail.split("\"ln\": ")[1].strip().split(",")[0].strip().replace("\"", "")
-                # 下一行为提示信息忽略
-                f.readline()
-                # 后续的数行是conditional free path
-                # 读取后面数行直到遇到空行或文件结尾
-                conditional_free_paths = []
-                while True:
-                    line = f.readline().strip()
-                    if line.startswith("-->"):
-                        # 处理conditional free path
-                        line = line.split("--> ")[1].strip()
-                        cond = line.split("|")[1].strip().split(")")[0].strip()
-                        cond_path_detail = line.split("{")[1].split("}")[0]
-                        cond_file_name = cond_path_detail.split("\"fl\": ")[1].strip().replace("\"", "")
-                        cond_file_path = utils.find_file_path(project_name, cond_file_name)
-                        cond_line_number = cond_path_detail.split("\"ln\": ")[1].strip().split(",")[0].strip().replace("\"", "")
-                        conditional_path = PartialLeak.conditional_path(cond, cond_file_path+":"+cond_line_number)
-                        conditional_free_paths.append(conditional_path)    
-                    elif not line.strip():
+            if not file_name or line_number is None:
+                return None
+
+            file_path = utils.find_file_path(project_name, file_name)
+            return f"{file_path}:{line_number}" if file_path else None
+        except (json.JSONDecodeError, AttributeError):
+            # Log error or handle cases where parsing fails.
+            return None
+
+    def read_alter_file(self, alter_file_path, alter_file_name):
+        memory_leak_list = []
+        project_name = alter_file_name.split("_")[0]
+        full_path = os.path.join(alter_file_path, alter_file_name)
+
+        if not os.path.exists(full_path):
+            return memory_leak_list
+
+        with open(full_path, 'r') as f:
+            lines = iter(f)
+            for line in lines:
+                line = line.strip()
+                leak_match = self.LEAK_RE.match(line)
+                if not leak_match:
+                    continue
+
+                leak_type, node_detail_str = leak_match.groups()
+                location = self._parse_location(project_name, node_detail_str)
+                if not location:
+                    continue
+
+                if leak_type == "NeverFree":
+                    memory_leak_list.append(NeverFree(location))
+                elif leak_type == "PartialLeak":
+                    try:
+                        # Skip the hint line
+                        next(lines)
+                    except StopIteration:
                         break
-                    pass
-                memory_leak_list.append(PartialLeak(file_path+":"+line_number, conditional_free_paths))
 
-def handle_memory_leak(file_path, file_name):
-    utils.extract_alter(file_path, file_name)
-    alter_file_path = os.path.join(file_path, file_name.replace('.txt', '_alter.txt'))
+                    conditional_free_paths = []
+                    while True:
+                        try:
+                            cond_line = next(lines).strip()
+                            if not cond_line:
+                                # Blank line signifies the end of this PartialLeak's conditional paths
+                                break
+
+                            cond_match = self.COND_PATH_RE.match(cond_line)
+                            if cond_match:
+                                cond_node_detail_str, cond = cond_match.groups()
+                                cond_location = self._parse_location(project_name, cond_node_detail_str)
+                                if cond_location:
+                                    conditional_path = PartialLeak.conditional_path(cond, cond_location)
+                                    conditional_free_paths.append(conditional_path)
+                        except StopIteration:
+                            break # End of file
+                    memory_leak_list.append(PartialLeak(location, conditional_free_paths))
+        self.alter_list = memory_leak_list
+        return memory_leak_list
+
+    def handle_memory_leak(self):
+        # 处理当前alter_list中的每个alter
+        for alter in self.alter_list:
+            print(alter.to_prompt())
+        return
 
 
-read_alter_file("SARIF", "memcached_alter.txt")
+if __name__ == '__main__':
+    handler = MemoryLeakHandler()
+    handler.read_alter_file(r"SARIF", "memcached_alter.txt")
+    handler.handle_memory_leak()
