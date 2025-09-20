@@ -3,9 +3,11 @@ import subprocess
 import logging
 import sys
 
-
-
 PUT_ROOT_PATH = "PUT"
+
+'''
+structure
+'''
 
 # dump_source_file
 # Return a slice of a source  file with line numbers.
@@ -40,7 +42,6 @@ def find_callee(source_location):
     # 基于LLVM来实现不要使用基于文本的查找
     # libclang
     return None
-
 
 # ctags_readtags
 # Find definition locations  for an identifier using ctags.
@@ -89,7 +90,6 @@ def ctags_readtags(source_location, id_name):
         logging.error(f"An error occurred: {e}")
         return []
 
-
 # find_var_definitions
 # Find all definition sites  of a variable from a use site.
 # return: list < source_location >
@@ -98,6 +98,10 @@ def find_var_definitions(source_location, var_name):
     # libclang
     return []
 
+'''
+path condition
+'''
+
 # get_path_constraint
 # Compute the path condition to  reach a given source line.
 # return: exp
@@ -105,6 +109,34 @@ def get_path_constraint(source_location):
     # 基于LLVM来实现不要使用基于文本的查找
     # libclang
     return None
+
+# check_always_implying、
+# Check if one path constraint  logically implies another.
+# exp1  exp2
+# return: bool
+def check_always_implying(exp1, exp2):
+    # 基于求解器来实现
+    return None
+
+'''
+bound
+'''
+
+
+# check_le
+# Check if exp1 ≤ exp2  always holds.
+# exp1  exp2
+# return: bool
+def check_le(exp1, exp2):
+    # 基于求解器来实现
+    return None
+
+
+
+
+'''
+context
+'''
 
 # find_func_context
 # 判断source location及变量是否在一个函数中
