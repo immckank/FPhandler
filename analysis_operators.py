@@ -42,6 +42,69 @@ def find_callee(source_location):
     return None
 
 
+# ctags_readtags
+# Find definition locations  for an identifier using ctags.
+# return: list < source_location >
+def ctags_readtags(source_location, id_name):
+    # ctags实现
+    project_path = os.path.join(PUT_ROOT_PATH, source_location.split(":")[0].split("/")[0])
+    tag_file_path = os.path.join(project_path, "tags")
+    if not os.path.exists(tag_file_path):
+        # 在项目根目录运行命令生成ctags文件
+        print(f"Generating ctags file in {project_path}...")
+        subprocess.run(["ctags", "-R", "--fields=+n", "--languages=C,C++", "-f", "tags"], cwd=project_path)
+    source_location_list = []
+    try:
+        with open(tag_file_path, "r") as f:
+            for line in f:
+                if line.startswith("!_"):
+                    continue
+                parts = line.strip().split("\t")
+                if len(parts) < 3:
+                    continue
+                tag_name = parts[0]
+                if tag_name == id_name:
+                    file_path = parts[1]
+                    line_number = None
+                    for field in parts[3:]:
+                        if field.startswith('line:'):
+                            try:
+                                line_number = int(field.split(':')[1])
+                                break
+                            except (ValueError, IndexError):
+                                continue
+                    if line_number is None:
+                        address = parts[2]
+                        match = re.match(r'^(\d+);"', address)
+                        if match:
+                            line_number = match.group(1)
+                    if line_number is not None:
+                        res_source_location = f"{file_path}:{line_number}"
+                        source_location_list.append(res_source_location)
+        return source_location_list
+    except FileNotFoundError:
+        logging.error(f"Tag file not found: {tag_file_path}")
+        return []
+    except Exception as e:
+        logging.error(f"An error occurred: {e}")
+        return []
+
+
+# find_var_definitions
+# Find all definition sites  of a variable from a use site.
+# return: list < source_location >
+def find_var_definitions(source_location, var_name):
+    # 基于LLVM来实现不要使用基于文本的查找
+    # libclang
+    return []
+
+# get_path_constraint
+# Compute the path condition to  reach a given source line.
+# return: exp
+def get_path_constraint(source_location):
+    # 基于LLVM来实现不要使用基于文本的查找
+    # libclang
+    return None
 
 # find_func_context
 # 判断source location及变量是否在一个函数中
@@ -82,4 +145,4 @@ def dump_func_context(source_location):
     return None
 
 
-print(find_var_decl("memcached/logger.c:756", "ret"))  # memcached/slab_automove.c:37
+ctags_readtags("memcached/slab_automove.c:37", "a")
