@@ -131,30 +131,13 @@ def check_le(exp1, exp2):
     # 基于求解器来实现
     return None
 
-
-
-
 '''
 context
 '''
 
-# find_func_context
-# 判断source location及变量是否在一个函数中
-# 返回函数实现所在的source location
-def find_func_context(source_location):
-    file_path = os.path.join(PUT_ROOT_PATH, source_location.split(":")[0])
-    line_number = int(source_location.split(":")[1])
-    with open(file_path, "r") as f:
-        lines = f.readlines()
-        # TODO: 这里简单找括号 没有处理任何
-        # TODO: 建议从LLVM中去实现
-        for i in range(line_number - 1, -1, -1):
-            if "{" in lines[i]:
-                return f"{file_path.replace(PUT_ROOT_PATH, '').replace('\\', '/').lstrip('/')}:{i + 1}"
-    return None
-
 # dump_func_context
 # 得到函数实现所在第一行 打印全部函数实现
+# return: string
 def dump_func_context(source_location):
     func_context = ""
     file_path = os.path.join(PUT_ROOT_PATH, source_location.split(":")[0])
@@ -175,6 +158,3 @@ def dump_func_context(source_location):
             func_context += lines[i]
         return func_context
     return None
-
-
-ctags_readtags("memcached/slab_automove.c:37", "a")
