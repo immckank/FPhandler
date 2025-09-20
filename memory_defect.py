@@ -4,7 +4,7 @@ import utils
 
 '''prompt format
 Type of bug: PartialLeak.
-Guidance on triaging this type of bug: The warning at a specific source line is a false positive if    
+TODO: Guidance on triaging this type of bug: The warning at a specific source line is a false positive if    
 Source location: memcached/slab_automove.c:37
 Message: The variable 'a' allocated at memcached/slab_automove.c:37 may not be freed along some paths that reach the end of the function.
 The following are the conditions and locations of conditional free paths:

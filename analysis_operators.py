@@ -9,18 +9,8 @@ PUT_ROOT_PATH = "PUT"
 structure
 '''
 
-# dump_source_file
-# Return a slice of a source  file with line numbers.
-# return: string
-def dump_source_file(source_location, start_line, end_line):
-    file_path = os.path.join(PUT_ROOT_PATH, source_location.split(":")[0])
-    with open(file_path, "r") as f:
-        lines = f.readlines()
-        return "".join(lines[start_line - 1:end_line])
-    return None
-
 # find_var_decl
-# Find the source location of a  variable’s declaration.
+# 找到变量声明的位置
 # return: source_location: 'memcached/slab_automove.c:37'
 def find_var_decl(source_location, var_name):
     # 基于LLVM来实现不要使用基于文本的查找
@@ -28,7 +18,7 @@ def find_var_decl(source_location, var_name):
     return None
 
 # find_callers
-# Find all functions that  call a target function.
+# 找到所有调用目标函数的其他函数
 # return: list < function_name, source_location >
 def find_callers(source_location):
     # 基于LLVM来实现不要使用基于文本的查找
@@ -36,7 +26,7 @@ def find_callers(source_location):
     return []
 
 # find_callee
-# Find the body of a function  called at a given location.
+# 找到被调用函数的函数体
 # return: function_name, source_location
 def find_callee(source_location):
     # 基于LLVM来实现不要使用基于文本的查找
@@ -44,7 +34,7 @@ def find_callee(source_location):
     return None
 
 # ctags_readtags
-# Find definition locations  for an identifier using ctags.
+# 用ctag找到指定某个标识符的所有出现位置
 # return: list < source_location >
 def ctags_readtags(source_location, id_name):
     # ctags实现
@@ -91,7 +81,7 @@ def ctags_readtags(source_location, id_name):
         return []
 
 # find_var_definitions
-# Find all definition sites  of a variable from a use site.
+# 找到指定变量所有被定义的位置
 # return: list < source_location >
 def find_var_definitions(source_location, var_name):
     # 基于LLVM来实现不要使用基于文本的查找
@@ -103,7 +93,7 @@ path condition
 '''
 
 # get_path_constraint
-# Compute the path condition to  reach a given source line.
+# 找到当前source_location的路径约束条件的表达式
 # return: exp
 def get_path_constraint(source_location):
     # 基于LLVM来实现不要使用基于文本的查找
@@ -111,7 +101,7 @@ def get_path_constraint(source_location):
     return None
 
 # check_always_implying、
-# Check if one path constraint  logically implies another.
+# 检测两个表达式是否总是蕴含关系
 # exp1  exp2
 # return: bool
 def check_always_implying(exp1, exp2):
@@ -124,7 +114,7 @@ bound
 
 
 # check_le
-# Check if exp1 ≤ exp2  always holds.
+# 检测两个表达式exp1 <= exp2是否恒成立
 # exp1  exp2
 # return: bool
 def check_le(exp1, exp2):
@@ -135,8 +125,18 @@ def check_le(exp1, exp2):
 context
 '''
 
+# dump_source_file
+# 按行号寻找指定代码片段
+# return: string
+def dump_source_file(source_location, start_line, end_line):
+    file_path = os.path.join(PUT_ROOT_PATH, source_location.split(":")[0])
+    with open(file_path, "r") as f:
+        lines = f.readlines()
+        return "".join(lines[start_line - 1:end_line])
+    return None
+
 # dump_func_context
-# 得到函数实现所在第一行 打印全部函数实现
+# 得到函数体所在第一行 打印全部函数实现
 # return: string
 def dump_func_context(source_location):
     func_context = ""

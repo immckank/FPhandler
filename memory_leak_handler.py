@@ -11,12 +11,10 @@ from alter_handler import AlterHandler
 class MemoryLeakHandler(AlterHandler):
     def __init__(self):
         super().__init__()
-    # TODO: 设定分析元语
-    # Regex to parse the main leak line, capturing type and JSON-like details.
+    # TODO: 设定分析函数
     LEAK_RE = re.compile(
         r"^\s*(NeverFree|PartialLeak)\s*:\s*memory allocation at\s*:\s*\(CallICFGNode:\s*({.*})\)"
     )
-    # Regex to parse conditional free path lines, capturing condition and JSON-like details.
     COND_PATH_RE = re.compile(
         r"^\s*-->\s*\(\s*({.*?})\s*\|\s*(.*?)\s*\)"
     )
