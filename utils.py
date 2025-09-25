@@ -13,7 +13,7 @@ def find_file_path(project_name, file_name):
             return full_path.replace(PUT_ROOT_PATH, "").replace("\\", "/").lstrip("/")
     return None
 
-# 根据指定scource_location找到对应的代码行
+# 根据指定source_location找到对应的代码行
 def find_code_line(source_location):
     file_path = source_location.split(":")[0]
     # replace \ with /
