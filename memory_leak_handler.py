@@ -7,6 +7,9 @@ from memory_defect import NeverFree
 from memory_defect import PartialLeak
 from memory_defect import MemoryLeak
 from alter_handler import AlterHandler
+from llm_rag import resposeToAlter
+from analysis_operators import dump_source_file
+
 
 class MemoryLeakHandler(AlterHandler):
     def __init__(self):
@@ -90,11 +93,20 @@ class MemoryLeakHandler(AlterHandler):
     def handle_memory_leak(self):
         # 处理当前alter_list中的每个alter
         for alter in self.alter_list:
-            print(alter.to_prompt())
+            # print(alter.to_prompt())
+            # user_prompt = "source code stats_prefix.c:118 " + dump_source_file(alter.get_source_location(), 118, 118) + "\n"
+            # user_prompt += "source code is inside function stats_prefix.c:114-123 " + dump_source_file(alter.get_source_location(), 114, 123) + "\n"
+            # user_prompt += "called function stats_prefix_find stats_prefix.c:37-87: " + dump_source_file(alter.get_source_location(), 37, 87) + "\n"
+            # print(user_prompt)
+            source_location = alter.get_source_location()
+            user_prompt = f"source code at {source_location} : " + dump_source_file(source_location, 1, 1) + "\n"
+            # 给出source_location所在的函数
+            response = resposeToAlter(alter.to_prompt(), user_prompt=user_prompt)
+            print(response)
         return
 
 
 if __name__ == '__main__':
     handler = MemoryLeakHandler()
-    handler.read_alter_file(r"SARIF", "memcached.txt")
+    handler.read_alter_file(r"SARIF", "memcached_NEVERFREETEST.txt")
     handler.handle_memory_leak()
