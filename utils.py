@@ -1,6 +1,6 @@
 import os
 import networkx as nx
-import pydot
+# import pydot
 
 PUT_ROOT_PATH = "PUT"
 
@@ -66,22 +66,22 @@ def extract_alter(sarif_path, sarif_file_name):
     return extracted_lines
 
 # 读取 dot 文件为 networkx 有向图
-def load_dot_to_nx(dot_path):
-    graphs = pydot.graph_from_dot_file(dot_path)
-    p = graphs[0]
-    G = nx.DiGraph()
-    # 解析节点
-    for n in p.get_nodes():
-        name = n.get_name().strip('"')
-        attrs = n.get_attributes() or {}
-        # 常见属性: label, file, line, func 等
-        G.add_node(name, **attrs)
-    # 解析边
-    for e in p.get_edges():
-        src = e.get_source().strip('"')
-        dst = e.get_destination().strip('"')
-        attrs = e.get_attributes() or {}
-        G.add_edge(src, dst, **attrs)
-    return G
+# def load_dot_to_nx(dot_path):
+#     graphs = pydot.graph_from_dot_file(dot_path)
+#     p = graphs[0]
+#     G = nx.DiGraph()
+#     # 解析节点
+#     for n in p.get_nodes():
+#         name = n.get_name().strip('"')
+#         attrs = n.get_attributes() or {}
+#         # 常见属性: label, file, line, func 等
+#         G.add_node(name, **attrs)
+#     # 解析边
+#     for e in p.get_edges():
+#         src = e.get_source().strip('"')
+#         dst = e.get_destination().strip('"')
+#         attrs = e.get_attributes() or {}
+#         G.add_edge(src, dst, **attrs)
+#     return G
 
-G = load_dot_to_nx("GRAPH/icfg_initial.dot")
+# G = load_dot_to_nx("GRAPH/icfg_initial.dot")
