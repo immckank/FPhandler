@@ -2,8 +2,10 @@ import os
 import re
 import json
 
+from networkx.classes import freeze
+
 import utils
-from memory_defect import NeverFree
+from memory_defect import NeverFree, DoubleFree
 from memory_defect import PartialLeak
 from memory_defect import MemoryLeak
 from alter_handler import AlterHandler
@@ -13,7 +15,7 @@ class MemoryLeakHandler(AlterHandler):
         super().__init__()
     # TODO: 设定分析函数
     LEAK_RE = re.compile(
-        r"^\s*(NeverFree|PartialLeak)\s*:\s*memory allocation at\s*:\s*\(CallICFGNode:\s*({.*})\)"
+        r"^\s*(NeverFree|PartialLeak|DoubleFree)\s*:\s*memory allocation at\s*:\s*\(CallICFGNode:\s*({.*})\)"
     )
     COND_PATH_RE = re.compile(
         r"^\s*-->\s*\(\s*({.*?})\s*\|\s*(.*?)\s*\)"
@@ -69,12 +71,12 @@ class MemoryLeakHandler(AlterHandler):
                     conditional_free_paths = []
                     while True:
                         try:
-                            cond_line = next(lines).strip()
-                            if not cond_line:
+                            free_line = next(lines).strip()
+                            if not free_line:
                                 # Blank line signifies the end of this PartialLeak's conditional paths
                                 break
 
-                            cond_match = self.COND_PATH_RE.match(cond_line)
+                            cond_match = self.COND_PATH_RE.match(free_line)
                             if cond_match:
                                 cond_node_detail_str, cond = cond_match.groups()
                                 cond_location = self._parse_location(project_name, cond_node_detail_str)
@@ -84,6 +86,31 @@ class MemoryLeakHandler(AlterHandler):
                         except StopIteration:
                             break # End of file
                     memory_leak_list.append(PartialLeak(location, conditional_free_paths))
+                elif leak_type=="DoubleFree":
+                    try:
+                        # Skip the hint line
+                        next(lines)
+                    except StopIteration:
+                        break
+
+                    double_free_paths = []
+                    while True:
+                        try:
+                            free_line = next(lines).strip()
+                            if not free_line:
+                                # Blank line signifies the end of this DoubleFree's free paths
+                                break
+                            cond_match = self.COND_PATH_RE.match(free_line)
+                            if cond_match:
+                                cond_node_detail_str, cond = cond_match.groups()
+                                cond_location = self._parse_location(project_name, cond_node_detail_str)
+                                if cond_location:
+                                    double_free_path = DoubleFree.double_path(cond, cond_location)
+                                    double_free_paths.append(double_free_path)
+                        except StopIteration:
+                            break
+                    memory_leak_list.append(DoubleFree(location, double_free_paths))
+
         self.alter_list = memory_leak_list
         return memory_leak_list
 
