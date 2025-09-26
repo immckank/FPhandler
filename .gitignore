@@ -2,7 +2,7 @@
 .idea
 .pytest_cache
 .pytest_cache
-__pycache__
+.__pycache__
 pipcache/
 /PUT/*
 /FP
