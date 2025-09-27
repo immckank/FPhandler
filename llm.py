@@ -49,3 +49,27 @@ def responseForAlter(Alter_prompt, user_prompt="", allowed_tools = []):
         config=config
     )
     return response.text
+
+def llm_tool_calling_example(prompt: str):
+    """
+    This is an example function that demonstrates how to use the analysis operators as tools for the Gemini model.
+    The model can choose to call any of the provided functions to gather information to answer the user's prompt.
+    """
+    # The list of functions that the model can use as tools.
+    tools = [
+        dump_source_snippet,
+        dump_source_line,
+        find_callee,
+        find_current_function,
+        find_callers
+    ]
+
+    client = genai.Client()
+    
+    # The model will decide which tools to use based on the user's prompt.
+    response = client.models.generate_content(
+        model="gemini-1.5-flash",  # Using a model that is good at tool calling
+        contents=prompt,
+        tools=tools
+    )
+    return response.text

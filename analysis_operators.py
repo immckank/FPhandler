@@ -4,6 +4,7 @@ import logging
 import sys
 import json
 import re
+from typing import List, Dict, Any, Optional
 
 
 from command_caller import CommandCaller
@@ -17,20 +18,28 @@ PROJECT_NAME = config.PROJECT_NAME
 structure function
 '''
 
-# find_callers
-# 找到所有调用目标函数的其他函数
-# return: list < source_location >
-# D
-def find_callers(function_name):
+def find_callers(function_name: str) -> List[Dict[str, Any]]:
+    """Finds all functions that call a given target function.
+
+    Args:
+        function_name: The name of the target function to find callers for.
+
+    Returns:
+        A list of dictionaries, where each dictionary represents a call site
+        and contains the location and the source code of the call.
+        Example:
+        [{'location': 'proto_text.c:581', 'code': '...'},
+         {'location': 'proto_bin.c:602', 'code': '...'}]
+        Returns an empty list if no callers are found or an error occurs.
+    """
     command_caller = CommandCaller()
     res = command_caller.call_graph_reader("find-call-sites", function_name, os.path.join(PUT_ROOT_PATH, f"{PROJECT_NAME}.bc"))
-    caller_source_location_list = []
+    call_sites_list = []
     if res:
         res_json = json.loads(res)
         error = res_json.get("error", None)
         if error:
-            # TODO 说明错误
-            print(error)
+            logging.error(f"Error finding callers for {function_name}: {error}")
         else:
             # 删除error属性
             del res_json["error"]
@@ -38,19 +47,29 @@ def find_callers(function_name):
             # 为每个call_site添加code属性
             for call_site in res_json.get("call_sites", []):
                 call_site["code"] = dump_source_line(call_site["location"].split(":")[0], call_site["location"].split(":")[1])
-                caller_source_location_list.append(call_site["location"])
-            return res_json
+                call_sites_list.append(call_site)
+            return call_sites_list
     return []
 
-# find_callee
-# 找到被调用函数的函数体
-# return: list < { function_name, filename, start_line, end_line, function_body } >
-# D
-def find_callee(source_location):
+def find_callee(source_location: str) -> Optional[List[Dict[str, Any]]]:
+    """Finds the function body of functions called at a specific source location.
+
+    Args:
+        source_location: The source location of the call site, in the format
+                         'filename.c:line_number'.
+
+    Returns:
+        A list of dictionaries, each representing a callee function, including its
+        name, file, line numbers, and full body. Returns None if the location
+        is invalid or no callee is found.
+        Example:
+        [{'function_name': 'callee_func', 'filename': 'a.c', 'start_line': 10,
+          'end_line': 20, 'function_body': '...'}]
+    """
     # 基于LLVM来实现不要使用基于文本的查找
     # 检查source_location是否合法
     if not re.match(r'^[\w/]+\.c:\d+$', source_location) and not re.match(r'^[\w/]+\.h:\d+$', source_location):
-        print(f"Invalid source location format: {source_location}")
+        logging.error(f"Invalid source location format: {source_location}")
         return None
     command_caller = CommandCaller()
     res = command_caller.call_graph_reader("find-callee-body", source_location, os.path.join(PUT_ROOT_PATH, f"{PROJECT_NAME}.bc"))
@@ -58,8 +77,7 @@ def find_callee(source_location):
         res_json = json.loads(res)
         error = res_json.get("error", None)
         if error:
-            # TODO 说明错误
-            print(error)
+            logging.error(f"Error finding callee for {source_location}: {error}")
         else:
             # 删除error属性
             del res_json["error"]
@@ -71,14 +89,24 @@ def find_callee(source_location):
             return callee_functions
     return None
 
-# find_current_function
-# 找到当前sourcelocation所在的函数
-# return: function_name
-def find_current_function(source_location):
+def find_current_function(source_location: str) -> Optional[Dict[str, Any]]:
+    """Finds the function in which the given source location exists.
+
+    Args:
+        source_location: The source location, in the format 'filename.c:line_number'.
+
+    Returns:
+        A dictionary containing the details of the function, including its name,
+        file, line numbers, and full body. Returns None if the location is
+        invalid or the function is not found.
+        Example:
+        {'function_name': 'current_func', 'filename': 'a.c', 'start_line': 5,
+         'end_line': 25, 'function_body': '...'}
+    """
     # 基于LLVM来实现不要使用基于文本的查找
     # 检查source_location是否合法
     if not re.match(r'^[\w/]+\.c:\d+$', source_location) and not re.match(r'^[\w/]+\.h:\d+$', source_location):
-        print(f"Invalid source location format: {source_location}")
+        logging.error(f"Invalid source location format: {source_location}")
         return None
     command_caller = CommandCaller()
     res = command_caller.call_graph_reader("find-function-body", source_location, os.path.join(PUT_ROOT_PATH, f"{PROJECT_NAME}.bc"))
@@ -86,8 +114,7 @@ def find_current_function(source_location):
         res_json = json.loads(res)
         error = res_json.get("error", None)
         if error:
-            # TODO 说明错误
-            print(error)
+            logging.error(f"Error finding current function for {source_location}: {error}")
         else:
             # 删除error属性
             del res_json["error"]
@@ -101,10 +128,20 @@ def find_current_function(source_location):
 structure ctags
 '''
 
-# ctags_readtags
-# 用ctag找到指定某个标识符的所有出现位置
-# return: list < source_location >
-def ctags_readtags(source_location, id_name):
+def ctags_readtags(source_location: str, id_name: str) -> List[str]:
+    """Finds all occurrences of a given identifier using ctags.
+
+    This function generates a ctags file for the project if it doesn't exist,
+    then searches for all locations of the specified identifier.
+
+    Args:
+        source_location: A source location within the project to determine the
+                         project path (e.g., 'memcached/items.c:100').
+        id_name: The identifier (e.g., variable or function name) to search for.
+
+    Returns:
+        A list of source locations in 'filename:line_number' format.
+    """
     # ctags实现
     project_path = os.path.join(PUT_ROOT_PATH, source_location.split(":")[0].split("/")[0])
     tag_file_path = os.path.join(project_path, "tags")
@@ -154,16 +191,16 @@ structure variable
 
 # find_var_definitions
 # 找到指定变量所有被定义的位置
-# return: list < source_location >
-def find_var_definitions(source_location, var_name):
+# return: list < str >
+def find_var_definitions(source_location: str, var_name: str) -> List[str]:
     # 基于LLVM来实现不要使用基于文本的查找
     # libclang
     return []
 
 # find_var_decl
 # 找到变量声明的位置
-# return: source_location: 'memcached/slab_automove.c:37'
-def find_var_decl(source_location, var_name):
+# return: str: 'memcached/slab_automove.c:37'
+def find_var_decl(source_location: str, var_name: str) -> Optional[str]:
     # 基于LLVM来实现不要使用基于文本的查找
     # libclang
     return None
@@ -175,8 +212,8 @@ path condition
 
 # get_path_constraint
 # 找到当前source_location的路径约束条件的表达式
-# return: exp
-def get_path_constraint(source_location):
+# return: str
+def get_path_constraint(source_location: str) -> Optional[str]:
     # 基于LLVM来实现不要使用基于文本的查找
     # libclang
     return None
@@ -185,7 +222,7 @@ def get_path_constraint(source_location):
 # 检测两个表达式是否总是蕴含关系
 # exp1  exp2
 # return: bool
-def check_always_implying(exp1, exp2):
+def check_always_implying(exp1: str, exp2: str) -> Optional[bool]:
     # 基于求解器来实现
     return None
 
@@ -198,7 +235,7 @@ bound
 # 检测两个表达式exp1 <= exp2是否恒成立
 # exp1  exp2
 # return: bool
-def check_le(exp1, exp2):
+def check_le(exp1: str, exp2: str) -> Optional[bool]:
     # 基于求解器来实现
     return None
 
@@ -208,23 +245,43 @@ context
 
 # dump_source_snippet
 # 按行号寻找指定代码片段
-# return: string
-def dump_source_snippet(file_name, start_line, end_line):
-    start_line = int(start_line)
-    end_line = int(end_line)
-    file_path = os.path.join(PUT_ROOT_PATH, PROJECT_NAME, file_name)
-    with open(file_path, "r") as f:
-        lines = f.readlines()
-        return "".join(lines[start_line - 1:end_line])
-    return None
+def dump_source_snippet(file_name: str, start_line: int, end_line: int) -> Optional[str]:
+    """Dumps a snippet of source code from a file between the given line numbers.
 
-def dump_source_line(file_name, line_number):
-    line_number = int(line_number)
+    Args:
+        file_name: The name of the file relative to the project root.
+        start_line: The starting line number (inclusive).
+        end_line: The ending line number (inclusive).
+
+    Returns:
+        The source code snippet as a string, or None if the file cannot be read
+        or line numbers are out of range.
+    """
     file_path = os.path.join(PUT_ROOT_PATH, PROJECT_NAME, file_name)
-    with open(file_path, "r") as f:
-        lines = f.readlines()
-        return lines[line_number - 1].strip()
-    return None
+    try:
+        with open(file_path, "r") as f:
+            lines = f.readlines()
+            return "".join(lines[int(start_line) - 1:int(end_line)])
+    except FileNotFoundError:
+        logging.error(f"File not found: {file_path}")
+        return None
+    except IndexError:
+        logging.error(f"Line numbers out of range for file {file_path}")
+        return None
+
+def dump_source_line(file_name: str, line_number: int) -> Optional[str]:
+    """Dumps a single line of source code from a file.
+
+    Args:
+        file_name: The name of the file relative to the project root.
+        line_number: The line number to retrieve.
+
+    Returns:
+        The content of the specified line as a string, or None if an error occurs.
+    """
+    file_path = os.path.join(PUT_ROOT_PATH, PROJECT_NAME, file_name)
+    snippet = dump_source_snippet(file_name, line_number, line_number)
+    return snippet.strip() if snippet else None
 
 if __name__ == '__main__':
     # printFunctionCallSites(icfg, "stats_prefix_record_get");

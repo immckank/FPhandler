@@ -7,7 +7,8 @@ from memory_defect import NeverFree
 from memory_defect import PartialLeak
 from memory_defect import MemoryLeak
 from alter_handler import AlterHandler
-from llm_rag import resposeToAlter
+from llm import resposeToAlter
+from llm import responseForAlter
 from analysis_operators import find_callers
 from analysis_operators import find_callee
 from analysis_operators import find_current_function
