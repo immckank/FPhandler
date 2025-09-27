@@ -8,8 +8,14 @@ from memory_defect import PartialLeak
 from memory_defect import MemoryLeak
 from alter_handler import AlterHandler
 from llm_rag import resposeToAlter
+from analysis_operators import find_callers
+from analysis_operators import find_callee
+from analysis_operators import find_current_function
 from analysis_operators import dump_source_file
+from analysis_operators import dump_source_line
 
+PUT_ROOT_PATH = "PUT"
+PROJECT_NAME = "memcached"
 
 class MemoryLeakHandler(AlterHandler):
     def __init__(self):
@@ -99,8 +105,28 @@ class MemoryLeakHandler(AlterHandler):
             # user_prompt += "called function stats_prefix_find stats_prefix.c:37-87: " + dump_source_file(alter.get_source_location(), 37, 87) + "\n"
             # print(user_prompt)
             source_location = alter.get_source_location()
-            user_prompt = f"source code at {source_location} : " + dump_source_file(source_location, 1, 1) + "\n"
+            # source_location前面如果有项目目录 删除
+            if source_location.startswith(PROJECT_NAME + "/"):
+                source_location = source_location[len(PROJECT_NAME) + 1:]
+            user_prompt = f"source code at {source_location} : " + dump_source_line(source_location.split(":")[0], source_location.split(":")[1])+ "\n"
             # 给出source_location所在的函数
+            current_function = find_current_function(source_location)
+            if current_function:
+                user_prompt += "source code is inside function " + current_function["function_name"] + " "
+                user_prompt += current_function["function_body"] + "\n"
+            # 给出当前行调用了什么函数
+            callee_functions = find_callee(source_location)
+            # print(callee_functions)
+            for callee in callee_functions if callee_functions else []:
+                user_prompt += "source code called function " + callee["function_name"] + " "
+                user_prompt += callee["function_body"] + "\n"
+            # if callee_functions:
+            #     user_prompt += "this line called functions: " + ", ".join(callee_functions) + "\n"
+            # 给出被调用函数的函数体
+            # for callee in find_callee(current_function["function_name"]):
+            #     user_prompt += "called function " + callee["function_name"] + " "
+            #     user_prompt += callee["function_body"] + "\n"
+            # print(user_prompt)
             response = resposeToAlter(alter.to_prompt(), user_prompt=user_prompt)
             print(response)
         return

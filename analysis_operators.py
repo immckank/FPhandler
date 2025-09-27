@@ -32,11 +32,12 @@ def find_callers(function_name):
         else:
             # 删除error属性
             del res_json["error"]
-            call_sites = res_json.get("call_sites", [])
-            for loc in call_sites:
-                loc_str = loc["location"]
-                caller_source_location_list.append(loc_str)
-            return caller_source_location_list
+            # {'call_sites': [{'location': 'proto_text.c:581'}, {'location': 'proto_bin.c:602'}]}
+            # 为每个call_site添加code属性
+            for call_site in res_json.get("call_sites", []):
+                call_site["code"] = dump_source_line(call_site["location"].split(":")[0], call_site["location"].split(":")[1])
+                caller_source_location_list.append(call_site["location"])
+            return res_json
     return []
 
 # find_callee
@@ -229,7 +230,7 @@ if __name__ == '__main__':
     # printFunctionCallSites(icfg, "stats_prefix_record_get");
     # print(find_callers("stats_prefix_record_get"))
     # printCalleeFunctionBodyByLocation(icfg, "stats_prefix.c:118");
-    # print(find_callee("stats_prefix.c:118"))
+    print(find_callee("stats_prefix.c:118"))
     # printFunctionBodyByLocation(icfg, "stats_prefix.c:118");
-    print(find_current_function("stats_prefix.c:118"))
+    # print(find_current_function("stats_prefix.c:118"))
     #

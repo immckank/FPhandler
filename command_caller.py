@@ -2,11 +2,6 @@ import os
 import json
 import subprocess
 
-
-# 尝试借助此文件唤起SVF中 graph-reader 命令行工具的相关方法
-# exp1
-# graph-reader --find-function-body="stats_prefix.c:118" memcached.bc
-
 class CommandCaller:
     def __init__(self, setupbash_path="../SVFmemplus/setup.sh"):
         self.setupbash_path = setupbash_path
@@ -29,17 +24,6 @@ class CommandCaller:
             print(f"Error calling graph-reader with command: {' '.join(command)}", result.stderr)
             return None
         return result.stdout
-
-# def test_graph_reader():
-#     # 执行graph-reader -find-function-body="stats_prefix.c:118" memcached.bc
-#     dot_path = "memcached.bc"
-#     command = f'graph-reader -find-function-body="stats_prefix.c:118" PUT/{dot_path}'
-#     result = subprocess.run(command, capture_output=True, text=True)
-#     if result.returncode != 0:
-#         print("Error calling graph-reader:", result.stderr)
-#         return None
-#     return result.stdout
-
 
 if __name__ == '__main__':
     caller = CommandCaller()
