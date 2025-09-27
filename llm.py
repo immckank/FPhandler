@@ -35,12 +35,26 @@ def resposeToAlter(Alter_prompt, user_prompt=""):
     )
     return response.text
     
-def responseForAlter(Alter_prompt, user_prompt="", allowed_tools = []):
+def responseForAlter(Alter_prompt, user_prompt="", allowed_tool_names = []):
+    allowed_tools = []
+    for tool_name in allowed_tool_names:
+        if tool_name == "dump_source_snippet":
+            allowed_tools.append(dump_source_snippet)
+        elif tool_name == "dump_source_line":
+            allowed_tools.append(dump_source_line)
+        elif tool_name == "find_callee":
+            allowed_tools.append(find_callee)
+        elif tool_name == "find_current_function":
+            allowed_tools.append(find_current_function)
+        elif tool_name == "find_callers":
+            allowed_tools.append(find_callers)
+        else:
+            raise ValueError(f"Unknown tool name: {tool_name}")
     config = types.GenerateContentConfig(
         system_instruction=SYS_PROMPT,
-        response_schema=judgeResult,
-        response_mime_type="application/json",
-        tools = allowed_tools
+        # response_schema=judgeResult,
+        # response_mime_type="application/json",
+        tools=allowed_tools
     )
     client = genai.Client()
     response = client.models.generate_content(
@@ -48,28 +62,4 @@ def responseForAlter(Alter_prompt, user_prompt="", allowed_tools = []):
         contents=Alter_prompt + "\n" + user_prompt,
         config=config
     )
-    return response.text
-
-def llm_tool_calling_example(prompt: str):
-    """
-    This is an example function that demonstrates how to use the analysis operators as tools for the Gemini model.
-    The model can choose to call any of the provided functions to gather information to answer the user's prompt.
-    """
-    # The list of functions that the model can use as tools.
-    tools = [
-        dump_source_snippet,
-        dump_source_line,
-        find_callee,
-        find_current_function,
-        find_callers
-    ]
-
-    client = genai.Client()
-    
-    # The model will decide which tools to use based on the user's prompt.
-    response = client.models.generate_content(
-        model="gemini-1.5-flash",  # Using a model that is good at tool calling
-        contents=prompt,
-        tools=tools
-    )
-    return response.text
+    return response

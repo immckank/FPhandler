@@ -9,6 +9,7 @@ from memory_defect import MemoryLeak
 from alter_handler import AlterHandler
 from llm import resposeToAlter
 from llm import responseForAlter
+from llm import llm_tool_calling_example
 from analysis_operators import find_callers
 from analysis_operators import find_callee
 from analysis_operators import find_current_function
@@ -119,8 +120,9 @@ class MemoryLeakHandler(AlterHandler):
                 source_location = alter.get_source_location()[len(PROJECT_NAME) + 1:]
             user_prompt = f"source code at {source_location} : " + dump_source_line(source_location.split(":")[0], source_location.split(":")[1])+ "\n"
             allowed_tools = ["dump_source_snippet", "dump_source_line", "find_callee", "find_current_function", "find_callers"]
-            response = responseForAlter(alter.to_prompt(), user_prompt=user_prompt, allowed_tools=allowed_tools)
-            print(response)
+            response = responseForAlter(alter.to_prompt(), user_prompt=user_prompt, allowed_tool_names=allowed_tools)
+            # response = llm_tool_calling_example(alter.to_prompt(), user_prompt=user_prompt)
+            print(response.text)
         return
 
 

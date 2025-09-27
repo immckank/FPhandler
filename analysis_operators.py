@@ -71,13 +71,16 @@ def find_callee(source_location: str) -> Optional[List[Dict[str, Any]]]:
     if not re.match(r'^[\w/]+\.c:\d+$', source_location) and not re.match(r'^[\w/]+\.h:\d+$', source_location):
         logging.error(f"Invalid source location format: {source_location}")
         return None
+    # 如果以项目名称开头 去掉项目名
+    if source_location.startswith(PROJECT_NAME + "/"):
+        source_location = source_location[len(PROJECT_NAME) + 1:]
     command_caller = CommandCaller()
     res = command_caller.call_graph_reader("find-callee-body", source_location, os.path.join(PUT_ROOT_PATH, f"{PROJECT_NAME}.bc"))
     if res:
         res_json = json.loads(res)
         error = res_json.get("error", None)
         if error:
-            logging.error(f"Error finding callee for {source_location}: {error}")
+            logging.error(f"Error finding callee for {source_location}: {error} {res_json}")
         else:
             # 删除error属性
             del res_json["error"]
@@ -108,6 +111,9 @@ def find_current_function(source_location: str) -> Optional[Dict[str, Any]]:
     if not re.match(r'^[\w/]+\.c:\d+$', source_location) and not re.match(r'^[\w/]+\.h:\d+$', source_location):
         logging.error(f"Invalid source location format: {source_location}")
         return None
+    # 如果以项目名称开头 去掉项目名
+    if source_location.startswith(PROJECT_NAME + "/"):
+        source_location = source_location[len(PROJECT_NAME) + 1:]
     command_caller = CommandCaller()
     res = command_caller.call_graph_reader("find-function-body", source_location, os.path.join(PUT_ROOT_PATH, f"{PROJECT_NAME}.bc"))
     if res:
