@@ -1,8 +1,11 @@
 import os
+import config
 # import networkx as nx
 # import pydot
 
-PUT_ROOT_PATH = "PUT"
+PUT_ROOT_PATH = config.PUT_ROOT_PATH
+PROJECT_NAME = config.PROJECT_NAME
+
 
 # 找到指定项目中指定文件名的路径
 def find_file_path(project_name, file_name):

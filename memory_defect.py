@@ -1,6 +1,4 @@
-
 import utils
-
 
 '''prompt format
 Type of bug: PartialLeak.

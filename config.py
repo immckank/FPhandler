@@ -1,0 +1,2 @@
+PUT_ROOT_PATH = "PUT"
+PROJECT_NAME = "memcached"

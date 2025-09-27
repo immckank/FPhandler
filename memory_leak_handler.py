@@ -11,11 +11,13 @@ from llm_rag import resposeToAlter
 from analysis_operators import find_callers
 from analysis_operators import find_callee
 from analysis_operators import find_current_function
-from analysis_operators import dump_source_file
+from analysis_operators import dump_source_snippet
 from analysis_operators import dump_source_line
 
-PUT_ROOT_PATH = "PUT"
-PROJECT_NAME = "memcached"
+import config
+
+PUT_ROOT_PATH = config.PUT_ROOT_PATH
+PROJECT_NAME = config.PROJECT_NAME
 
 class MemoryLeakHandler(AlterHandler):
     def __init__(self):
@@ -99,35 +101,24 @@ class MemoryLeakHandler(AlterHandler):
     def handle_memory_leak(self):
         # 处理当前alter_list中的每个alter
         for alter in self.alter_list:
-            # print(alter.to_prompt())
-            # user_prompt = "source code stats_prefix.c:118 " + dump_source_file(alter.get_source_location(), 118, 118) + "\n"
-            # user_prompt += "source code is inside function stats_prefix.c:114-123 " + dump_source_file(alter.get_source_location(), 114, 123) + "\n"
-            # user_prompt += "called function stats_prefix_find stats_prefix.c:37-87: " + dump_source_file(alter.get_source_location(), 37, 87) + "\n"
-            # print(user_prompt)
-            source_location = alter.get_source_location()
-            # source_location前面如果有项目目录 删除
-            if source_location.startswith(PROJECT_NAME + "/"):
-                source_location = source_location[len(PROJECT_NAME) + 1:]
-            user_prompt = f"source code at {source_location} : " + dump_source_line(source_location.split(":")[0], source_location.split(":")[1])+ "\n"
-            # 给出source_location所在的函数
-            current_function = find_current_function(source_location)
-            if current_function:
-                user_prompt += "source code is inside function " + current_function["function_name"] + " "
-                user_prompt += current_function["function_body"] + "\n"
-            # 给出当前行调用了什么函数
-            callee_functions = find_callee(source_location)
-            # print(callee_functions)
-            for callee in callee_functions if callee_functions else []:
-                user_prompt += "source code called function " + callee["function_name"] + " "
-                user_prompt += callee["function_body"] + "\n"
-            # if callee_functions:
-            #     user_prompt += "this line called functions: " + ", ".join(callee_functions) + "\n"
-            # 给出被调用函数的函数体
-            # for callee in find_callee(current_function["function_name"]):
-            #     user_prompt += "called function " + callee["function_name"] + " "
+            # source_location = alter.get_source_location()
+            # if source_location.startswith(PROJECT_NAME + "/"):
+            #     source_location = source_location[len(PROJECT_NAME) + 1:]
+            # user_prompt = f"source code at {source_location} : " + dump_source_line(source_location.split(":")[0], source_location.split(":")[1])+ "\n"
+            # current_function = find_current_function(source_location)
+            # if current_function:
+            #     user_prompt += "source code is inside function " + current_function["function_name"] + " "
+            #     user_prompt += current_function["function_body"] + "\n"
+            # callee_functions = find_callee(source_location)
+            # for callee in callee_functions if callee_functions else []:
+            #     user_prompt += "source code called function " + callee["function_name"] + " "
             #     user_prompt += callee["function_body"] + "\n"
-            # print(user_prompt)
-            response = resposeToAlter(alter.to_prompt(), user_prompt=user_prompt)
+            # response = resposeToAlter(alter.to_prompt(), user_prompt=user_prompt)
+            if alter.get_source_location().startswith(PROJECT_NAME + "/"):
+                source_location = alter.get_source_location()[len(PROJECT_NAME) + 1:]
+            user_prompt = f"source code at {source_location} : " + dump_source_line(source_location.split(":")[0], source_location.split(":")[1])+ "\n"
+            allowed_tools = ["dump_source_snippet", "dump_source_line", "find_callee", "find_current_function", "find_callers"]
+            response = responseForAlter(alter.to_prompt(), user_prompt=user_prompt, allowed_tools=allowed_tools)
             print(response)
         return
 

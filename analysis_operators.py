@@ -8,8 +8,10 @@ import re
 
 from command_caller import CommandCaller
 
-PUT_ROOT_PATH = "PUT"
-PROJECT_NAME = "memcached"
+import config
+
+PUT_ROOT_PATH = config.PUT_ROOT_PATH
+PROJECT_NAME = config.PROJECT_NAME
 
 '''
 structure function
@@ -42,7 +44,7 @@ def find_callers(function_name):
 
 # find_callee
 # 找到被调用函数的函数体
-# return: 
+# return: list < { function_name, filename, start_line, end_line, function_body } >
 # D
 def find_callee(source_location):
     # 基于LLVM来实现不要使用基于文本的查找
@@ -63,7 +65,7 @@ def find_callee(source_location):
             del res_json["error"]
             callee_functions = res_json.get("callee_functions", [])
             for func in callee_functions:
-                func_body = dump_source_file(func["filename"], func['start_line'], func['end_line'])
+                func_body = dump_source_snippet(func["filename"], func['start_line'], func['end_line'])
                 # 为func添加func_body属性
                 func["function_body"] = func_body
             return callee_functions
@@ -89,7 +91,7 @@ def find_current_function(source_location):
         else:
             # 删除error属性
             del res_json["error"]
-            func_body = dump_source_file(res_json["filename"], res_json['start_line'], res_json['end_line'])
+            func_body = dump_source_snippet(res_json["filename"], res_json['start_line'], res_json['end_line'])
             # 为func添加func_body属性
             res_json["function_body"] = func_body
             return res_json
@@ -204,13 +206,12 @@ def check_le(exp1, exp2):
 context
 '''
 
-# dump_source_file
+# dump_source_snippet
 # 按行号寻找指定代码片段
 # return: string
-def dump_source_file(file_name, start_line, end_line):
+def dump_source_snippet(file_name, start_line, end_line):
     start_line = int(start_line)
     end_line = int(end_line)
-
     file_path = os.path.join(PUT_ROOT_PATH, PROJECT_NAME, file_name)
     with open(file_path, "r") as f:
         lines = f.readlines()
@@ -219,7 +220,6 @@ def dump_source_file(file_name, start_line, end_line):
 
 def dump_source_line(file_name, line_number):
     line_number = int(line_number)
-
     file_path = os.path.join(PUT_ROOT_PATH, PROJECT_NAME, file_name)
     with open(file_path, "r") as f:
         lines = f.readlines()
@@ -231,6 +231,9 @@ if __name__ == '__main__':
     # print(find_callers("stats_prefix_record_get"))
     # printCalleeFunctionBodyByLocation(icfg, "stats_prefix.c:118");
     print(find_callee("stats_prefix.c:118"))
+    # 查询返回对象的类型
+    print(type(find_callee("stats_prefix.c:118")))
+
     # printFunctionBodyByLocation(icfg, "stats_prefix.c:118");
     # print(find_current_function("stats_prefix.c:118"))
     #
