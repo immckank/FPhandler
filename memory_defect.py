@@ -7,7 +7,6 @@ Source location: memcached/slab_automove.c:37
 Message: The variable 'a' allocated at memcached/slab_automove.c:37 may not be freed along some paths that reach the end of the function.
 The following are the conditions and locations of conditional free paths:
   Path 1: Condition 'True' at memcached/slab_automove.c:43
-TODO: Function code:
 Task: Please classify this alert as TP, FP, or UNCERTAIN, and provide your reasoning.
 '''
 

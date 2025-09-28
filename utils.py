@@ -19,10 +19,11 @@ def find_file_path(project_name, file_name):
 # 根据指定scource_location找到对应的代码行
 def find_code_line(source_location):
     file_path = source_location.split(":")[0]
-    # replace \ with /
+    # 如果file_path以project_name开头删掉
+    if file_path.startswith(PROJECT_NAME + "/"):
+        file_path = file_path[len(PROJECT_NAME) + 1:]
     file_path = file_path.replace("\\", "/").lstrip("/")
-    file_path = os.path.join(PUT_ROOT_PATH, file_path).replace("\\", "/").lstrip("/")
-    print(file_path)
+    file_path = os.path.join(PUT_ROOT_PATH, PROJECT_NAME, file_path).replace("\\", "/").lstrip("/")
     if not file_path:
         return None
     with open(file_path, 'r') as f:

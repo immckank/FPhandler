@@ -8,8 +8,6 @@ from memory_defect import PartialLeak
 from memory_defect import MemoryLeak
 from alter_handler import AlterHandler
 from llm import responseForAlter
-from analysis_operators import dump_source_snippet
-from analysis_operators import dump_source_line
 
 import config
 
@@ -104,7 +102,7 @@ class MemoryLeakHandler(AlterHandler):
             if source_location.startswith(PROJECT_NAME + "/"):
                 source_location = source_location[len(PROJECT_NAME) + 1:]
 
-            user_prompt = f"source code at {source_location} : " + dump_source_line(source_location.split(":")[0], source_location.split(":")[1]) + "\n"
+            user_prompt = f"source code at {source_location} : " + utils.find_code_line(source_location) + "\n"
             
             allowed_tools = ["dump_source_snippet", "dump_source_line", "find_callee", "find_current_function", "find_callers"]
             if alter.get_leak_type() == "NeverFree":
