@@ -1,13 +1,9 @@
 import os
 import re
 import json
-
-from networkx.classes import freeze
-
 import utils
 from memory_defect import NeverFree, DoubleFree
 from memory_defect import PartialLeak
-from memory_defect import MemoryLeak
 from alter_handler import AlterHandler
 
 class MemoryLeakHandler(AlterHandler):
@@ -15,7 +11,7 @@ class MemoryLeakHandler(AlterHandler):
         super().__init__()
     # TODO: 设定分析函数
     LEAK_RE = re.compile(
-        r"^\s*(NeverFree|PartialLeak|DoubleFree)\s*:\s*memory allocation at\s*:\s*\(CallICFGNode:\s*({.*})\)"
+        r"^\s*(NeverFree|PartialLeak|Double Free)\s*:\s*memory allocation at\s*:\s*\(CallICFGNode:\s*({.*})\)"
     )
     COND_PATH_RE = re.compile(
         r"^\s*-->\s*\(\s*({.*?})\s*\|\s*(.*?)\s*\)"
@@ -86,13 +82,7 @@ class MemoryLeakHandler(AlterHandler):
                         except StopIteration:
                             break # End of file
                     memory_leak_list.append(PartialLeak(location, conditional_free_paths))
-                elif leak_type=="DoubleFree":
-                    try:
-                        # Skip the hint line
-                        next(lines)
-                    except StopIteration:
-                        break
-
+                elif leak_type=="Double Free":
                     double_free_paths = []
                     while True:
                         try:
