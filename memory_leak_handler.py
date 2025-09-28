@@ -7,11 +7,7 @@ from memory_defect import NeverFree
 from memory_defect import PartialLeak
 from memory_defect import MemoryLeak
 from alter_handler import AlterHandler
-from llm import resposeToAlter
 from llm import responseForAlter
-from analysis_operators import find_callers
-from analysis_operators import find_callee
-from analysis_operators import find_current_function
 from analysis_operators import dump_source_snippet
 from analysis_operators import dump_source_line
 
@@ -19,10 +15,12 @@ import config
 
 PUT_ROOT_PATH = config.PUT_ROOT_PATH
 PROJECT_NAME = config.PROJECT_NAME
+RES_ROOT_PATH = config.RES_ROOT_PATH
 
 class MemoryLeakHandler(AlterHandler):
     def __init__(self):
         super().__init__()
+        self.alter_file_name = ""
     # TODO: 设定分析函数
     LEAK_RE = re.compile(
         r"^\s*(NeverFree|PartialLeak)\s*:\s*memory allocation at\s*:\s*\(CallICFGNode:\s*({.*})\)"
@@ -52,7 +50,7 @@ class MemoryLeakHandler(AlterHandler):
         memory_leak_list = []
         project_name = alter_file_name.split("_")[0].split(".")[0]
         full_path = os.path.join(alter_file_path, alter_file_name)
-
+        self.alter_file_name = alter_file_name
         if not os.path.exists(full_path):
             return memory_leak_list
 
@@ -116,6 +114,13 @@ class MemoryLeakHandler(AlterHandler):
 
             response = responseForAlter(alter.to_prompt(), user_prompt=user_prompt, allowed_tool_names=allowed_tools)
             print(response.text)
+            # 写入结果日志
+            # 新建一个txt f"{RES_ROOT_PATH}/RES_{self.alter_file_name}"
+            res_file_path = os.path.join(RES_ROOT_PATH, f"RES_{self.alter_file_name}")
+            with open(res_file_path, 'w') as f:
+                f.write(source_location + "\n")
+                f.write(alter.to_prompt() + "\n")
+                f.write(response.text)
         return
 
 

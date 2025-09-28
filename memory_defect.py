@@ -90,7 +90,7 @@ class PartialLeak(MemoryLeak):
     def to_prompt(self):
         Type_prompt = f"Type of bug: {self.leak_type}. \n"
         # TODO: Guidance on triaging this type of bug:
-        Guidance_prompt = f"Guidance on triaging this type of bug: The warning at a specific source line is a false positive if \n"
+        Guidance_prompt = f"Guidance on triaging this type of bug: The warning at a specific source line is a false positive if the member is freed by other means, or its ownership is managed separately from the parent structure.\n"
         Location_prompt = f"Source location: {self.source_location}  \n"
         variable_name = utils.extract_lhs_variable(utils.find_code_line(self.source_location))
         if variable_name:
@@ -101,9 +101,9 @@ class PartialLeak(MemoryLeak):
             Message_prompt += "The following are the conditions and locations of conditional free paths:\n"
             for idx, cond_path in enumerate(self.conditional_free_paths):
                 Message_prompt += f"  Path {idx+1}: Condition '{cond_path.get_condition()}' at {cond_path.get_condition_location()}\n"
-        Code_prompt = f"TODO: Function code:  \n"
+        # Code_prompt = f"TODO: Function code:  \n"
         Task_prompt = f"Task: Please classify this alert as TP, FP, or UNCERTAIN, and provide your reasoning."
-        return Type_prompt + Guidance_prompt + Location_prompt + Message_prompt + Code_prompt + Task_prompt
+        return Type_prompt + Guidance_prompt + Location_prompt + Message_prompt + Task_prompt
 
 class DoubleFree(MemoryDefect):
     def __init__(self, source_location):

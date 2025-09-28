@@ -1,0 +1,17 @@
+items.c:1557
+Type of bug: PartialLeak. 
+Guidance on triaging this type of bug: The warning at a specific source line is a false positive if the member is freed by other means, or its ownership is managed separately from the parent structure.
+Source location: memcached/items.c:1557  
+Message: The memory allocated at memcached/items.c:1557 may not be freed along some paths that reach the end of the function.  
+The following are the conditions and locations of conditional free paths:
+  Path 1: Condition 'False' at memcached/items.c:1565
+  Path 2: Condition 'True' at memcached/items.c:1573
+Task: Please classify this alert as TP, FP, or UNCERTAIN, and provide your reasoning.
+This alert is a False Positive.
+
+**Reasoning:**
+1.  **Allocation:** The memory for `cdata` is allocated at `items.c:1557` using `calloc`.
+2.  **Thread Function:** The allocation occurs within the `lru_maintainer_thread` function, which is a background thread that runs in a `while (do_run_lru_maintainer_thread)` loop (starting at `items.c:1573`).
+3.  **Deallocation:** After the `while` loop terminates (i.e., when `do_run_lru_maintainer_thread` becomes `false`), `free(cdata);` is explicitly called at `items.c:1632`.
+
+The alert highlights a path where the loop condition at `items.c:1573` is `True`, implying the memory might not be freed. However, for a thread designed to run in a loop, the resource `cdata` is meant to persist for the duration of that loop. The `free(cdata)` call correctly deallocates the memory when the thread's main loop finishes and the thread function is about to exit. This is the intended lifecycle of the `cdata` object within this thread. Therefore, the memory is indeed freed along paths that lead to the end of the `lru_maintainer_thread` function.

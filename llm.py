@@ -10,8 +10,6 @@ from analysis_operators import find_current_function
 from analysis_operators import find_callers
 from analysis_operators import get_path_cond_func
 
-
-
 class judgeResult(BaseModel):
     classification: str
     reasoning: str
