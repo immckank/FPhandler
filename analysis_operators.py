@@ -33,7 +33,10 @@ def find_callers(function_name: str) -> List[Dict[str, Any]]:
         Returns an empty list if no callers are found or an error occurs.
     """
     command_caller = CommandCaller()
-    res = command_caller.call_graph_reader("find-call-sites", function_name, os.path.join(PUT_ROOT_PATH, f"{PROJECT_NAME}.bc"))
+    res = command_caller.call_graph_reader_with_args(
+        f"-find-call-sites={function_name}",
+        os.path.join(PUT_ROOT_PATH, f"{PROJECT_NAME}.bc")
+    )
     call_sites_list = []
     if res:
         res_json = json.loads(res)
@@ -75,7 +78,10 @@ def find_callee(source_location: str) -> Optional[List[Dict[str, Any]]]:
     if source_location.startswith(PROJECT_NAME + "/"):
         source_location = source_location[len(PROJECT_NAME) + 1:]
     command_caller = CommandCaller()
-    res = command_caller.call_graph_reader("find-callee-body", source_location, os.path.join(PUT_ROOT_PATH, f"{PROJECT_NAME}.bc"))
+    res = command_caller.call_graph_reader_with_args(
+        f"-find-callee-body={source_location}",
+        os.path.join(PUT_ROOT_PATH, f"{PROJECT_NAME}.bc")
+    )
     if res:
         res_json = json.loads(res)
         error = res_json.get("error", None)
@@ -115,7 +121,10 @@ def find_current_function(source_location: str) -> Optional[Dict[str, Any]]:
     if source_location.startswith(PROJECT_NAME + "/"):
         source_location = source_location[len(PROJECT_NAME) + 1:]
     command_caller = CommandCaller()
-    res = command_caller.call_graph_reader("find-function-body", source_location, os.path.join(PUT_ROOT_PATH, f"{PROJECT_NAME}.bc"))
+    res = command_caller.call_graph_reader_with_args(
+        f"-find-function-body={source_location}", 
+        os.path.join(PUT_ROOT_PATH, f"{PROJECT_NAME}.bc")
+    )
     if res:
         res_json = json.loads(res)
         error = res_json.get("error", None)
@@ -216,6 +225,65 @@ def find_var_decl(source_location: str, var_name: str) -> Optional[str]:
 path condition
 '''
 
+# get_path_cond_func
+# 找到startline到targetline所有路径 收集路径中未返回的调用及条件分支
+# return 
+def get_path_cond_func(start_location: str, target_location: str) -> Optional[List[Dict[str, Any]]]:
+    """Finds all paths between a start and target location, collecting information
+    about function calls and conditional branches along the way.
+
+    Args:
+        start_location: The start source location, in 'filename.c:line_number' format.
+        target_location: The target source location, in 'filename.c:line_number' format.
+
+    Returns:
+        A list of dictionaries, where each dictionary represents a path. Each path
+        contains a list of 'events' (function calls or conditions) with their
+        location and source code. Returns None if an error occurs or no paths are found.
+        Example:
+        [
+            {
+                "events": [
+                    {"type": "condition", "location": "restart.c:80", "code": "if (foo)"},
+                    {"type": "call", "location": "restart.c:85", "code": "bar()"}
+                ]
+            }
+        ]
+    """
+    if not re.match(r'^[\w/]+\.c:\d+$', start_location) and not re.match(r'^[\w/]+\.h:\d+$', start_location):
+        logging.error(f"Invalid source location format: {start_location}")
+        return None
+    if not re.match(r'^[\w/]+\.c:\d+$', target_location) and not re.match(r'^[\w/]+\.h:\d+$', target_location):
+        logging.error(f"Invalid source location format: {target_location}")
+        return None
+    if start_location.startswith(PROJECT_NAME + "/"):
+        start_location = start_location[len(PROJECT_NAME) + 1:]
+    if target_location.startswith(PROJECT_NAME + "/"):
+        target_location = target_location[len(PROJECT_NAME) + 1:]
+    command_caller = CommandCaller()
+    res = command_caller.call_graph_reader_with_args(
+        f"-path-cond-func-start={start_location}",
+        f"-path-cond-func-end={target_location}",
+        os.path.join(PUT_ROOT_PATH, f"{PROJECT_NAME}.bc")
+    )
+    if res:
+        res_json = json.loads(res)
+        error = res_json.get("error", None)
+        if error:
+            logging.error(f"Error finding path condition function for {start_location} to {target_location}: {error}")
+            return None
+        else:
+            del res_json["error"]
+            paths = res_json.get("paths", [])
+            for path in paths:
+                events = path.get("events", [])
+                for event in events:
+                    location = event.get("location", None)
+                    if location:
+                        event["code"] = dump_source_line(location.split(":")[0], location.split(":")[1])
+            return res_json.get("paths", [])
+    return None
+
 # get_path_constraint
 # 找到当前source_location的路径约束条件的表达式
 # return: str
@@ -290,13 +358,11 @@ def dump_source_line(file_name: str, line_number: int) -> Optional[str]:
     return snippet.strip() if snippet else None
 
 if __name__ == '__main__':
-    # printFunctionCallSites(icfg, "stats_prefix_record_get");
+    # # printFunctionCallSites(icfg, "stats_prefix_record_get");
     # print(find_callers("stats_prefix_record_get"))
-    # printCalleeFunctionBodyByLocation(icfg, "stats_prefix.c:118");
-    print(find_callee("stats_prefix.c:118"))
-    # 查询返回对象的类型
-    print(type(find_callee("stats_prefix.c:118")))
-
-    # printFunctionBodyByLocation(icfg, "stats_prefix.c:118");
+    # # printCalleeFunctionBodyByLocation(icfg, "stats_prefix.c:118");
+    # print(find_callee("stats_prefix.c:118"))
+    # print(type(find_callee("stats_prefix.c:118")))
+    # # printFunctionBodyByLocation(icfg, "stats_prefix.c:118");
     # print(find_current_function("stats_prefix.c:118"))
-    #
+    get_path_cond_func("restart.c:76", "restart.c:121")

@@ -15,10 +15,13 @@ class CommandCaller:
             (key, _, value) = line.decode("utf-8").partition("=")
             os.environ[key] = value.strip()
         proc.communicate()
-
-    def call_graph_reader(self, arg_type, arg_value, dot_path):
-        # 调用 graph-reader 命令行工具
-        command = ['graph-reader', f'-{arg_type}', arg_value, dot_path]
+    
+    def call_graph_reader_with_args(self, *args):
+        """
+        Calls the graph-reader command-line tool with a variable number of arguments.
+        This is useful for commands with complex parameter structures.
+        """
+        command = ['graph-reader'] + list(args)
         result = subprocess.run(command, capture_output=True, text=True)
         if result.returncode != 0:
             print(f"Error calling graph-reader with command: {' '.join(command)}", result.stderr)

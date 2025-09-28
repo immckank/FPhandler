@@ -9,7 +9,6 @@ from memory_defect import MemoryLeak
 from alter_handler import AlterHandler
 from llm import resposeToAlter
 from llm import responseForAlter
-from llm import llm_tool_calling_example
 from analysis_operators import find_callers
 from analysis_operators import find_callee
 from analysis_operators import find_current_function
@@ -103,30 +102,24 @@ class MemoryLeakHandler(AlterHandler):
     def handle_memory_leak(self):
         # 处理当前alter_list中的每个alter
         for alter in self.alter_list:
-            # source_location = alter.get_source_location()
-            # if source_location.startswith(PROJECT_NAME + "/"):
-            #     source_location = source_location[len(PROJECT_NAME) + 1:]
-            # user_prompt = f"source code at {source_location} : " + dump_source_line(source_location.split(":")[0], source_location.split(":")[1])+ "\n"
-            # current_function = find_current_function(source_location)
-            # if current_function:
-            #     user_prompt += "source code is inside function " + current_function["function_name"] + " "
-            #     user_prompt += current_function["function_body"] + "\n"
-            # callee_functions = find_callee(source_location)
-            # for callee in callee_functions if callee_functions else []:
-            #     user_prompt += "source code called function " + callee["function_name"] + " "
-            #     user_prompt += callee["function_body"] + "\n"
-            # response = resposeToAlter(alter.to_prompt(), user_prompt=user_prompt)
-            if alter.get_source_location().startswith(PROJECT_NAME + "/"):
-                source_location = alter.get_source_location()[len(PROJECT_NAME) + 1:]
-            user_prompt = f"source code at {source_location} : " + dump_source_line(source_location.split(":")[0], source_location.split(":")[1])+ "\n"
+            source_location = alter.get_source_location()
+            if source_location.startswith(PROJECT_NAME + "/"):
+                source_location = source_location[len(PROJECT_NAME) + 1:]
+
+            user_prompt = f"source code at {source_location} : " + dump_source_line(source_location.split(":")[0], source_location.split(":")[1]) + "\n"
+            
             allowed_tools = ["dump_source_snippet", "dump_source_line", "find_callee", "find_current_function", "find_callers"]
+            if alter.get_leak_type() == "NeverFree":
+                pass  # 使用默认的 allowed_tools
+            elif alter.get_leak_type() == "PartialLeak":
+                allowed_tools.append("get_path_cond_func")
+
             response = responseForAlter(alter.to_prompt(), user_prompt=user_prompt, allowed_tool_names=allowed_tools)
-            # response = llm_tool_calling_example(alter.to_prompt(), user_prompt=user_prompt)
             print(response.text)
         return
 
 
 if __name__ == '__main__':
     handler = MemoryLeakHandler()
-    handler.read_alter_file(r"SARIF", "memcached_NEVERFREETEST.txt")
+    handler.read_alter_file(r"SARIF", "memcached_PARTIALLEAKTEST.txt")
     handler.handle_memory_leak()

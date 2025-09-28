@@ -8,6 +8,8 @@ from analysis_operators import dump_source_line
 from analysis_operators import find_callee
 from analysis_operators import find_current_function
 from analysis_operators import find_callers
+from analysis_operators import get_path_cond_func
+
 
 
 class judgeResult(BaseModel):
@@ -48,6 +50,8 @@ def responseForAlter(Alter_prompt, user_prompt="", allowed_tool_names = []):
             allowed_tools.append(find_current_function)
         elif tool_name == "find_callers":
             allowed_tools.append(find_callers)
+        elif tool_name == "get_path_cond_func":
+            allowed_tools.append(get_path_cond_func)
         else:
             raise ValueError(f"Unknown tool name: {tool_name}")
     config = types.GenerateContentConfig(
