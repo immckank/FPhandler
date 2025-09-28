@@ -1,5 +1,3 @@
-
-
 class AlterHandler:
     def __init__(self):
         # list 存储所有需要处理的alter
@@ -12,6 +10,3 @@ class AlterHandler:
     
     def handle_alter(self, file_path, file_name):
         pass
-
-
-    

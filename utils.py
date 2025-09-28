@@ -1,8 +1,11 @@
 import os
-import networkx as nx
-import pydot
+import config
+# import networkx as nx
+# import pydot
 
-PUT_ROOT_PATH = "PUT"
+PUT_ROOT_PATH = config.PUT_ROOT_PATH
+PROJECT_NAME = config.PROJECT_NAME
+
 
 # 找到指定项目中指定文件名的路径
 def find_file_path(project_name, file_name):
@@ -13,13 +16,14 @@ def find_file_path(project_name, file_name):
             return full_path.replace(PUT_ROOT_PATH, "").replace("\\", "/").lstrip("/")
     return None
 
-# 根据指定source_location找到对应的代码行
+# 根据指定scource_location找到对应的代码行
 def find_code_line(source_location):
     file_path = source_location.split(":")[0]
-    # replace \ with /
+    # 如果file_path以project_name开头删掉
+    if file_path.startswith(PROJECT_NAME + "/"):
+        file_path = file_path[len(PROJECT_NAME) + 1:]
     file_path = file_path.replace("\\", "/").lstrip("/")
-    file_path = os.path.join(PUT_ROOT_PATH, file_path).replace("\\", "/").lstrip("/")
-    print(file_path)
+    file_path = os.path.join(PUT_ROOT_PATH, PROJECT_NAME, file_path).replace("\\", "/").lstrip("/")
     if not file_path:
         return None
     with open(file_path, 'r') as f:
@@ -66,22 +70,22 @@ def extract_alter(sarif_path, sarif_file_name):
     return extracted_lines
 
 # 读取 dot 文件为 networkx 有向图
-def load_dot_to_nx(dot_path):
-    graphs = pydot.graph_from_dot_file(dot_path)
-    p = graphs[0]
-    G = nx.DiGraph()
-    # 解析节点
-    for n in p.get_nodes():
-        name = n.get_name().strip('"')
-        attrs = n.get_attributes() or {}
-        # 常见属性: label, file, line, func 等
-        G.add_node(name, **attrs)
-    # 解析边
-    for e in p.get_edges():
-        src = e.get_source().strip('"')
-        dst = e.get_destination().strip('"')
-        attrs = e.get_attributes() or {}
-        G.add_edge(src, dst, **attrs)
-    return G
+# def load_dot_to_nx(dot_path):
+#     graphs = pydot.graph_from_dot_file(dot_path)
+#     p = graphs[0]
+#     G = nx.DiGraph()
+#     # 解析节点
+#     for n in p.get_nodes():
+#         name = n.get_name().strip('"')
+#         attrs = n.get_attributes() or {}
+#         # 常见属性: label, file, line, func 等
+#         G.add_node(name, **attrs)
+#     # 解析边
+#     for e in p.get_edges():
+#         src = e.get_source().strip('"')
+#         dst = e.get_destination().strip('"')
+#         attrs = e.get_attributes() or {}
+#         G.add_edge(src, dst, **attrs)
+#     return G
 
-G = load_dot_to_nx("GRAPH/icfg_initial.dot")
+# G = load_dot_to_nx("GRAPH/icfg_initial.dot")

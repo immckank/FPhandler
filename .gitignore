@@ -1,7 +1,8 @@
 .vscode
 .idea
 .pytest_cache
+.pytest_cache
 __pycache__
 pipcache/
 /PUT/*
-/ALTER_EXAMPLE/
+/FP
