@@ -1,0 +1,25 @@
+storage.c:820
+Type of bug: DoubleFree. 
+Guidance on triaging this type of bug: The warning at a specific source line is a false positive if 
+Source location: memcached/storage.c:820  
+Message: The variable 'st.page_data' allocated at memcached/storage.c:820 is double freed.  
+The following are the conditions and locations of conditional free paths:
+  Path 1: Condition 'True' at memcached/storage.c:824
+  Path 2: Condition 'True' at memcached/storage.c:865
+  Path 3: Condition 'True' at memcached/storage.c:867
+  Path 4: Condition 'True' at memcached/storage.c:867
+TODO: Function code:  
+Task: Please classify this alert as TP, FP, or UNCERTAIN, and provide your reasoning.
+This alert is classified as **FP**.
+
+**Reasoning:**
+The alert states that `st.page_data`, allocated at `memcached/storage.c:820`, is double freed, and provides four conditional free paths.
+
+1.  **Allocation:** `st.page_data = calloc(st.page_count, sizeof(struct extstore_page_data));` (memcached/storage.c:820)
+2.  **Explicit Free:** The code snippet shows one explicit `free(st.page_data);` at `memcached/storage.c:865`. This corresponds to "Path 2" in the alert.
+
+Let's examine the other reported "free paths":
+*   **Path 1: Condition 'True' at memcached/storage.c:824**: The code at this line is `for (int x = 0; x < st.page_count; x++) {`. This is a loop construct and does not contain a `free` operation for `st.page_data`.
+*   **Path 3 and 4: Condition 'True' at memcached/storage.c:867**: The code at this line is `if (buk->pages_total != 0) {`. This is a conditional statement and does not contain a `free` operation for `st.page_data`.
+
+Based on the provided source code snippet, there is only one `free(st.page_data)` call at line 865. The other lines specified as "conditional free paths" do not contain any `free` calls for `st.page_data`. While `extstore_evict_page` is called later, the tool was unable to provide its definition, and the alert message explicitly points to direct frees at specific lines. Given the information directly available in the snippet and the explicit nature of the alert message's paths, there is no evidence of a double free of `st.page_data`.
