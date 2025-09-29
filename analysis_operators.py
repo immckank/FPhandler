@@ -233,14 +233,31 @@ structure variable
 # find_var_definitions
 # 找到指定变量所有被定义的位置
 # return: list < str >
-def find_var_definitions(source_location, var_name):
+def find_var_definitions(source_location: str, var_name: str) -> List[Dict[str, str]]:
+    """Finds all definitions of a given variable across the project.
+
+    This function searches for variable definitions, which are locations where
+    memory is actually allocated for the variable (i.e., not 'extern' declarations).
+    The search starts from the given source location and expands to the entire project
+    if necessary.
+
+    Args:
+        source_location: A source location within the project to provide
+                         context, e.g., 'path/to/file.c:123'.
+        var_name: The name of the variable to find definitions for.
+
+    Returns:
+        A list of dictionaries, where each dictionary represents a definition
+        site and contains its location and source code. Returns an empty list
+        if no definitions are found.
+        Example: [{'location': 'items.c:100', 'code': 'item *it = item_alloc(...);'}]
     """
-    找到指定变量所有被定义的位置（只返回实际分配内存的定义位置，而不是extern声明）
-    已初步测试
-    return: list < source_location >
-    """
-    # 基于LLVM来实现不要使用基于文本的查找
-    # libclang
+    # 检查source_location是否合法
+    if not re.match(r'^[\w/]+\.c:\d+$', source_location) and not re.match(r'^[\w/]+\.h:\d+$', source_location):
+        return []
+    # 如果没有以项目名称开头 加上项目名
+    if not source_location.startswith(PROJECT_NAME + "/"):
+        source_location = PROJECT_NAME + "/" + source_location
     if not libclang_available:
         return []
     
@@ -279,47 +296,32 @@ def find_var_definitions(source_location, var_name):
             
         # 在整个翻译单元中查找变量定义
         definitions = []
+        processed_locations: Set[str] = set()
+
+        def _add_definition(cursor):
+            location = cursor.location
+            if not location.file:
+                return
+
+            file_name = location.file.name
+            if file_name.startswith(os.path.abspath(PUT_ROOT_PATH)):
+                file_name = os.path.relpath(file_name, PUT_ROOT_PATH)
+            if file_name.startswith(PROJECT_NAME + "/"):
+                file_name = file_name[len(PROJECT_NAME) + 1:]
+            
+            location_str = f"{file_name}:{location.line}"
+            if location_str not in processed_locations:
+                code = dump_source_line(file_name, location.line)
+                definitions.append({"location": location_str, "code": code})
+                processed_locations.add(location_str)
         
         def find_variable_definitions(cursor, var_name):
             # 检查是否为变量声明
             if cursor.kind == CursorKind.VAR_DECL and cursor.spelling == var_name:
-                # 检查是否是定义（非extern声明）
-                # 遍历子节点查找ExternStorageClass属性
-                is_extern = False
-                for token in cursor.get_tokens():
-                    if token.spelling == 'extern':
-                        is_extern = True
-                        break
-                
-                # 如果不是extern声明，则认为是定义
-                if not is_extern:
-                    # 检查是否有初始化（定义通常包含初始化或赋值）
-                    children = list(cursor.get_children())
-                    # 变量定义通常会有初始化子节点
-                    has_init = any(child.kind in [CursorKind.INTEGER_LITERAL, 
-                                                CursorKind.STRING_LITERAL,
-                                                CursorKind.CHARACTER_LITERAL,
-                                                CursorKind.FLOATING_LITERAL,
-                                                CursorKind.UNEXPOSED_EXPR,
-                                                CursorKind.CALL_EXPR,
-                                                CursorKind.INIT_LIST_EXPR] for child in children)
-                    
-                    # 如果有初始化或者有子节点，认为是定义
-                    if has_init or children:
-                        location = cursor.location
-                        if location.file:
-                            # 返回格式: 'filename:line_number'
-                            # 使用实际的文件名而不是原始的file_path
-                            file_name = location.file.name
-                            # 移除PUT_ROOT_PATH前缀以保持一致性
-                            if file_name.startswith(os.path.abspath(PUT_ROOT_PATH)):
-                                file_name = os.path.relpath(file_name, PUT_ROOT_PATH)
-                            # 如果以project name开头删掉project name
-                            if file_name.startswith(PROJECT_NAME + "/"):
-                                file_name = file_name[len(PROJECT_NAME) + 1:]
-                            location_str = f"{file_name}:{location.line}"
-                            code = dump_source_line(file_name, location.line)
-                            definitions.append({"location": location_str, "code": code})
+                # is_definition() 检查这是否是一个定义而不是一个前向声明
+                # 对于变量，如果它不是 extern 并且有存储空间，它就是定义。
+                if cursor.is_definition():
+                    _add_definition(cursor)
             
             # 递归遍历子节点
             for child in cursor.get_children():
@@ -327,8 +329,8 @@ def find_var_definitions(source_location, var_name):
         
         find_variable_definitions(translation_unit.cursor, var_name)
         
-        # 如果在当前翻译单元中找不到，尝试在整个项目中查找
-        if not definitions:
+        # 总是遍历整个项目以查找所有可能的定义，而不仅仅是在找不到时才查找
+        if True: # Kept for logical structure, can be removed.
             # 遍历整个PUT目录寻找.c文件
             put_path = os.path.abspath(PUT_ROOT_PATH)
             for root, dirs, files in os.walk(put_path):
@@ -341,7 +343,7 @@ def find_var_definitions(source_location, var_name):
                     if file.endswith('.c'):
                         full_path = os.path.join(root, file)
                         # 避免重复解析原始文件
-                        if full_path == os.path.abspath(full_file_path):
+                        if os.path.abspath(full_path) == os.path.abspath(full_file_path):
                             continue
                         
                         try:
@@ -363,17 +365,31 @@ def find_var_definitions(source_location, var_name):
 # 找到变量声明的位置
 # return: str: 'memcached/slab_automove.c:37'
 def find_var_decl(source_location: str, var_name: str) -> List[Dict[str, str]]:
+    """Finds all declarations of a given identifier across the project.
+
+    This function searches for all declaration sites of an identifier, which can
+    include variables, functions, structs, typedefs, enums, and macros.
+    The search starts from the given source location and expands to the entire project.
+
+    Args:
+        source_location: A source location within the project to provide
+                         context, e.g., 'path/to/file.c:123'.
+        var_name: The name of the identifier to find declarations for.
+
+    Returns:
+        A list of dictionaries, where each dictionary represents a declaration
+        site and contains its location and source code. Returns an empty list
+        if no declarations are found.
+        Example: [{'location': 'items.h:50', 'code': 'extern unsigned int total_items;'}]
     """
-    找到指定标识符所有声明的位置 (变量、函数、结构体等)。
-    已初步测试！
-    return: list of {'location': 'path/to/file.c:line', 'code': 'source code line'}
-    """
-    # 基于LLVM来实现不要使用基于文本的查找
-    # 基于LLVM的实现比基于文本的查找方法更加精确，因为它基于编译器级别的代码分析，能够准确识别变量声明的位置，而不会被注释、字符串或其他文本中的相似内容干扰。
-    # libclang
+    # 检查source_location是否合法
+    if not re.match(r'^[\w/]+\.c:\d+$', source_location):
+        return []
+    # 如果没有以项目名称开头 加上项目名
+    if not source_location.startswith(PROJECT_NAME + "/"):
+        source_location = PROJECT_NAME + "/" + source_location
     if not libclang_available:
         return []
-    
     try:
         # 解析source_location获取文件路径
         file_path = source_location.split(":")[0]
@@ -602,4 +618,4 @@ if __name__ == '__main__':
     # # printFunctionBodyByLocation(icfg, "stats_prefix.c:118");
     # print(find_current_function("stats_prefix.c:118"))
     # print(get_path_cond_func("restart.c:76", "restart.c:121"))
-    print(find_var_decl("memcached/memcached.c:18", "total_prefix_size"))
+    print(find_var_definitions("memcached.c:18", "total_prefix_size"))
