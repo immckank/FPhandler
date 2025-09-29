@@ -4,7 +4,33 @@ import logging
 import sys
 import json
 import re
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
+
+def _configure_libclang():
+    """Finds and configures the path to libclang."""
+    # Option 1: From environment variable
+    libclang_path = os.environ.get('LIBCLANG_PATH')
+    if libclang_path and os.path.exists(libclang_path):
+        cindex.Config.set_library_file(libclang_path)
+        return True
+
+    # Option 2: Look in a project-specific path
+    # Assuming SVFmemplus is a sibling directory to the project root
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    svf_lib_path = os.path.abspath(os.path.join(project_root, '..', 'SVFmemplus', 'build', 'lib', 'libclang.so'))
+    if os.path.exists(svf_lib_path):
+        cindex.Config.set_library_file(svf_lib_path)
+        return True
+
+    return False
+
+try:
+    from clang import cindex
+    from clang.cindex import CursorKind
+    libclang_available = _configure_libclang()
+except ImportError:
+    libclang_available = False
+    logging.warning("libclang not available. Some features will be disabled.")
 
 
 from command_caller import CommandCaller
@@ -207,18 +233,236 @@ structure variable
 # find_var_definitions
 # 找到指定变量所有被定义的位置
 # return: list < str >
-def find_var_definitions(source_location: str, var_name: str) -> List[str]:
+def find_var_definitions(source_location, var_name):
+    """
+    找到指定变量所有被定义的位置（只返回实际分配内存的定义位置，而不是extern声明）
+    已初步测试
+    return: list < source_location >
+    """
     # 基于LLVM来实现不要使用基于文本的查找
     # libclang
-    return []
+    if not libclang_available:
+        return []
+    
+    try:
+        # 解析source_location获取文件路径
+        file_path = source_location.split(":")[0]
+        
+        # 构造完整的文件路径
+        full_file_path = os.path.join(PUT_ROOT_PATH, file_path)
+        
+        # 检查文件是否存在
+        if not os.path.exists(full_file_path):
+            # logging.error(f"文件不存在: {full_file_path}")
+            return []
+        
+        # 使用libclang解析文件，它会自动处理包含的头文件
+        index = cindex.Index.create()
+        # 传递适当的解析选项，确保包含的文件也被解析
+        args = ['-I' + PUT_ROOT_PATH]
+        translation_unit = index.parse(full_file_path, args=args)
+        
+        if not translation_unit:
+            # logging.error("无法创建 translation unit")
+            return []
+            
+        # 检查诊断信息
+        diagnostics = list(translation_unit.diagnostics)
+        error_count = 0
+        for diag in diagnostics:
+            if diag.severity >= cindex.Diagnostic.Error:  # Error or fatal
+                error_count += 1
+                # logging.warning(f"解析警告/错误: {diag.spelling} (级别: {diag.severity})")
+        
+        # if error_count > 0:
+            # logging.warning(f"存在 {error_count} 个严重错误，可能影响分析结果")
+            
+        # 在整个翻译单元中查找变量定义
+        definitions = []
+        
+        def find_variable_definitions(cursor, var_name):
+            # 检查是否为变量声明
+            if cursor.kind == CursorKind.VAR_DECL and cursor.spelling == var_name:
+                # 检查是否是定义（非extern声明）
+                # 遍历子节点查找ExternStorageClass属性
+                is_extern = False
+                for token in cursor.get_tokens():
+                    if token.spelling == 'extern':
+                        is_extern = True
+                        break
+                
+                # 如果不是extern声明，则认为是定义
+                if not is_extern:
+                    # 检查是否有初始化（定义通常包含初始化或赋值）
+                    children = list(cursor.get_children())
+                    # 变量定义通常会有初始化子节点
+                    has_init = any(child.kind in [CursorKind.INTEGER_LITERAL, 
+                                                CursorKind.STRING_LITERAL,
+                                                CursorKind.CHARACTER_LITERAL,
+                                                CursorKind.FLOATING_LITERAL,
+                                                CursorKind.UNEXPOSED_EXPR,
+                                                CursorKind.CALL_EXPR,
+                                                CursorKind.INIT_LIST_EXPR] for child in children)
+                    
+                    # 如果有初始化或者有子节点，认为是定义
+                    if has_init or children:
+                        location = cursor.location
+                        if location.file:
+                            # 返回格式: 'filename:line_number'
+                            # 使用实际的文件名而不是原始的file_path
+                            file_name = location.file.name
+                            # 移除PUT_ROOT_PATH前缀以保持一致性
+                            if file_name.startswith(os.path.abspath(PUT_ROOT_PATH)):
+                                file_name = os.path.relpath(file_name, PUT_ROOT_PATH)
+                            # 如果以project name开头删掉project name
+                            if file_name.startswith(PROJECT_NAME + "/"):
+                                file_name = file_name[len(PROJECT_NAME) + 1:]
+                            location_str = f"{file_name}:{location.line}"
+                            code = dump_source_line(file_name, location.line)
+                            definitions.append({"location": location_str, "code": code})
+            
+            # 递归遍历子节点
+            for child in cursor.get_children():
+                find_variable_definitions(child, var_name)
+        
+        find_variable_definitions(translation_unit.cursor, var_name)
+        
+        # 如果在当前翻译单元中找不到，尝试在整个项目中查找
+        if not definitions:
+            # 遍历整个PUT目录寻找.c文件
+            put_path = os.path.abspath(PUT_ROOT_PATH)
+            for root, dirs, files in os.walk(put_path):
+                # 排除一些不必要的目录
+                dirs[:] = [d for d in dirs if d not in ['.git', '.github', 't', 'scripts', 'doc', 'devtools', 'm4', 'vendor']
+                            and not os.path.abspath(os.path.join(root, d)).startswith('/usr/include')
+                            and not os.path.abspath(os.path.join(root, d)).startswith('/usr/local/include')]
+                
+                for file in files:
+                    if file.endswith('.c'):
+                        full_path = os.path.join(root, file)
+                        # 避免重复解析原始文件
+                        if full_path == os.path.abspath(full_file_path):
+                            continue
+                        
+                        try:
+                            tu = index.parse(full_path, args=['-I' + PUT_ROOT_PATH, '-std=c99'])
+                            find_variable_definitions(tu.cursor, var_name)
+                        except Exception as e:
+                            # 如果解析某个文件失败，继续尝试其他文件
+                            # logging.warning(f"解析文件 {full_path} 时出错: {e}")
+                            continue
+        
+        return definitions
+    except Exception as e:
+        # logging.error(f"Error in find_var_definitions: {e}")
+        # import traceback
+        # logging.error(traceback.format_exc())
+        return []
 
 # find_var_decl
 # 找到变量声明的位置
 # return: str: 'memcached/slab_automove.c:37'
-def find_var_decl(source_location: str, var_name: str) -> Optional[str]:
+def find_var_decl(source_location: str, var_name: str) -> List[Dict[str, str]]:
+    """
+    找到指定标识符所有声明的位置 (变量、函数、结构体等)。
+    已初步测试！
+    return: list of {'location': 'path/to/file.c:line', 'code': 'source code line'}
+    """
     # 基于LLVM来实现不要使用基于文本的查找
+    # 基于LLVM的实现比基于文本的查找方法更加精确，因为它基于编译器级别的代码分析，能够准确识别变量声明的位置，而不会被注释、字符串或其他文本中的相似内容干扰。
     # libclang
-    return None
+    if not libclang_available:
+        return []
+    
+    try:
+        # 解析source_location获取文件路径
+        file_path = source_location.split(":")[0]
+        
+        # 构造完整的文件路径
+        full_file_path = os.path.join(PUT_ROOT_PATH, file_path)
+        
+        # 检查文件是否真的存在
+        if not os.path.exists(full_file_path):
+            # logging.error(f"File does not exist: {full_file_path}")
+            return []
+        
+        # 使用libclang解析文件，它会自动处理包含的头文件
+        index = cindex.Index.create()
+        
+        # 尝试添加更多编译参数以提高解析成功率
+        args = ['-I' + PUT_ROOT_PATH]
+        translation_unit = index.parse(full_file_path, args=args)
+        
+        if not translation_unit:
+            # logging.error("Failed to create translation unit")
+            return []
+            
+        declarations: List[Dict[str, str]] = []
+        processed_locations: Set[str] = set()
+
+        # 在整个翻译单元中查找变量声明（包括包含的头文件）
+        def find_declarations_in_cursor(cursor, var_name):
+            # 支持多种声明类型
+            supported_kinds = [
+                CursorKind.VAR_DECL,        # 变量声明
+                CursorKind.STRUCT_DECL,     # 结构体声明
+                CursorKind.TYPEDEF_DECL,    # typedef声明
+                CursorKind.FUNCTION_DECL,   # 函数声明
+                CursorKind.ENUM_DECL,       # 枚举声明
+                CursorKind.ENUM_CONSTANT_DECL,  # 枚举常量声明
+                CursorKind.MACRO_DEFINITION     # 宏定义
+            ]
+            
+            if cursor.kind in supported_kinds and cursor.spelling == var_name:
+                location = cursor.location
+                if location.file:
+                    # 返回格式: 'filename:line_number'
+                    # 使用实际的文件名而不是原始的file_path
+                    file_name = location.file.name
+                    # 移除PUT_ROOT_PATH前缀以保持一致性
+                    if file_name.startswith(os.path.abspath(PUT_ROOT_PATH)):
+                        file_name = os.path.relpath(file_name, PUT_ROOT_PATH)
+                    # 如果以project name开头删掉project name
+                    if file_name.startswith(PROJECT_NAME + "/"):
+                        file_name = file_name[len(PROJECT_NAME) + 1:]
+                    location_str = f"{file_name}:{location.line}"
+                    if location_str not in processed_locations:
+                        code = dump_source_line(file_name, location.line)
+                        declarations.append({"location": location_str, "code": code})
+                        processed_locations.add(location_str)
+            
+            # 递归遍历子节点
+            for child in cursor.get_children():
+                find_declarations_in_cursor(child, var_name)
+        
+        find_declarations_in_cursor(translation_unit.cursor, var_name)
+        
+        # 在整个项目中查找
+        put_path = os.path.abspath(PUT_ROOT_PATH)
+        processed_files: Set[str] = {os.path.abspath(full_file_path)}
+
+        for root, dirs, files in os.walk(put_path):
+            # 排除一些不必要的目录
+            dirs[:] = [d for d in dirs if d not in ['.git', '.github', 't', 'scripts', 'doc', 'devtools', 'm4', 'vendor']]
+            
+            for file in files:
+                if file.endswith(('.c', '.h')):
+                    current_file_path = os.path.join(root, file)
+                    abs_current_path = os.path.abspath(current_file_path)
+                    # 避免重复解析原始文件
+                    if abs_current_path in processed_files:
+                        continue
+                    
+                    processed_files.add(abs_current_path)
+                    try:
+                        tu = index.parse(current_file_path, args=args)
+                        find_declarations_in_cursor(tu.cursor, var_name)
+                    except Exception:
+                        continue
+        return declarations
+    except Exception as e:
+        # logging.error(f"Error in find_var_decl: {e}", exc_info=True)
+        return []
 
 
 '''
@@ -282,14 +526,6 @@ def get_path_cond_func(start_location: str, target_location: str) -> Optional[Li
                     if location:
                         event["code"] = dump_source_line(location.split(":")[0], location.split(":")[1])
             return res_json.get("paths", [])
-    return None
-
-# get_path_constraint
-# 找到当前source_location的路径约束条件的表达式
-# return: str
-def get_path_constraint(source_location: str) -> Optional[str]:
-    # 基于LLVM来实现不要使用基于文本的查找
-    # libclang
     return None
 
 # check_always_implying、
@@ -361,8 +597,9 @@ if __name__ == '__main__':
     # # printFunctionCallSites(icfg, "stats_prefix_record_get");
     # print(find_callers("stats_prefix_record_get"))
     # # printCalleeFunctionBodyByLocation(icfg, "stats_prefix.c:118");
-    # print(find_callee("stats_prefix.c:118"))
+    # print(find_callee("items.c:499"))
     # print(type(find_callee("stats_prefix.c:118")))
     # # printFunctionBodyByLocation(icfg, "stats_prefix.c:118");
     # print(find_current_function("stats_prefix.c:118"))
-    get_path_cond_func("restart.c:76", "restart.c:121")
+    # print(get_path_cond_func("restart.c:76", "restart.c:121"))
+    print(find_var_decl("memcached/memcached.c:18", "total_prefix_size"))
