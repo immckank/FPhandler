@@ -2,12 +2,7 @@
 .idea
 .pytest_cache
 .pytest_cache
+__pycache__
+pipcache/
 /PUT/*
-analysis_operators/check_always_implying.py
-analysis_operators/check_le.py
-analysis_operators/ctags_readtags.py
-analysis_operators/dump_func_context.py
-analysis_operators/dump_source_file.py
-analysis_operators/find_callers_in_project.py
-analysis_operators/get_path_constraint.py
-tests/test_find_callers_in_project.py
+/FP
