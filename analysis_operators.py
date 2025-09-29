@@ -11,6 +11,7 @@ structure
 
 # find_var_decl
 # 找到变量声明的位置
+# 已实现，并初步测试
 # return: source_location: 'memcached/slab_automove.c:37'
 def find_var_decl(source_location, var_name):
     # 基于LLVM来实现不要使用基于文本的查找
@@ -19,6 +20,7 @@ def find_var_decl(source_location, var_name):
 
 # find_callers
 # 找到所有调用目标函数的其他函数
+# 已实现，并初步测试
 # return: list < function_name, source_location >
 def find_callers(source_location):
     # 基于LLVM来实现不要使用基于文本的查找
@@ -27,14 +29,16 @@ def find_callers(source_location):
 
 # find_callee
 # 找到被调用函数的函数体
+# 已实现，并初步测试
 # return: function_name, source_location
 def find_callee(source_location):
     # 基于LLVM来实现不要使用基于文本的查找
     # libclang
+    # 完成寻找
     return None
 
 # ctags_readtags
-# 用ctag找到指定某个标识符的所有出现位置
+# TODO 用ctag找到指定某个标识符的所有出现位置
 # return: list < source_location >
 def ctags_readtags(source_location, id_name):
     # ctags实现
@@ -82,6 +86,7 @@ def ctags_readtags(source_location, id_name):
 
 # find_var_definitions
 # 找到指定变量所有被定义的位置
+# 已实现，并初步测试
 # return: list < source_location >
 def find_var_definitions(source_location, var_name):
     # 基于LLVM来实现不要使用基于文本的查找
@@ -93,7 +98,7 @@ path condition
 '''
 
 # get_path_constraint
-# 找到当前source_location的路径约束条件的表达式
+# TODO找到当前source_location的路径约束条件的表达式
 # return: exp
 def get_path_constraint(source_location):
     # 基于LLVM来实现不要使用基于文本的查找
@@ -101,7 +106,7 @@ def get_path_constraint(source_location):
     return None
 
 # check_always_implying、
-# 检测两个表达式是否总是蕴含关系
+# TODO 检测两个表达式是否总是蕴含关系
 # exp1  exp2
 # return: bool
 def check_always_implying(exp1, exp2):
@@ -114,7 +119,7 @@ bound
 
 
 # check_le
-# 检测两个表达式exp1 <= exp2是否恒成立
+# TODO 检测两个表达式exp1 <= exp2是否恒成立
 # exp1  exp2
 # return: bool
 def check_le(exp1, exp2):
@@ -126,7 +131,7 @@ context
 '''
 
 # dump_source_file
-# 按行号寻找指定代码片段
+# TODO 按行号寻找指定代码片段
 # return: string
 def dump_source_file(source_location, start_line, end_line):
     file_path = os.path.join(PUT_ROOT_PATH, source_location.split(":")[0])
@@ -136,7 +141,7 @@ def dump_source_file(source_location, start_line, end_line):
     return None
 
 # dump_func_context
-# 得到函数体所在第一行 打印全部函数实现
+# TODO 得到函数体所在第一行 打印全部函数实现
 # return: string
 def dump_func_context(source_location):
     func_context = ""
