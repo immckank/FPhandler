@@ -485,6 +485,52 @@ def find_var_decl(source_location: str, var_name: str) -> List[Dict[str, str]]:
 path condition
 '''
 
+def get_shortest_path_cond(start_location: str, target_location: str):
+    if not re.match(r'^[\w/]+\.c:\d+$', start_location) and not re.match(r'^[\w/]+\.h:\d+$', start_location):
+        logging.error(f"Invalid source location format: {start_location}")
+        return None
+    if not re.match(r'^[\w/]+\.c:\d+$', target_location) and not re.match(r'^[\w/]+\.h:\d+$', target_location):
+        logging.error(f"Invalid source location format: {target_location}")
+        return None
+    if start_location.startswith(PROJECT_NAME + "/"):
+        start_location = start_location[len(PROJECT_NAME) + 1:]
+    if target_location.startswith(PROJECT_NAME + "/"):
+        target_location = target_location[len(PROJECT_NAME) + 1:]
+    command_caller = CommandCaller()
+    res = command_caller.call_graph_reader_with_args(
+        f"-path-cond-func-start={start_location}",
+        f"-path-cond-func-end={target_location}",
+        os.path.join(PUT_ROOT_PATH, f"{PROJECT_NAME}.bc")
+    )
+    if res:
+        res_json = json.loads(res)
+        error = res_json.get("error", None)
+        if error:
+            logging.error(f"Error finding shortest path condition for {start_location} to {target_location}: {error}")
+            return None
+        else:
+            del res_json["error"]
+            paths = res_json.get("paths", [])
+            # 找到最短的路径
+            shortest_path = None
+            min_length = float('inf')
+            for path in paths:
+                events = path.get("events", [])
+                if len(events) < min_length:
+                    min_length = len(events)
+                    shortest_path = path
+            
+            if shortest_path:
+                events = shortest_path.get("events", [])
+                for event in events:
+                    location = event.get("location", None)
+                    if location:
+                        event["code"] = dump_source_line(location.split(":")[0], location.split(":")[1])
+                return shortest_path.get("events", [])
+                
+    return None
+    
+
 # get_path_cond_func
 # 找到startline到targetline所有路径 收集路径中未返回的调用及条件分支
 # return 
@@ -617,5 +663,5 @@ if __name__ == '__main__':
     # print(type(find_callee("stats_prefix.c:118")))
     # # printFunctionBodyByLocation(icfg, "stats_prefix.c:118");
     # print(find_current_function("stats_prefix.c:118"))
-    # print(get_path_cond_func("restart.c:76", "restart.c:121"))
-    print(find_var_definitions("memcached.c:18", "total_prefix_size"))
+    print(get_shortest_path_cond("restart.c:76", "restart.c:121"))
+    # print(find_var_definitions("memcached.c:18", "total_prefix_size"))
