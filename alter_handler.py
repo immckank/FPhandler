@@ -115,7 +115,7 @@ class AlterHandler():
             elif alter.get_leak_type() == "PartialLeak" or alter.get_leak_type() == "Double Free":
                 allowed_tools.append("get_path_cond_func")
             response = responseForAlter(alter.to_prompt(), user_prompt=user_prompt, allowed_tool_names=allowed_tools)
-            print(response.text)
+            # print(response.text)
             res_file_path = os.path.join(RES_ROOT_PATH, f"RES_{self.alter_file_name}")
             with open(res_file_path, 'w') as f:
                 f.write(source_location + "\n")
@@ -125,5 +125,5 @@ class AlterHandler():
 
 if __name__ == '__main__':
     handler = AlterHandler()
-    handler.read_alter_file(r"SARIF", "memcached_DOUBLEFREETEST.txt")
+    handler.read_alter_file(r"SARIF", "libtiff_MEMORYLEAK.txt")
     handler.handle_memory_leak()

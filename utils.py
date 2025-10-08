@@ -8,8 +8,8 @@ PROJECT_NAME = config.PROJECT_NAME
 
 
 # 找到指定项目中指定文件名的路径
-def find_file_path(project_name, file_name):
-    for root, dirs, files in os.walk(os.path.join(PUT_ROOT_PATH, project_name)):
+def find_file_path(file_name):
+    for root, dirs, files in os.walk(os.path.join(PUT_ROOT_PATH, PROJECT_NAME)):
         if file_name in files:
             # 路径中不包含PUT_ROOT_PATH
             full_path = os.path.join(root, file_name)
@@ -19,7 +19,7 @@ def find_file_path(project_name, file_name):
 # 根据指定scource_location找到对应的代码行
 def find_code_line(source_location):
     file_name = source_location.split(":")[0]
-    file_path = find_file_path(PROJECT_NAME, file_name)
+    file_path = find_file_path(file_name)
     file_path = os.path.join(PUT_ROOT_PATH, file_path).replace("\\", "/").lstrip("/")
     if not file_path:
         return None

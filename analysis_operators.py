@@ -255,7 +255,7 @@ def find_var_definitions(source_location: str, var_name: str) -> List[Dict[str, 
     
     try:
         file_name = source_location.split(":")[0]
-        file_path = utils.find_file_path(PROJECT_NAME, file_name)
+        file_path = utils.find_file_path(file_name)
         full_file_path = os.path.join(PUT_ROOT_PATH, file_path)
         
         # 检查文件是否存在
@@ -380,7 +380,7 @@ def find_var_decl(source_location: str, var_name: str) -> List[Dict[str, str]]:
         return []
     try:
         file_name = source_location.split(":")[0]
-        file_path = utils.find_file_path(PROJECT_NAME, file_name)
+        file_path = utils.find_file_path(file_name)
         full_file_path = os.path.join(PUT_ROOT_PATH, file_path)
         
         # 检查文件是否真的存在
@@ -608,7 +608,7 @@ def dump_source_snippet(file_name: str, start_line: int, end_line: int) -> Optio
         The source code snippet as a string, or None if the file cannot be read
         or line numbers are out of range.
     """
-    file_path = utils.find_file_path(PROJECT_NAME, file_name)
+    file_path = utils.find_file_path(file_name)
     file_path = os.path.join(PUT_ROOT_PATH, file_path)
     try:
         with open(file_path, "r") as f:
@@ -631,7 +631,7 @@ def dump_source_line(file_name: str, line_number: int) -> Optional[str]:
     Returns:
         The content of the specified line as a string, or None if an error occurs.
     """
-    file_path = utils.find_file_path(PROJECT_NAME, file_name)
+    file_path = utils.find_file_path(file_name)
     file_path = os.path.join(PUT_ROOT_PATH, file_path)
     snippet = dump_source_snippet(file_name, line_number, line_number)
     return snippet.strip() if snippet else None
