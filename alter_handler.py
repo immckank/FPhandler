@@ -3,13 +3,14 @@ import re
 import json
 import utils
 from memory_defect import NeverFree, DoubleFree, PartialLeak
-from llm import responseForAlter
+from llm import Gemini, DeepSeek
 
 import config
 
 PUT_ROOT_PATH = config.PUT_ROOT_PATH
 PROJECT_NAME = config.PROJECT_NAME
 RES_ROOT_PATH = config.RES_ROOT_PATH
+LLM_TYPE = config.LLM_TYPE
 
 class AlterHandler():
     def __init__(self):
@@ -114,7 +115,16 @@ class AlterHandler():
                 pass  # 使用默认的 allowed_tools
             elif alter.get_leak_type() == "PartialLeak" or alter.get_leak_type() == "Double Free":
                 allowed_tools.append("get_path_cond_func")
-            response = responseForAlter(alter.to_prompt(), user_prompt=user_prompt, allowed_tool_names=allowed_tools)
+            if LLM_TYPE == "Gemini":
+                gemini = Gemini(model_name="gemini-2.5-flash")
+                response = gemini.responseForAlter(Alter_prompt=alter.to_prompt(), user_prompt=user_prompt, allowed_tool_names=allowed_tools)
+                print(response)
+            elif LLM_TYPE == "DeepSeek":
+                ds = DeepSeek(model_name="deepseek-chat")
+                response = ds.responseForAlter(Alter_prompt=alter.to_prompt(), user_prompt=user_prompt, allowed_tool_names=allowed_tools)
+                print(response)
+            else:
+                raise ValueError(f"Unknown LLM type: {LLM_TYPE}")
             # print(response.text)
             res_file_path = os.path.join(RES_ROOT_PATH, f"RES_{self.alter_file_name}")
             with open(res_file_path, 'w') as f:

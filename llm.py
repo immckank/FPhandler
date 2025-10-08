@@ -1,5 +1,11 @@
 from google import genai
 from google.genai import types
+import json
+import os
+from config import *
+import logging
+
+from openai import OpenAI
 
 from pydantic import BaseModel
 
@@ -9,6 +15,17 @@ from analysis_operators import find_callee
 from analysis_operators import find_current_function
 from analysis_operators import find_callers
 from analysis_operators import get_path_cond_func
+
+
+# logging config
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] - %(message)s',
+    handlers=[
+        logging.FileHandler(os.path.join(RES_ROOT_PATH, f'{LLM_TYPE}_{PROJECT_NAME}_log.txt')),
+        logging.StreamHandler()
+    ]
+)
 
 class judgeResult(BaseModel):
     classification: str
@@ -21,47 +38,231 @@ Each user input will include: the bug type, source file name and line number of 
 Guidelines: Focus only on the specified bug type and location. Don't speculate about future code changes. Think step by step. Your analysis must be based on the source code.
 """
 
-def resposeToAlter(Alter_prompt, user_prompt=""):
-    config = types.GenerateContentConfig(
-        system_instruction=SYS_PROMPT,
-        response_schema=judgeResult,
-        response_mime_type="application/json",
-    )
-    client = genai.Client()
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=Alter_prompt + "\n" + user_prompt,
-        config=config
-    )
-    return response.text
+class Model():
+    def __init__(self):
+        pass
     
-def responseForAlter(Alter_prompt, user_prompt="", allowed_tool_names = []):
-    allowed_tools = []
-    for tool_name in allowed_tool_names:
-        if tool_name == "dump_source_snippet":
-            allowed_tools.append(dump_source_snippet)
-        elif tool_name == "dump_source_line":
-            allowed_tools.append(dump_source_line)
-        elif tool_name == "find_callee":
-            allowed_tools.append(find_callee)
-        elif tool_name == "find_current_function":
-            allowed_tools.append(find_current_function)
-        elif tool_name == "find_callers":
-            allowed_tools.append(find_callers)
-        elif tool_name == "get_path_cond_func":
-            allowed_tools.append(get_path_cond_func)
-        else:
-            raise ValueError(f"Unknown tool name: {tool_name}")
-    config = types.GenerateContentConfig(
-        system_instruction=SYS_PROMPT,
-        # response_schema=judgeResult,
-        # response_mime_type="application/json",
-        tools=allowed_tools
-    )
-    client = genai.Client()
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=Alter_prompt + "\n" + user_prompt,
-        config=config
-    )
-    return response
+    def responseToAlter(self, Alter_prompt, user_prompt=""):
+        return None
+
+    def responseForAlter(self, Alter_prompt, user_prompt=""):
+        return None
+
+class Gemini(Model):
+    def __init__(self, model_name="gemini-2.5-flash"):
+        super().__init__()
+        self.model_name = model_name
+                 
+    def resposeToAlter(self, Alter_prompt, user_prompt=""):
+        config = types.GenerateContentConfig(
+            system_instruction=SYS_PROMPT,
+            response_schema=judgeResult,
+            response_mime_type="application/json",
+        )
+        client = genai.Client()
+        response = client.models.generate_content(
+            model=self.model_name,
+            contents=Alter_prompt + "\n" + user_prompt,
+            config=config
+        )
+        return response.text
+    
+    def responseForAlter(self, Alter_prompt, user_prompt="", allowed_tool_names = []):
+        allowed_tools = []
+        for tool_name in allowed_tool_names:
+            if tool_name == "dump_source_snippet":
+                allowed_tools.append(dump_source_snippet)
+            elif tool_name == "dump_source_line":
+                allowed_tools.append(dump_source_line)
+            elif tool_name == "find_callee":
+                allowed_tools.append(find_callee)
+            elif tool_name == "find_current_function":
+                allowed_tools.append(find_current_function)
+            elif tool_name == "find_callers":
+                allowed_tools.append(find_callers)
+            elif tool_name == "get_path_cond_func":
+                allowed_tools.append(get_path_cond_func)
+            else:
+                raise ValueError(f"Unknown tool name: {tool_name}")
+        config = types.GenerateContentConfig(
+            system_instruction=SYS_PROMPT,
+            # response_schema=judgeResult,
+            # response_mime_type="application/json",
+            tools=allowed_tools
+        )
+        client = genai.Client()
+        response = client.models.generate_content(
+            model=self.model_name,
+            contents=Alter_prompt + "\n" + user_prompt,
+            config=config
+        )
+        return response
+    
+class DeepSeek(Model):
+    def __init__(self, model_name="deepseek-chat"):
+        super().__init__()
+        self.model_name = model_name
+        self.client = OpenAI(
+            api_key=os.environ.get("DEEPSEEK_API_KEY"),
+            base_url="https://api.deepseek.com",
+        )
+        
+    def send_message(self, messages, tools):
+        response = self.client.chat.completions.create(
+            model=self.model_name,
+            messages=messages,
+            tools=tools
+        )
+        return response.choices[0].message
+                
+            
+    def responseToAlter(self, Alter_prompt, user_prompt=""):
+        return None
+    
+    def responseForAlter(self, Alter_prompt, user_prompt="", allowed_tool_names = []):
+        allowed_tools = []
+        for tool_name in allowed_tool_names:
+            if tool_name == "dump_source_snippet":
+                allowed_tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": "dump_source_snippet",
+                        "description": "Dumps a snippet of source code from a file between the given line numbers.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "file_name": {"type": "string", "description": "The name of the file relative to the project root."},
+                                "start_line": {"type": "integer", "description": "The starting line number (inclusive)."},
+                                "end_line": {"type": "integer", "description": "The ending line number (inclusive)."}
+                            },
+                            "required": ["file_name", "start_line", "end_line"]
+                        }
+                    }
+                })
+            elif tool_name == "dump_source_line":
+                allowed_tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": "dump_source_line",
+                        "description": "Dumps a single line of source code from a file.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "file_name": {"type": "string", "description": "The name of the file relative to the project root."},
+                                "line_number": {"type": "integer", "description": "The line number to retrieve."}
+                            },
+                            "required": ["file_name", "line_number"]
+                        }
+                    }
+                })
+            elif tool_name == "find_callee":
+                allowed_tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": "find_callee",
+                        "description": "Finds the function body of functions called at a specific source location.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "source_location": {"type": "string", "description": "The source location of the call site, in the format 'filename.c:line_number'."}
+                            },
+                            "required": ["source_location"]
+                        }
+                    }
+                })
+            elif tool_name == "find_current_function":
+                allowed_tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": "find_current_function",
+                        "description": "Finds the function in which the given source location exists.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "source_location": {"type": "string", "description": "The source location, in the format 'filename.c:line_number'."}
+                            },
+                            "required": ["source_location"]
+                        }
+                    }
+                })
+            elif tool_name == "find_callers":
+                allowed_tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": "find_callers",
+                        "description": "Finds all functions that call a given target function.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "function_name": {"type": "string", "description": "The name of the target function to find callers for."}
+                            },
+                            "required": ["function_name"]
+                        }
+                    }
+                })
+            elif tool_name == "get_path_cond_func":
+                allowed_tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": "get_path_cond_func",
+                        "description": "Finds all paths between a start and target location, collecting information about function calls and conditional branches along the way.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "start_location": {"type": "string", "description": "The start source location, in 'filename.c:line_number' format."},
+                                "target_location": {"type": "string", "description": "The target source location, in 'filename.c:line_number' format."}
+                            },
+                            "required": ["start_location", "target_location"]
+                        }
+                    }
+                })
+            else:
+                raise ValueError(f"Unknown tool name: {tool_name}")
+        messages = [
+            {"role": "system", "content": SYS_PROMPT},
+            {"role": "user", "content": Alter_prompt + "\n" + user_prompt}
+        ]
+        response = self.send_message(messages, allowed_tools)
+        logging.info(f"Model response: {response.content}")
+        messages.append(response)
+        while response.tool_calls:
+            for tool_call in response.tool_calls:
+                tool_function_name = tool_call.function.name
+                tool_arguments = json.loads(tool_call.function.arguments)
+                logging.info(f"Calling tool: {tool_function_name} with args: {tool_arguments}")
+                if tool_function_name == "dump_source_snippet":
+                    function_response = dump_source_snippet(**tool_arguments)
+                elif tool_function_name == "dump_source_line":
+                    function_response = dump_source_line(**tool_arguments)
+                elif tool_function_name == "find_callee":
+                    function_response = find_callee(**tool_arguments)
+                elif tool_function_name == "find_current_function":
+                    function_response = find_current_function(**tool_arguments)
+                elif tool_function_name == "find_callers":
+                    function_response = find_callers(**tool_arguments)
+                elif tool_function_name == "get_path_cond_func":
+                    function_response = get_path_cond_func(**tool_arguments)
+                else:
+                    # It's good practice to handle unknown tool calls
+                    logging.error(f"Unknown tool call: {tool_function_name}")
+                    function_response = f"Error: Tool '{tool_function_name}' not found."
+
+                # Convert response to JSON string if it's not already a string
+                if not isinstance(function_response, str):
+                    function_response = json.dumps(function_response)
+                    logging.info(f"Tool response converted to JSON: {function_response}")
+
+                messages.append(
+                    {
+                        "tool_call_id": tool_call.id,
+                        "role": "tool",
+                        "content": function_response,
+                    }
+                )
+            
+            # Send the tool responses back to the model
+            response = self.send_message(messages, allowed_tools)
+            logging.info(f"Model response: {response.content}")
+            messages.append(response)
+
+        return response
