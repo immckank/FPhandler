@@ -13,6 +13,7 @@ Task: Please classify this alert as TP, FP, or UNCERTAIN, and provide your reaso
 
 class MemoryDefect:
     def __init__(self, defect_type, source_location):
+        # 构造时传入的source_location都是 文件名 : 行号
         self.defect_type = defect_type
         self.source_location = source_location
 

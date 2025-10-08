@@ -29,12 +29,9 @@ class AlterHandler():
             details = json.loads(node_detail_str)
             file_name = details.get("fl")
             line_number = details.get("ln")
-
             if not file_name or line_number is None:
                 return None
-
-            file_path = utils.find_file_path(PROJECT_NAME, file_name)
-            return f"{file_path}:{line_number}" if file_path else None
+            return f"{file_name}:{line_number}"
         except (json.JSONDecodeError, AttributeError):
             # Log error or handle cases where parsing fails.
             return None
@@ -56,7 +53,7 @@ class AlterHandler():
                     continue
 
                 leak_type, node_detail_str = leak_match.groups()
-                print(leak_type, node_detail_str)
+                # print(leak_type, node_detail_str)
                 location = self._parse_location(node_detail_str)
                 if not location:
                     continue
@@ -77,7 +74,6 @@ class AlterHandler():
                             if not free_line:
                                 # Blank line signifies the end of this PartialLeak's conditional paths
                                 break
-
                             cond_match = self.COND_PATH_RE.match(free_line)
                             if cond_match:
                                 cond_node_detail_str, cond = cond_match.groups()
@@ -112,21 +108,14 @@ class AlterHandler():
         # 处理当前alter_list中的每个alter
         for alter in self.alter_list:
             source_location = alter.get_source_location()
-            if source_location.startswith(PROJECT_NAME + "/"):
-                source_location = source_location[len(PROJECT_NAME) + 1:]
-
             user_prompt = f"source code at {source_location} : " + utils.find_code_line(source_location) + "\n"
-            
             allowed_tools = ["dump_source_snippet", "dump_source_line", "find_callee", "find_current_function", "find_callers"]
             if alter.get_leak_type() == "NeverFree":
                 pass  # 使用默认的 allowed_tools
             elif alter.get_leak_type() == "PartialLeak" or alter.get_leak_type() == "Double Free":
                 allowed_tools.append("get_path_cond_func")
-
             response = responseForAlter(alter.to_prompt(), user_prompt=user_prompt, allowed_tool_names=allowed_tools)
             print(response.text)
-            # 写入结果日志
-            # 新建一个txt f"{RES_ROOT_PATH}/RES_{self.alter_file_name}"
             res_file_path = os.path.join(RES_ROOT_PATH, f"RES_{self.alter_file_name}")
             with open(res_file_path, 'w') as f:
                 f.write(source_location + "\n")

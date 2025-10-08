@@ -4,6 +4,7 @@ import logging
 import sys
 import json
 import re
+from utils import find_file_path
 from typing import List, Dict, Any, Optional, Set
 
 def _configure_libclang():
@@ -39,6 +40,7 @@ import config
 
 PUT_ROOT_PATH = config.PUT_ROOT_PATH
 PROJECT_NAME = config.PROJECT_NAME
+PUT_NAME = config.PUT_NAME
 
 '''
 structure function
@@ -61,7 +63,7 @@ def find_callers(function_name: str) -> List[Dict[str, Any]]:
     command_caller = CommandCaller()
     res = command_caller.call_graph_reader_with_args(
         f"-find-call-sites={function_name}",
-        os.path.join(PUT_ROOT_PATH, f"{PROJECT_NAME}.bc")
+        os.path.join(PUT_ROOT_PATH, f"{PUT_NAME}.bc")
     )
     call_sites_list = []
     if res:
@@ -97,16 +99,13 @@ def find_callee(source_location: str) -> Optional[List[Dict[str, Any]]]:
     """
     # 基于LLVM来实现不要使用基于文本的查找
     # 检查source_location是否合法
-    if not re.match(r'^[\w/]+\.c:\d+$', source_location) and not re.match(r'^[\w/]+\.h:\d+$', source_location):
+    if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', source_location):
         logging.error(f"Invalid source location format: {source_location}")
         return None
-    # 如果以项目名称开头 去掉项目名
-    if source_location.startswith(PROJECT_NAME + "/"):
-        source_location = source_location[len(PROJECT_NAME) + 1:]
     command_caller = CommandCaller()
     res = command_caller.call_graph_reader_with_args(
         f"-find-callee-body={source_location}",
-        os.path.join(PUT_ROOT_PATH, f"{PROJECT_NAME}.bc")
+        os.path.join(PUT_ROOT_PATH, f"{PUT_NAME}.bc")
     )
     if res:
         res_json = json.loads(res)
@@ -140,16 +139,13 @@ def find_current_function(source_location: str) -> Optional[Dict[str, Any]]:
     """
     # 基于LLVM来实现不要使用基于文本的查找
     # 检查source_location是否合法
-    if not re.match(r'^[\w/]+\.c:\d+$', source_location) and not re.match(r'^[\w/]+\.h:\d+$', source_location):
+    if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', source_location):
         logging.error(f"Invalid source location format: {source_location}")
         return None
-    # 如果以项目名称开头 去掉项目名
-    if source_location.startswith(PROJECT_NAME + "/"):
-        source_location = source_location[len(PROJECT_NAME) + 1:]
     command_caller = CommandCaller()
     res = command_caller.call_graph_reader_with_args(
         f"-find-function-body={source_location}", 
-        os.path.join(PUT_ROOT_PATH, f"{PROJECT_NAME}.bc")
+        os.path.join(PUT_ROOT_PATH, f"{PUT_NAME}.bc")
     )
     if res:
         res_json = json.loads(res)
@@ -242,8 +238,7 @@ def find_var_definitions(source_location: str, var_name: str) -> List[Dict[str, 
     if necessary.
 
     Args:
-        source_location: A source location within the project to provide
-                         context, e.g., 'path/to/file.c:123'.
+        source_location: The source location to provide context, in the format 'filename.c:line_number'.
         var_name: The name of the variable to find definitions for.
 
     Returns:
@@ -253,19 +248,14 @@ def find_var_definitions(source_location: str, var_name: str) -> List[Dict[str, 
         Example: [{'location': 'items.c:100', 'code': 'item *it = item_alloc(...);'}]
     """
     # 检查source_location是否合法
-    if not re.match(r'^[\w/]+\.c:\d+$', source_location) and not re.match(r'^[\w/]+\.h:\d+$', source_location):
+    if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', source_location):
         return []
-    # 如果没有以项目名称开头 加上项目名
-    if not source_location.startswith(PROJECT_NAME + "/"):
-        source_location = PROJECT_NAME + "/" + source_location
     if not libclang_available:
         return []
     
     try:
-        # 解析source_location获取文件路径
-        file_path = source_location.split(":")[0]
-        
-        # 构造完整的文件路径
+        file_name = source_location.split(":")[0]
+        file_path = utils.find_file_path(PROJECT_NAME, file_name)
         full_file_path = os.path.join(PUT_ROOT_PATH, file_path)
         
         # 检查文件是否存在
@@ -333,6 +323,7 @@ def find_var_definitions(source_location: str, var_name: str) -> List[Dict[str, 
         if True: # Kept for logical structure, can be removed.
             # 遍历整个PUT目录寻找.c文件
             put_path = os.path.abspath(PUT_ROOT_PATH)
+            put_path = os.path.join(put_path, PROJECT_NAME)
             for root, dirs, files in os.walk(put_path):
                 # 排除一些不必要的目录
                 dirs[:] = [d for d in dirs if d not in ['.git', '.github', 't', 'scripts', 'doc', 'devtools', 'm4', 'vendor']
@@ -373,7 +364,7 @@ def find_var_decl(source_location: str, var_name: str) -> List[Dict[str, str]]:
 
     Args:
         source_location: A source location within the project to provide
-                         context, e.g., 'path/to/file.c:123'.
+                         context, in format 'filename.c:line_number'.
         var_name: The name of the identifier to find declarations for.
 
     Returns:
@@ -383,18 +374,13 @@ def find_var_decl(source_location: str, var_name: str) -> List[Dict[str, str]]:
         Example: [{'location': 'items.h:50', 'code': 'extern unsigned int total_items;'}]
     """
     # 检查source_location是否合法
-    if not re.match(r'^[\w/]+\.c:\d+$', source_location):
+    if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', source_location):
         return []
-    # 如果没有以项目名称开头 加上项目名
-    if not source_location.startswith(PROJECT_NAME + "/"):
-        source_location = PROJECT_NAME + "/" + source_location
     if not libclang_available:
         return []
     try:
-        # 解析source_location获取文件路径
-        file_path = source_location.split(":")[0]
-        
-        # 构造完整的文件路径
+        file_name = source_location.split(":")[0]
+        file_path = utils.find_file_path(PROJECT_NAME, file_name)
         full_file_path = os.path.join(PUT_ROOT_PATH, file_path)
         
         # 检查文件是否真的存在
@@ -455,6 +441,7 @@ def find_var_decl(source_location: str, var_name: str) -> List[Dict[str, str]]:
         
         # 在整个项目中查找
         put_path = os.path.abspath(PUT_ROOT_PATH)
+        put_path = os.path.join(put_path, PROJECT_NAME)
         processed_files: Set[str] = {os.path.abspath(full_file_path)}
 
         for root, dirs, files in os.walk(put_path):
@@ -462,7 +449,7 @@ def find_var_decl(source_location: str, var_name: str) -> List[Dict[str, str]]:
             dirs[:] = [d for d in dirs if d not in ['.git', '.github', 't', 'scripts', 'doc', 'devtools', 'm4', 'vendor']]
             
             for file in files:
-                if file.endswith(('.c', '.h')):
+                if file.endswith(('.c', '.cpp', '.h')):
                     current_file_path = os.path.join(root, file)
                     abs_current_path = os.path.abspath(current_file_path)
                     # 避免重复解析原始文件
@@ -486,21 +473,17 @@ path condition
 '''
 
 def get_shortest_path_cond(start_location: str, target_location: str):
-    if not re.match(r'^[\w/]+\.c:\d+$', start_location) and not re.match(r'^[\w/]+\.h:\d+$', start_location):
+    if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', start_location):
         logging.error(f"Invalid source location format: {start_location}")
         return None
-    if not re.match(r'^[\w/]+\.c:\d+$', target_location) and not re.match(r'^[\w/]+\.h:\d+$', target_location):
+    if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', target_location):
         logging.error(f"Invalid source location format: {target_location}")
         return None
-    if start_location.startswith(PROJECT_NAME + "/"):
-        start_location = start_location[len(PROJECT_NAME) + 1:]
-    if target_location.startswith(PROJECT_NAME + "/"):
-        target_location = target_location[len(PROJECT_NAME) + 1:]
     command_caller = CommandCaller()
     res = command_caller.call_graph_reader_with_args(
         f"-path-cond-func-start={start_location}",
         f"-path-cond-func-end={target_location}",
-        os.path.join(PUT_ROOT_PATH, f"{PROJECT_NAME}.bc")
+        os.path.join(PUT_ROOT_PATH, f"{PUT_NAME}.bc")
     )
     if res:
         res_json = json.loads(res)
@@ -556,16 +539,12 @@ def get_path_cond_func(start_location: str, target_location: str) -> Optional[Li
             }
         ]
     """
-    if not re.match(r'^[\w/]+\.c:\d+$', start_location) and not re.match(r'^[\w/]+\.h:\d+$', start_location):
+    if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', start_location):
         logging.error(f"Invalid source location format: {start_location}")
         return None
-    if not re.match(r'^[\w/]+\.c:\d+$', target_location) and not re.match(r'^[\w/]+\.h:\d+$', target_location):
+    if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', target_location):
         logging.error(f"Invalid source location format: {target_location}")
         return None
-    if start_location.startswith(PROJECT_NAME + "/"):
-        start_location = start_location[len(PROJECT_NAME) + 1:]
-    if target_location.startswith(PROJECT_NAME + "/"):
-        target_location = target_location[len(PROJECT_NAME) + 1:]
     command_caller = CommandCaller()
     res = command_caller.call_graph_reader_with_args(
         f"-path-cond-func-start={start_location}",
@@ -629,7 +608,8 @@ def dump_source_snippet(file_name: str, start_line: int, end_line: int) -> Optio
         The source code snippet as a string, or None if the file cannot be read
         or line numbers are out of range.
     """
-    file_path = os.path.join(PUT_ROOT_PATH, PROJECT_NAME, file_name)
+    file_path = utils.find_file_path(PROJECT_NAME, file_name)
+    file_path = os.path.join(PUT_ROOT_PATH, file_path)
     try:
         with open(file_path, "r") as f:
             lines = f.readlines()
@@ -651,7 +631,8 @@ def dump_source_line(file_name: str, line_number: int) -> Optional[str]:
     Returns:
         The content of the specified line as a string, or None if an error occurs.
     """
-    file_path = os.path.join(PUT_ROOT_PATH, PROJECT_NAME, file_name)
+    file_path = utils.find_file_path(PROJECT_NAME, file_name)
+    file_path = os.path.join(PUT_ROOT_PATH, file_path)
     snippet = dump_source_snippet(file_name, line_number, line_number)
     return snippet.strip() if snippet else None
 
