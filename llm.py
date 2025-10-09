@@ -1,31 +1,14 @@
 from google import genai
 from google.genai import types
-import json
-import os
-from config import *
-import logging
-
+from pydantic import BaseModel
 from openai import OpenAI
 
-from pydantic import BaseModel
+import json
+import os
+import logging
 
-from analysis_operators import dump_source_snippet
-from analysis_operators import dump_source_line
-from analysis_operators import find_callee
-from analysis_operators import find_current_function
-from analysis_operators import find_callers
-from analysis_operators import get_path_cond_func
-
-
-# logging config
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] - %(message)s',
-    handlers=[
-        logging.FileHandler(os.path.join(RES_ROOT_PATH, f'{LLM_TYPE}_{PROJECT_NAME}_log.txt')),
-        logging.StreamHandler()
-    ]
-)
+from analysis_operators import *
+from config import *
 
 class judgeResult(BaseModel):
     classification: str
@@ -80,6 +63,8 @@ class Gemini(Model):
                 allowed_tools.append(find_current_function)
             elif tool_name == "find_callers":
                 allowed_tools.append(find_callers)
+            elif tool_name == "find_function_body":
+                allowed_tools.append(find_function_body)
             elif tool_name == "get_path_cond_func":
                 allowed_tools.append(get_path_cond_func)
             else:
@@ -200,6 +185,21 @@ class DeepSeek(Model):
                         }
                     }
                 })
+            elif tool_name == "find_function_body":
+                allowed_tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": "find_function_body",
+                        "description": "Finds the function body by its name.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "function_name": {"type": "string", "description": "The name of the function to find."}
+                            },
+                            "required": ["function_name"]
+                        }
+                    }
+                })
             elif tool_name == "get_path_cond_func":
                 allowed_tools.append({
                     "type": "function",
@@ -240,6 +240,8 @@ class DeepSeek(Model):
                     function_response = find_current_function(**tool_arguments)
                 elif tool_function_name == "find_callers":
                     function_response = find_callers(**tool_arguments)
+                elif tool_function_name == "find_function_body":
+                    function_response = find_function_body(**tool_arguments)
                 elif tool_function_name == "get_path_cond_func":
                     function_response = get_path_cond_func(**tool_arguments)
                 else:
@@ -247,6 +249,7 @@ class DeepSeek(Model):
                     logging.error(f"Unknown tool call: {tool_function_name}")
                     function_response = f"Error: Tool '{tool_function_name}' not found."
 
+                logging.info(f"Tool response: {function_response}")
                 # Convert response to JSON string if it's not already a string
                 if not isinstance(function_response, str):
                     function_response = json.dumps(function_response)

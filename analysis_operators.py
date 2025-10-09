@@ -123,6 +123,35 @@ def find_callee(source_location: str) -> Optional[List[Dict[str, Any]]]:
             return callee_functions
     return None
 
+def find_function_body(function_name: str) -> Optional[Dict[str, Any]]:
+    """Finds the function body by its name.
+
+    Args:
+        function_name: The name of the function to find.
+
+    Returns:
+        A dictionary containing the details of the function, including its name,
+        file, line numbers, and full body. Returns None if the function is not found.
+        Example:
+        {'function_name': 'target_func', 'filename': 'a.c', 'start_line': 5,
+         'end_line': 25, 'function_body': '...'}
+    """
+    command_caller = CommandCaller()
+    res = command_caller.call_graph_reader_with_args(
+        f"-find-body-by-name={function_name}",
+        os.path.join(PUT_ROOT_PATH, f"{PUT_NAME}.bc")
+    )
+    if res:
+        res_json = json.loads(res)
+        error = res_json.get("error", None)
+        if error:
+            logging.error(f"Error finding function body for {function_name}: {error}")
+            return None
+        func_body = dump_source_snippet(res_json["filename"], res_json['start_line'], res_json['end_line'])
+        res_json["function_body"] = func_body
+        return res_json
+    return None
+
 def find_current_function(source_location: str) -> Optional[Dict[str, Any]]:
     """Finds the function in which the given source location exists.
 
@@ -139,9 +168,11 @@ def find_current_function(source_location: str) -> Optional[Dict[str, Any]]:
     """
     # 基于LLVM来实现不要使用基于文本的查找
     # 检查source_location是否合法
+    errer_json = {}
     if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', source_location):
         logging.error(f"Invalid source location format: {source_location}")
-        return None
+        error_json = {"error": "Invalid source location format"}
+        return errer_json
     command_caller = CommandCaller()
     res = command_caller.call_graph_reader_with_args(
         f"-find-function-body={source_location}", 
@@ -151,7 +182,8 @@ def find_current_function(source_location: str) -> Optional[Dict[str, Any]]:
         res_json = json.loads(res)
         error = res_json.get("error", None)
         if error:
-            logging.error(f"Error finding current function for {source_location}: {error}")
+            logging.error(f"Error finding current function for {source_location}")
+            error_json = {"error": f"Error finding current function for {source_location}"}
         else:
             # 删除error属性
             del res_json["error"]
@@ -159,12 +191,13 @@ def find_current_function(source_location: str) -> Optional[Dict[str, Any]]:
             # 为func添加func_body属性
             res_json["function_body"] = func_body
             return res_json
-    return None
+    error_json = {"error": "Unknown error"}
+    return error_json
 
 '''
 structure ctags
 '''
-
+# TODO:不一定有用
 def ctags_readtags(source_location: str, id_name: str) -> List[str]:
     """Finds all occurrences of a given identifier using ctags.
 
@@ -472,6 +505,7 @@ def find_var_decl(source_location: str, var_name: str) -> List[Dict[str, str]]:
 path condition
 '''
 
+# TODO: 注释说明
 def get_shortest_path_cond(start_location: str, target_location: str):
     if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', start_location):
         logging.error(f"Invalid source location format: {start_location}")

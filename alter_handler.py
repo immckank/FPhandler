@@ -5,12 +5,7 @@ import utils
 from memory_defect import NeverFree, DoubleFree, PartialLeak
 from llm import Gemini, DeepSeek
 
-import config
-
-PUT_ROOT_PATH = config.PUT_ROOT_PATH
-PROJECT_NAME = config.PROJECT_NAME
-RES_ROOT_PATH = config.RES_ROOT_PATH
-LLM_TYPE = config.LLM_TYPE
+from config import *
 
 class AlterHandler():
     def __init__(self):
@@ -106,34 +101,36 @@ class AlterHandler():
         return 
 
     def handle_memory_leak(self):
+        logging.info(f"total alter number: {len(self.alter_list)}")
         # 处理当前alter_list中的每个alter
         for alter in self.alter_list:
+            logging.info(f"alter number : {self.alter_list.index(alter) + 1}")
             source_location = alter.get_source_location()
-            user_prompt = f"source code at {source_location} : " + utils.find_code_line(source_location) + "\n"
-            allowed_tools = ["dump_source_snippet", "dump_source_line", "find_callee", "find_current_function", "find_callers"]
+            user_prompt = f"source code at {source_location} : " + (utils.find_code_line(source_location) or "") + "\n"
+            allowed_tools = ["dump_source_snippet", "dump_source_line"]
             if alter.get_leak_type() == "NeverFree":
-                pass  # 使用默认的 allowed_tools
+                allowed_tools.append("find_current_function")
+                allowed_tools.append("find_callers")
+                allowed_tools.append("find_function_body")
             elif alter.get_leak_type() == "PartialLeak" or alter.get_leak_type() == "Double Free":
+                allowed_tools.append("find_current_function")
+                allowed_tools.append("find_callers")
+                allowed_tools.append("find_function_body")
                 allowed_tools.append("get_path_cond_func")
+            logging.info(f"Model : {LLM_TYPE}")
+            logging.info(f"User Prompt : {user_prompt}")
+            logging.info(f"Alter Prompt : {alter.to_prompt()}")
             if LLM_TYPE == "Gemini":
                 gemini = Gemini(model_name="gemini-2.5-flash")
                 response = gemini.responseForAlter(Alter_prompt=alter.to_prompt(), user_prompt=user_prompt, allowed_tool_names=allowed_tools)
-                print(response)
             elif LLM_TYPE == "DeepSeek":
                 ds = DeepSeek(model_name="deepseek-chat")
                 response = ds.responseForAlter(Alter_prompt=alter.to_prompt(), user_prompt=user_prompt, allowed_tool_names=allowed_tools)
-                print(response)
             else:
                 raise ValueError(f"Unknown LLM type: {LLM_TYPE}")
-            # print(response.text)
-            res_file_path = os.path.join(RES_ROOT_PATH, f"RES_{self.alter_file_name}")
-            with open(res_file_path, 'w') as f:
-                f.write(source_location + "\n")
-                f.write(alter.to_prompt() + "\n")
-                f.write(response.text)
         return
 
 if __name__ == '__main__':
     handler = AlterHandler()
-    handler.read_alter_file(r"SARIF", "libtiff_MEMORYLEAK.txt")
+    handler.read_alter_file(r"SARIF", SARIF_NAME)
     handler.handle_memory_leak()
