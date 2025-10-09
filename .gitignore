@@ -4,5 +4,9 @@
 .pytest_cache
 __pycache__
 pipcache/
+/GRAPH
 /PUT/*
+/RES/*
+/SARIF/*
+/REF/*
 /FP

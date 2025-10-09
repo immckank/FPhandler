@@ -1,3 +1,0 @@
-         PartialLeak : memory allocation at : (CallICFGNode: { "ln": 369, "cl": 32, "fl": "tif_getimage.c" })
-                 conditional free path:
-                  --> ({ "ln": 245, "cl": 6, "fl": "tif_getimage.c" }|True)

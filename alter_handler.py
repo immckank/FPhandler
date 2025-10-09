@@ -1,11 +1,12 @@
 import os
 import re
 import json
-import utils
+
 from memory_defect import NeverFree, DoubleFree, PartialLeak
 from llm import Gemini, DeepSeek
 
 from config import *
+from utils import *
 
 class AlterHandler():
     def __init__(self):
@@ -106,7 +107,7 @@ class AlterHandler():
         for alter in self.alter_list:
             logging.info(f"alter number : {self.alter_list.index(alter) + 1}")
             source_location = alter.get_source_location()
-            user_prompt = f"source code at {source_location} : " + (utils.find_code_line(source_location) or "") + "\n"
+            user_prompt = f"source code at {source_location} : " + (find_code_line(source_location) or "") + "\n"
             allowed_tools = ["dump_source_snippet", "dump_source_line"]
             if alter.get_leak_type() == "NeverFree":
                 allowed_tools.append("find_current_function")
@@ -116,7 +117,8 @@ class AlterHandler():
                 allowed_tools.append("find_current_function")
                 allowed_tools.append("find_callers")
                 allowed_tools.append("find_function_body")
-                allowed_tools.append("get_path_cond_func")
+                # TODO 模型数不明白行数
+                # allowed_tools.append("get_path_cond_func")
             logging.info(f"Model : {LLM_TYPE}")
             logging.info(f"User Prompt : {user_prompt}")
             logging.info(f"Alter Prompt : {alter.to_prompt()}")
@@ -132,5 +134,5 @@ class AlterHandler():
 
 if __name__ == '__main__':
     handler = AlterHandler()
-    handler.read_alter_file(r"SARIF", SARIF_NAME)
+    handler.read_alter_file(SARIF_ROOT_PATH, SARIF_NAME)
     handler.handle_memory_leak()

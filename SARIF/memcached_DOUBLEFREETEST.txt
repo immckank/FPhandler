@@ -1,7 +1,0 @@
-#######################################################
-         Double Free : memory allocation at : (CallICFGNode: { "ln": 820, "cl": 20, "fl": "storage.c" })
-                 double free path:
-                  --> ({ "ln": 824, "cl": 5, "fl": "storage.c" }|True)
-                  --> ({ "ln": 865, "cl": 9, "fl": "storage.c" }|True)
-                  --> ({ "ln": 867, "cl": 34, "fl": "storage.c" }|True)
-                  --> ({ "ln": 867, "cl": 13, "fl": "storage.c" }|True)

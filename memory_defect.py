@@ -1,5 +1,4 @@
-
-import utils
+from utils import *
 
 '''prompt format
 Type of bug: PartialLeak.
@@ -55,14 +54,11 @@ class NeverFree(MemoryLeak):
         Type_prompt = f"Type of bug: {self.leak_type}. \n"
         Guidance_prompt = f"Guidance on triaging this type of bug: The warning at a specific source line is a false positive if the memory has been freed, or it has been transferred to a longer-lived context.\n"
         Location_prompt = f"Source location: {self.source_location}  \n"
-        variable_name = utils.extract_lhs_variable(utils.find_code_line(self.source_location))
+        variable_name = extract_lhs_variable(find_code_line(self.source_location))
         if variable_name:
             Message_prompt = f"Message: The variable '{variable_name}' allocated at {self.source_location} may not be freed along all the paths that reach the end of the function.  \n"
         else:
             Message_prompt = f"Message: The memory allocated at {self.source_location} may not be freed along all paths that reach the end of the function.  \n"
-        # TODO: Function code:
-        # Code_prompt = f"TODO: Function code:  \n"
-        Code_prompt = f""
         Task_prompt = f"Task: Please classify this alert as TP, FP, or UNCERTAIN, and provide your reasoning."
         return Type_prompt + Guidance_prompt + Location_prompt + Message_prompt + Code_prompt + Task_prompt
 
@@ -90,19 +86,19 @@ class PartialLeak(MemoryLeak):
 
     def to_prompt(self):
         Type_prompt = f"Type of bug: {self.leak_type}. \n"
-        # TODO: Guidance on triaging this type of bug:
         Guidance_prompt = f"Guidance on triaging this type of bug: The warning at a specific source line is a false positive if the member is freed by other means, or its ownership is managed separately from the parent structure.\n"
         Location_prompt = f"Source location: {self.source_location}  \n"
-        variable_name = utils.extract_lhs_variable(utils.find_code_line(self.source_location))
+        variable_name = extract_lhs_variable(find_code_line(self.source_location))
         if variable_name:
             Message_prompt = f"Message: The variable '{variable_name}' allocated at {self.source_location} may not be freed along some paths that reach the end of the function.  \n"
         else:
             Message_prompt = f"Message: The memory allocated at {self.source_location} may not be freed along some paths that reach the end of the function.  \n"
         if self.conditional_free_paths:
-            Message_prompt += "The following are the conditions and locations of conditional free paths:\n"
+            Message_prompt += "There exists at least one path that can free the memory, and this path requires"
             for idx, cond_path in enumerate(self.conditional_free_paths):
-                Message_prompt += f"  Path {idx+1}: Condition '{cond_path.get_condition()}' at {cond_path.get_condition_location()}\n"
-        # Code_prompt = f"TODO: Function code:  \n"
+                Message_prompt += f" the condition at {cond_path.get_condition_location()} to be '{cond_path.get_condition()}'"
+                Message_prompt += f" and"
+            Message_prompt = Message_prompt[:-4] + ".\n"
         Task_prompt = f"Task: Please classify this alert as TP, FP, or UNCERTAIN, and provide your reasoning."
         return Type_prompt + Guidance_prompt + Location_prompt + Message_prompt + Task_prompt
 
@@ -135,17 +131,17 @@ class DoubleFree(MemoryLeak):
         Type_prompt = f"Type of bug: {self.leak_type}. \n"
         Guidance_prompt = f"Guidance on triaging this type of bug: The warning at a specific source line is a false positive if \n"
         Location_prompt = f"Source location: {self.source_location}  \n"
-        variable_name = utils.extract_lhs_variable(utils.find_code_line(self.source_location))
+        variable_name = extract_lhs_variable(find_code_line(self.source_location))
         if variable_name:
             Message_prompt = f"Message: The variable '{variable_name}' allocated at {self.source_location} is double freed.  \n"
         else:
             Message_prompt = f"Message: The memory allocated at {self.source_location} is double freed.  \n"
         if self.double_free_paths:
-            Message_prompt += "The following are the conditions and locations of conditional free paths:\n"
-            for idx, free_path in enumerate(self.double_free_paths):
-                Message_prompt += f"  Path {idx + 1}: Condition '{free_path.get_condition()}' at {free_path.get_double_location()}\n"
-
-        Code_prompt = f"TODO: Function code:  \n"
+            Message_prompt += "There exists at least one path that leads to a double free, and this path requires "
+            for idx, cond_path in enumerate(self.conditional_free_paths):
+                Message_prompt += f" the condition at {cond_path.get_condition_location()} to be'{cond_path.get_condition()}'"
+                Message_prompt += f" and"
+            Message_prompt = Message_prompt[:-4] + ".\n"
         Task_prompt = f"Task: Please classify this alert as TP, FP, or UNCERTAIN, and provide your reasoning."
         return Type_prompt + Guidance_prompt + Location_prompt + Message_prompt + Code_prompt + Task_prompt
 

@@ -4,10 +4,11 @@ import datetime
 
 PUT_ROOT_PATH = "PUT"
 RES_ROOT_PATH = "RES"
+SARIF_ROOT_PATH = "SARIF"
 
 
 PROJECT_NAME = "memcached"
-SARIF_NAME = "memcached.txt"
+SARIF_NAME = "memcached_PARTIALLEAKTEST.txt"
 PUT_NAME = "memcached"
 
 

@@ -1,8 +1,0 @@
-tif_getimage.c:369
-Type of bug: PartialLeak. 
-Guidance on triaging this type of bug: The warning at a specific source line is a false positive if the member is freed by other means, or its ownership is managed separately from the parent structure.
-Source location: tif_getimage.c:369  
-Message: The variable 'img->greencmap' allocated at tif_getimage.c:369 may not be freed along some paths that reach the end of the function.  
-The following are the conditions and locations of conditional free paths:
-  Path 1: Condition 'True' at tif_getimage.c:245
-Task: Please classify this alert as TP, FP, or UNCERTAIN, and provide your reasoning.
