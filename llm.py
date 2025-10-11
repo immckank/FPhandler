@@ -229,15 +229,17 @@ class DeepSeek(AnalysisModel):
                 allowed_tools.append({
                     "type": "function",
                     "function": {
-                        "name": "get_path_cond_func",
+                        "name": "get_path_cond_func_",
                         "description": "Finds all paths between a start and target location, collecting information about function calls and conditional branches along the way.",
                         "parameters": {
                             "type": "object",
                             "properties": {
                                 "start_location": {"type": "string", "description": "The start source location, in 'filename.c:line_number' format."},
-                                "target_location": {"type": "string", "description": "The target source location, in 'filename.c:line_number' format."}
+                                "start_code": {"type": "string", "description": "The source code of the start location."},
+                                "target_location": {"type": "string", "description": "The target source location, in 'filename.c:line_number' format."},
+                                "target_code": {"type": "string", "description": "The source code of the target location."}
                             },
-                            "required": ["start_location", "target_location"]
+                            "required": ["start_location", "start_code", "target_location", "target_code"]
                         }
                     }
                 })
@@ -282,8 +284,8 @@ class DeepSeek(AnalysisModel):
                     function_response = find_callers(**tool_arguments)
                 elif tool_function_name == "find_function_body":
                     function_response = find_function_body(**tool_arguments)
-                elif tool_function_name == "get_path_cond_func":
-                    function_response = get_path_cond_func(**tool_arguments)
+                elif tool_function_name == "get_path_cond_func_":
+                    function_response = get_path_cond_func_(**tool_arguments)
                 else:
                     # It's good practice to handle unknown tool calls
                     self.analysis_logger.error(f"Unknown tool call: {tool_function_name}")

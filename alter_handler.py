@@ -125,11 +125,10 @@ class AlterAnalyzer():
                 allowed_tools.append("find_current_function")
                 allowed_tools.append("find_callers")
                 allowed_tools.append("find_function_body")
-                # TODO 模型数不明白行数
-                # allowed_tools.append("get_path_cond_func")
+                allowed_tools.append("get_path_cond_func")
             main_logger.info(f"Model : {LLM_TYPE}")
-            main_logger.info(f"User Prompt : {user_prompt}")
-            main_logger.info(f"Alter Prompt : {alter.to_prompt()}")
+            main_logger.info(f"User Prompt : \n{user_prompt}")
+            main_logger.info(f"Alter Prompt : \n{alter.to_prompt()}")
             self.analyzer.responseForAlter(user_prompt, alter.to_prompt(), allowed_tools)
         return
 

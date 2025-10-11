@@ -4,7 +4,7 @@ import logging
 import sys
 import json
 import re
-from utils import find_file_path
+from utils import *
 from typing import List, Dict, Any, Optional, Set
 
 def _configure_libclang():
@@ -196,11 +196,8 @@ def find_current_function(source_location: str) -> Optional[Dict[str, Any]]:
     """
     # 基于LLVM来实现不要使用基于文本的查找
     # 检查source_location是否合法
-    errer_json = {}
     if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', source_location):
-        logging.error(f"Invalid source location format: {source_location}")
-        error_json = {"error": "Invalid source location format, source_location should be in the format 'filename.c:line_number'."}
-        return errer_json
+        return {"error": "Invalid source location format, source_location should be in the format 'filename.c:line_number'."}
     command_caller = CommandCaller()
     res = command_caller.call_graph_reader_with_args(
         f"-find-function-body={source_location}", 
@@ -210,7 +207,7 @@ def find_current_function(source_location: str) -> Optional[Dict[str, Any]]:
         res_json = json.loads(res)
         error = res_json.get("error", None)
         if error:
-            error_json = {"error": f"Error finding current function for {source_location}, check if the location is right. {error}"}
+            return {"error": f"Error finding current function for {source_location}, check if the location is right."}
         else:
             # 删除error属性
             del res_json["error"]
@@ -218,8 +215,7 @@ def find_current_function(source_location: str) -> Optional[Dict[str, Any]]:
             # 为func添加func_body属性
             res_json["function_body"] = func_body
             return res_json
-    error_json = {"error": "Unknown error"}
-    return error_json
+    return {"error": "Unknown error"}
 
 '''
 structure ctags
@@ -574,6 +570,82 @@ def get_shortest_path_cond(start_location: str, target_location: str):
                 
     return None
     
+# get_path_cond_func
+# 找到startline到targetline所有路径 收集路径中未返回的调用及条件分支
+# return 
+def get_path_cond_func_(start_location: str, start_code: str, target_location: str, target_code: str) -> Optional[List[Dict[str, Any]]]:
+    """Finds all paths between a start and target location, collecting information
+    about function calls and conditional branches along the way.
+
+    Args:
+        start_location: The start source location, in 'filename.c:line_number' format.
+        start_code: The source code of the start location.
+        target_location: The target source location, in 'filename.c:line_number' format.
+        target_code: The source code of the target location.
+
+    Returns:
+        A list of dictionaries, where each dictionary represents a path. Each path
+        contains a list of 'events' (function calls or conditions) with their
+        location and source code. Returns None if an error occurs or no paths are found.
+        Example:
+        [
+            {
+                "events": [
+                    {"type": "condition", "location": "restart.c:80", "code": "if (foo)"},
+                    {"type": "call", "location": "restart.c:85", "code": "bar()"}
+                ]
+            }
+        ]
+    """
+    if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', start_location):
+        return {"error": "Invalid source location format, source_location should be in the format 'filename.c:line_number'."}
+    if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', target_location):
+        return {"error": "Invalid source location format, source_location should be in the format 'filename.c:line_number'."}
+    # 检索start_location处的代码
+    actual_start_code = find_code_line(start_location)
+    # 匹配start_code
+    if not start_code.strip() == actual_start_code.strip():
+        line_number = start_location.split(":")[1]
+        line_number = int(line_number)
+        for i in range(max(1, line_number-5), line_number+5):
+            loc = f"{start_location.split(':')[0]}:{i}"
+            code_line = find_code_line(loc)
+            if code_line.strip() == start_code.strip():
+                line_number = i
+                start_location = f"{start_location.split(':')[0]}:{line_number}"
+                break
+    if not target_code.strip() == find_code_line(target_location):
+        line_number = target_location.split(":")[1]
+        line_number = int(line_number)
+        for i in range(max(1, line_number-5), line_number+5):
+            loc = f"{target_location.split(':')[0]}:{i}"
+            code_line = find_code_line(loc)
+            if code_line.strip() == target_code.strip():
+                line_number = i
+                target_location = f"{target_location.split(':')[0]}:{line_number}"
+                break
+    command_caller = CommandCaller()
+    res = command_caller.call_graph_reader_with_args(
+        f"-path-cond-func-start={start_location}",
+        f"-path-cond-func-end={target_location}",
+        os.path.join(PUT_ROOT_PATH, f"{PROJECT_NAME}.bc")
+    )
+    if res:
+        res_json = json.loads(res)
+        error = res_json.get("error", None)
+        if error:
+            return {"error" : f"Error finding path condition function for {start_location} to {target_location}, check if the location is right."}
+        else:
+            del res_json["error"]
+            paths = res_json.get("paths", [])
+            for path in paths:
+                events = path.get("events", [])
+                for event in events:
+                    location = event.get("location", None)
+                    if location:
+                        event["code"] = find_code_line(location)
+            return res_json.get("paths", [])
+    return None
 
 # get_path_cond_func
 # 找到startline到targetline所有路径 收集路径中未返回的调用及条件分支
