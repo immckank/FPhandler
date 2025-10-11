@@ -70,7 +70,6 @@ def set_conclusion(classification: str, reason: str) -> Dict[str, str]:
     message = {"classification" : classification, "reason" : reason}
     return message
 
-
 '''
 structure function
 '''

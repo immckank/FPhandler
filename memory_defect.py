@@ -1,15 +1,5 @@
 from utils import *
 
-'''prompt format
-Type of bug: PartialLeak.
-TODO: Guidance on triaging this type of bug: The warning at a specific source line is a false positive if    
-Source location: memcached/slab_automove.c:37
-Message: The variable 'a' allocated at memcached/slab_automove.c:37 may not be freed along some paths that reach the end of the function.
-The following are the conditions and locations of conditional free paths:
-  Path 1: Condition 'True' at memcached/slab_automove.c:43
-Task: Please classify this alert as TP, FP, or UNCERTAIN, and provide your reasoning.
-'''
-
 class MemoryDefect:
     def __init__(self, defect_type, source_location):
         # 构造时传入的source_location都是 文件名 : 行号
@@ -54,13 +44,14 @@ class NeverFree(MemoryLeak):
         Type_prompt = f"Type of bug: {self.leak_type}. \n"
         Guidance_prompt = f"Guidance on triaging this type of bug: The warning at a specific source line is a false positive if the memory has been freed, or it has been transferred to a longer-lived context.\n"
         Location_prompt = f"Source location: {self.source_location}  \n"
+        Code_prompt = f"Source code at {self.source_location} here is : {find_code_line(self.source_location)}\n"
         variable_name = extract_lhs_variable(find_code_line(self.source_location))
         if variable_name:
             Message_prompt = f"Message: The variable '{variable_name}' allocated at {self.source_location} may not be freed along all the paths that reach the end of the function.  \n"
         else:
             Message_prompt = f"Message: The memory allocated at {self.source_location} may not be freed along all paths that reach the end of the function.  \n"
         Task_prompt = f"Task: Please classify this alert as TP, FP, or UNCERTAIN, and provide your reasoning."
-        return Type_prompt + Guidance_prompt + Location_prompt + Message_prompt + Code_prompt + Task_prompt
+        return Type_prompt + Guidance_prompt + Location_prompt + Code_prompt + Message_prompt + Code_prompt + Task_prompt
 
 class PartialLeak(MemoryLeak):
     class conditional_path:
@@ -88,6 +79,7 @@ class PartialLeak(MemoryLeak):
         Type_prompt = f"Type of bug: {self.leak_type}. \n"
         Guidance_prompt = f"Guidance on triaging this type of bug: The warning at a specific source line is a false positive if the member is freed by other means, or its ownership is managed separately from the parent structure.\n"
         Location_prompt = f"Source location: {self.source_location}  \n"
+        Code_prompt = f"Source code at {self.source_location} here is : {find_code_line(self.source_location)}\n"
         variable_name = extract_lhs_variable(find_code_line(self.source_location))
         if variable_name:
             Message_prompt = f"Message: The variable '{variable_name}' allocated at {self.source_location} may not be freed along some paths that reach the end of the function.  \n"
@@ -100,7 +92,7 @@ class PartialLeak(MemoryLeak):
                 Message_prompt += f" and"
             Message_prompt = Message_prompt[:-4] + ".\n"
         Task_prompt = f"Task: Please classify this alert as TP, FP, or UNCERTAIN, and provide your reasoning."
-        return Type_prompt + Guidance_prompt + Location_prompt + Message_prompt + Task_prompt
+        return Type_prompt + Guidance_prompt + Location_prompt + Code_prompt + Message_prompt + Task_prompt
 
 class DoubleFree(MemoryLeak):
     class double_path:
@@ -131,6 +123,7 @@ class DoubleFree(MemoryLeak):
         Type_prompt = f"Type of bug: {self.leak_type}. \n"
         Guidance_prompt = f"Guidance on triaging this type of bug: The warning at a specific source line is a false positive if \n"
         Location_prompt = f"Source location: {self.source_location}  \n"
+        Code_prompt = f"Source code at {self.source_location} here is : {find_code_line(self.source_location)}\n"
         variable_name = extract_lhs_variable(find_code_line(self.source_location))
         if variable_name:
             Message_prompt = f"Message: The variable '{variable_name}' allocated at {self.source_location} is double freed.  \n"
@@ -143,8 +136,7 @@ class DoubleFree(MemoryLeak):
                 Message_prompt += f" and"
             Message_prompt = Message_prompt[:-4] + ".\n"
         Task_prompt = f"Task: Please classify this alert as TP, FP, or UNCERTAIN, and provide your reasoning."
-        return Type_prompt + Guidance_prompt + Location_prompt + Message_prompt + Code_prompt + Task_prompt
-
+        return Type_prompt + Guidance_prompt + Location_prompt + Code_prompt + Message_prompt + Code_prompt + Task_prompt
 
 class UseAfterFree(MemoryDefect):
     def __init__(self, source_location):

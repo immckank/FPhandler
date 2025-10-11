@@ -114,7 +114,8 @@ class AlterAnalyzer():
             alter_index = self.alter_list.index(alter)
             main_logger.info(f"analysing alter index : {alter_index} / {len(self.alter_list)}")
             source_location = alter.get_source_location()
-            user_prompt = f"source code at {source_location} : " + (find_code_line(source_location) or "") + "\n"
+            # TODO: better user prompt
+            user_prompt = ""
             allowed_tools = ["dump_source_snippet", "dump_source_line"]
             if alter.get_leak_type() == "NeverFree":
                 allowed_tools.append("find_current_function")

@@ -3,7 +3,6 @@ from config import *
 import logging
 import datetime
 
-
 # 设置日志
 def setup_logger(log_type):
     main_formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -48,11 +47,6 @@ def setup_logger(log_type):
         return logger
     else:
         raise ValueError("Invalid log type")
-
-        
-
-
-
 
 # 找到指定项目中指定文件名的路径
 def find_file_path(file_name):
