@@ -8,8 +8,14 @@ from llm import Gemini, DeepSeek
 from config import *
 from utils import *
 
-class AlterHandler():
+class AlterAnalyzer():
     def __init__(self):
+        if LLM_TYPE == "Gemini":
+            self.analyzer = Gemini(model_name="gemini-2.5-flash")
+        elif LLM_TYPE == "DeepSeek":
+            self.analyzer = DeepSeek(model_name="deepseek-chat")
+        else:
+            raise ValueError(f"Unknown LLM type: {LLM_TYPE}")
         self.alter_list = []
         self.alter_file_name = None
         self.LEAK_RE = re.compile(
@@ -102,10 +108,11 @@ class AlterHandler():
         return 
 
     def handle_memory_leak(self):
-        logging.info(f"total alter number: {len(self.alter_list)}")
-        # 处理当前alter_list中的每个alter
+        main_logger = logging.getLogger("main")
+        main_logger.info(f"total alter number: {len(self.alter_list)}")
         for alter in self.alter_list:
-            logging.info(f"alter number : {self.alter_list.index(alter) + 1}")
+            alter_index = self.alter_list.index(alter)
+            main_logger.info(f"analysing alter index : {alter_index} / {len(self.alter_list)}")
             source_location = alter.get_source_location()
             user_prompt = f"source code at {source_location} : " + (find_code_line(source_location) or "") + "\n"
             allowed_tools = ["dump_source_snippet", "dump_source_line"]
@@ -119,20 +126,22 @@ class AlterHandler():
                 allowed_tools.append("find_function_body")
                 # TODO 模型数不明白行数
                 # allowed_tools.append("get_path_cond_func")
-            logging.info(f"Model : {LLM_TYPE}")
-            logging.info(f"User Prompt : {user_prompt}")
-            logging.info(f"Alter Prompt : {alter.to_prompt()}")
-            if LLM_TYPE == "Gemini":
-                gemini = Gemini(model_name="gemini-2.5-flash")
-                response = gemini.responseForAlter(Alter_prompt=alter.to_prompt(), user_prompt=user_prompt, allowed_tool_names=allowed_tools)
-            elif LLM_TYPE == "DeepSeek":
-                ds = DeepSeek(model_name="deepseek-chat")
-                response = ds.responseForAlter(Alter_prompt=alter.to_prompt(), user_prompt=user_prompt, allowed_tool_names=allowed_tools)
-            else:
-                raise ValueError(f"Unknown LLM type: {LLM_TYPE}")
+            main_logger.info(f"Model : {LLM_TYPE}")
+            main_logger.info(f"User Prompt : {user_prompt}")
+            main_logger.info(f"Alter Prompt : {alter.to_prompt()}")
+            self.analyzer.responseForAlter(user_prompt, alter.to_prompt(), allowed_tools)
         return
 
-if __name__ == '__main__':
-    handler = AlterHandler()
-    handler.read_alter_file(SARIF_ROOT_PATH, SARIF_NAME)
-    handler.handle_memory_leak()
+if __name__ == "__main__":
+    # handler = AlterHandler()
+    # if not SARIF_NAME:
+    #     # 处理SARIF_ROOT_PATH下每一个SARIF文件
+    #     for root, dirs, files in os.walk(SARIF_ROOT_PATH):
+    #         for file in files:
+    #             if file.endswith(".sarif"):
+    #                 SARIF_NAME = file
+    #                 handler.read_alter_file(SARIF_ROOT_PATH, file)
+    # else:
+    #     handler.read_alter_file(SARIF_ROOT_PATH, SARIF_NAME)
+    # handler.handle_memory_leak()
+    pass

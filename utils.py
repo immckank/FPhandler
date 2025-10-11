@@ -1,10 +1,57 @@
 import os
-import config
-# import networkx as nx
-# import pydot
+from config import *
+import logging
+import datetime
 
-PUT_ROOT_PATH = config.PUT_ROOT_PATH
-PROJECT_NAME = config.PROJECT_NAME
+
+# 设置日志
+def setup_logger(log_type):
+    main_formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    llm_formatter = logging.Formatter("%(message)s")
+    time_str = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    if log_type == "main":
+        # 3. 检测一次运行时所有相关配置的日志
+        # 命名： sarif警报名/sarif目录名称 时间
+        # 内容： sarif警报名/sarif目录名称 共计几个sarif警报名 几个报错条目 使用的模型
+        sarif = SARIF_ROOT_PATH if sarif_name is None else sarif_name.split('.')[0]
+        log_file_name = f"{sarif}-{time_str}.log"
+        log_file_path = os.path.join(RES_ROOT_PATH, "RUN", log_file_name)
+        logger = logging.getLogger("main")
+        logger.setLevel(logging.INFO)
+        file_handler = logging.FileHandler(log_file_path, mode="w")
+        file_handler.setFormatter(main_formatter)
+        logger.addHandler(file_handler)
+        return logger
+    elif log_type == "result":
+        # 2. 针对一个sarif警报中的一条报错信息 生成一份 分析模型处理结果 的日志
+        # 命名： result sarif警报名 报错条目序号 模型名 时间
+        # 内容： 全部用户提示词 模型结果
+        log_file_name = f"result_{sarif_name.split('.')[0]}_{alter_index}_{LLM_TYPE}-{time_str}.log"
+        log_file_path = os.path.join(RES_ROOT_PATH, "RESULT", log_file_name)
+        logger = logging.getLogger(f"result_{sarif_name.split('.')[0]}_{alter_index}_{LLM_TYPE}")
+        logger.setLevel(logging.INFO)
+        file_handler = logging.FileHandler(log_file_path, mode="a")
+        file_handler.setFormatter(llm_formatter)
+        logger.addHandler(file_handler)
+        return logger
+    elif log_type == "analysis":
+        # 1. 针对一个sarif警报中的一条报错信息 生成一份 分析模型处理流程 的日志
+        # 命名： analysis sarif警报名 报错条目序号 模型名 时间
+        # 内容： 全部用户提示词 {模型思考 模型工具调用 工具返回} {模型思考 模型工具调用 工具返回} ...
+        log_file_name = f"analysis_{sarif_name.split('.')[0]}_{alter_index}_{LLM_TYPE}-{time_str}.log"
+        log_file_path = os.path.join(RES_ROOT_PATH, "TRACE", log_file_name)
+        logger = logging.getLogger(f"analysis_{sarif_name.split('.')[0]}_{alter_index}_{LLM_TYPE}")
+        logger.setLevel(logging.INFO)
+        file_handler = logging.FileHandler(log_file_path, mode="a")
+        file_handler.setFormatter(llm_formatter)
+        logger.addHandler(file_handler)
+        return logger
+    else:
+        raise ValueError("Invalid log type")
+
+        
+
+
 
 
 # 找到指定项目中指定文件名的路径

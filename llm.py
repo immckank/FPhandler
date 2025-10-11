@@ -9,6 +9,8 @@ import logging
 
 from analysis_operators import *
 from config import *
+from utils import *
+
 
 class judgeResult(BaseModel):
     classification: str
@@ -21,22 +23,24 @@ Each user input will include: the bug type, source file name and line number of 
 Guidelines: Focus only on the specified bug type and location. Don't speculate about future code changes. Think step by step. Your analysis must be based on the source code.
 """
 
-class Model():
+class AnalysisModel():
     def __init__(self):
+        self.analysis_logger = setup_logger(log_type="analysis") 
+        self.result_logger = setup_logger(log_type="result")
         pass
     
-    def responseToAlter(self, Alter_prompt, user_prompt=""):
+    def responseToAlter(self, alter_prompt, user_prompt=""):
         return None
 
-    def responseForAlter(self, Alter_prompt, user_prompt=""):
+    def responseForAlter(self, alter_prompt, user_prompt=""):
         return None
 
-class Gemini(Model):
+class Gemini(AnalysisModel):
     def __init__(self, model_name="gemini-2.5-flash"):
         super().__init__()
         self.model_name = model_name
                  
-    def resposeToAlter(self, Alter_prompt, user_prompt=""):
+    def resposeToAlter(self, alter_prompt, user_prompt=""):
         config = types.GenerateContentConfig(
             system_instruction=SYS_PROMPT,
             response_schema=judgeResult,
@@ -45,12 +49,12 @@ class Gemini(Model):
         client = genai.Client()
         response = client.models.generate_content(
             model=self.model_name,
-            contents=Alter_prompt + "\n" + user_prompt,
+            contents=alter_prompt + "\n" + user_prompt,
             config=config
         )
         return response.text
     
-    def responseForAlter(self, Alter_prompt, user_prompt="", allowed_tool_names = []):
+    def responseForAlter(self, alter_prompt, user_prompt="", allowed_tool_names = []):
         allowed_tools = []
         for tool_name in allowed_tool_names:
             if tool_name == "dump_source_snippet":
@@ -83,7 +87,7 @@ class Gemini(Model):
         )
         return response
     
-class DeepSeek(Model):
+class DeepSeek(AnalysisModel):
     def __init__(self, model_name="deepseek-chat"):
         super().__init__()
         self.model_name = model_name
@@ -92,20 +96,41 @@ class DeepSeek(Model):
             base_url="https://api.deepseek.com",
         )
         
-    def send_message(self, messages, tools):
+    def send_message(self, messages, tools=""):
         response = self.client.chat.completions.create(
             model=self.model_name,
             messages=messages,
             tools=tools
         )
-        return response.choices[0].message
-                
+        return response.choices[0].message     
             
-    def responseToAlter(self, Alter_prompt, user_prompt=""):
+    def responseToAlter(self, alter_prompt, user_prompt=""):
         return None
     
-    def responseForAlter(self, Alter_prompt, user_prompt="", allowed_tool_names = []):
+    def responseForAlter(self, alter_prompt, user_prompt="", allowed_tool_names = []):
         allowed_tools = []
+        allowed_tools.append({
+            "type": "function",
+            "function": {
+                "name": "set_conclusion",
+                "description": "Sets the final conclusion for an alert analysis. This function should be called at the end of an analysis to provide a definitive classification and the reasoning behind it.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "classification": {
+                            "type": "string",
+                            "description": "The classification of the alert, must be one of 'FP' (False Positive), 'TP' (True Positive), or 'UNCERTAIN'.",
+                            "enum": ["FP", "TP", "UNCERTAIN"]
+                        },
+                        "reason": {
+                            "type": "string",
+                            "description": "A detailed explanation for the given classification."
+                        }
+                    },
+                    "required": ["classification", "reason"]
+                }
+            }
+        })
         for tool_name in allowed_tool_names:
             if tool_name == "dump_source_snippet":
                 allowed_tools.append({
@@ -218,18 +243,33 @@ class DeepSeek(Model):
                 })
             else:
                 raise ValueError(f"Unknown tool name: {tool_name}")
+        prompt = alter_prompt + "\n" + user_prompt
+        self.analysis_logger.info(f"Prompt: {prompt}")
+        self.result_logger.info(f"Prompt: {prompt}")
         messages = [
             {"role": "system", "content": SYS_PROMPT},
-            {"role": "user", "content": Alter_prompt + "\n" + user_prompt}
+            {"role": "user", "content": prompt}
         ]
         response = self.send_message(messages, allowed_tools)
-        logging.info(f"Model response: {response.content}")
+        self.analysis_logger.info(f"Model response: {response.content}")
         messages.append(response)
         while response.tool_calls:
             for tool_call in response.tool_calls:
                 tool_function_name = tool_call.function.name
                 tool_arguments = json.loads(tool_call.function.arguments)
-                logging.info(f"Calling tool: {tool_function_name} with args: {tool_arguments}")
+                self.analysis_logger.info(f"Calling tool: {tool_function_name} with args: {tool_arguments}")
+                if tool_function_name == "set_conclusion":
+                    function_response = set_conclusion(**tool_arguments)
+                    if not isinstance(function_response, str):
+                        function_response = json.dumps(function_response)
+                    # 查询response中有没有error字段
+                    if "error" in function_response:
+                        continue
+                    else:
+                        # 说明正常得出了结论 可以返回
+                        self.analysis_logger.info(f"Tool response: {function_response}")
+                        self.result_logger.info(f"{function_response}")
+                        return
                 if tool_function_name == "dump_source_snippet":
                     function_response = dump_source_snippet(**tool_arguments)
                 elif tool_function_name == "dump_source_line":
@@ -246,15 +286,13 @@ class DeepSeek(Model):
                     function_response = get_path_cond_func(**tool_arguments)
                 else:
                     # It's good practice to handle unknown tool calls
-                    logging.error(f"Unknown tool call: {tool_function_name}")
+                    self.analysis_logger.error(f"Unknown tool call: {tool_function_name}")
                     function_response = f"Error: Tool '{tool_function_name}' not found."
-
-                logging.info(f"Tool response: {function_response}")
                 # Convert response to JSON string if it's not already a string
                 if not isinstance(function_response, str):
                     function_response = json.dumps(function_response)
-                    logging.info(f"Tool response converted to JSON: {function_response}")
-
+                
+                self.analysis_logger.info(f"Tool response: {function_response}")   
                 messages.append(
                     {
                         "tool_call_id": tool_call.id,
@@ -262,10 +300,8 @@ class DeepSeek(Model):
                         "content": function_response,
                     }
                 )
-            
             # Send the tool responses back to the model
             response = self.send_message(messages, allowed_tools)
-            logging.info(f"Model response: {response.content}")
+            self.analysis_logger.info(f"Model response: {response.content}")
             messages.append(response)
-
-        return response
+        return
