@@ -98,7 +98,7 @@ def find_callers(function_name: str) -> List[Dict[str, Any]]:
         res_json = json.loads(res)
         error = res_json.get("error", None)
         if error:
-            logging.error(f"Error finding callers for {function_name}: {error}")
+            return [{"error": f"error in finding call sites for function {function_name}, plesse check if the name is right. {error}"}]
         else:
             # 删除error属性
             del res_json["error"]
@@ -110,6 +110,7 @@ def find_callers(function_name: str) -> List[Dict[str, Any]]:
             return call_sites_list
     return []
 
+# 暂时不用了
 def find_callee(source_location: str) -> Optional[List[Dict[str, Any]]]:
     """Finds the function body of functions called at a specific source location.
 
@@ -173,8 +174,7 @@ def find_function_body(function_name: str) -> Optional[Dict[str, Any]]:
         res_json = json.loads(res)
         error = res_json.get("error", None)
         if error:
-            logging.error(f"Error finding function body for {function_name}: {error}")
-            return None
+            return {"error": f"Error finding function body for {function_name}, plesse check if the name is right. {error}"}
         func_body = dump_source_snippet(res_json["filename"], res_json['start_line'], res_json['end_line'])
         res_json["function_body"] = func_body
         return res_json
@@ -199,7 +199,7 @@ def find_current_function(source_location: str) -> Optional[Dict[str, Any]]:
     errer_json = {}
     if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', source_location):
         logging.error(f"Invalid source location format: {source_location}")
-        error_json = {"error": "Invalid source location format"}
+        error_json = {"error": "Invalid source location format, source_location should be in the format 'filename.c:line_number'."}
         return errer_json
     command_caller = CommandCaller()
     res = command_caller.call_graph_reader_with_args(
@@ -210,8 +210,7 @@ def find_current_function(source_location: str) -> Optional[Dict[str, Any]]:
         res_json = json.loads(res)
         error = res_json.get("error", None)
         if error:
-            logging.error(f"Error finding current function for {source_location}")
-            error_json = {"error": f"Error finding current function for {source_location}"}
+            error_json = {"error": f"Error finding current function for {source_location}, check if the location is right. {error}"}
         else:
             # 删除error属性
             del res_json["error"]
