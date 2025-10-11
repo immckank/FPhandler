@@ -602,28 +602,39 @@ def get_path_cond_func_(start_location: str, start_code: str, target_location: s
     if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', target_location):
         return {"error": "Invalid source location format, source_location should be in the format 'filename.c:line_number'."}
     # 检索start_location处的代码
-    actual_start_code = find_code_line(start_location)
-    # 匹配start_code
-    if not start_code.strip() == actual_start_code.strip():
+    found = True
+    if not start_code.strip() in find_code_line(start_location).strip():
+        found = False
         line_number = start_location.split(":")[1]
         line_number = int(line_number)
         for i in range(max(1, line_number-5), line_number+5):
             loc = f"{start_location.split(':')[0]}:{i}"
             code_line = find_code_line(loc)
-            if code_line.strip() == start_code.strip():
+            if start_code.strip() in code_line.strip():
                 line_number = i
                 start_location = f"{start_location.split(':')[0]}:{line_number}"
+                found = True
                 break
-    if not target_code.strip() == find_code_line(target_location):
+    if not found:
+        return {"error": "wrong line number for start_location, please check line number or start code."}
+    found = True
+    if not target_code.strip() in find_code_line(target_location).strip():
+        found = False
         line_number = target_location.split(":")[1]
         line_number = int(line_number)
         for i in range(max(1, line_number-5), line_number+5):
+            
             loc = f"{target_location.split(':')[0]}:{i}"
             code_line = find_code_line(loc)
-            if code_line.strip() == target_code.strip():
+            print(code_line)
+            if target_code.strip() in code_line.strip():
                 line_number = i
                 target_location = f"{target_location.split(':')[0]}:{line_number}"
+                found = True
                 break
+    if not found:
+        return {"error": "wrong line number for target_location, please check line number or start code."}
+    print(f"start loc : {start_location}")
     command_caller = CommandCaller()
     res = command_caller.call_graph_reader_with_args(
         f"-path-cond-func-start={start_location}",
@@ -634,6 +645,7 @@ def get_path_cond_func_(start_location: str, start_code: str, target_location: s
         res_json = json.loads(res)
         error = res_json.get("error", None)
         if error:
+            print(res)
             return {"error" : f"Error finding path condition function for {start_location} to {target_location}, check if the location is right."}
         else:
             del res_json["error"]
@@ -770,6 +782,10 @@ def dump_source_line(file_name: str, line_number: int) -> Optional[str]:
     return snippet.strip() if snippet else None
 
 if __name__ == '__main__':
+    # {'start_location': 'items.c:1557', 'start_code': 'calloc(1, sizeof(struct crawler_expired_data))', 
+    # 'target_location': 'items.c:1629', 'target_code': 'free(cdata)'}
+    print(get_path_cond_func_(start_location="items.c:1557", start_code="struct",
+                              target_location="items.c:1629", target_code="free(cdata)"))
     # # printFunctionCallSites(icfg, "stats_prefix_record_get");
     # print(find_callers("stats_prefix_record_get"))
     # # printCalleeFunctionBodyByLocation(icfg, "stats_prefix.c:118");
@@ -777,5 +793,5 @@ if __name__ == '__main__':
     # print(type(find_callee("stats_prefix.c:118")))
     # # printFunctionBodyByLocation(icfg, "stats_prefix.c:118");
     # print(find_current_function("stats_prefix.c:118"))
-    print(get_shortest_path_cond("restart.c:76", "restart.c:121"))
+    # print(get_shortest_path_cond("restart.c:76", "restart.c:121"))
     # print(find_var_definitions("memcached.c:18", "total_prefix_size"))
