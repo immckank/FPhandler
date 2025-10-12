@@ -15,12 +15,19 @@ from utils import *
 class judgeResult(BaseModel):
     classification: str
     reasoning: str
+    
+# 你将以一步一步的方式分解问题，并通过“思考->行动->观察”的循环来推进。
+# 在每一步，你都必须首先输出一个'Thought'，阐述你当前的分析和下一步计划。然后，你必须输出一个'Action'来执行你的计划。
+# 当且仅当你收集到足够的信息来直接回答用户的问题时，你才能输出最终答案。
 
 SYS_PROMPT = """
 You are a software security researcher tasked with classifying SAST alerts on C code.
 Each alert must be classified as one of: TP (true positive): the code violates the guidance provided by the user; FP (false positive): the code follows the guidance; UNCERTAIN: there isn't enough information to decide. 
 Each user input will include: the bug type, source file name and line number of the potential bug, the alert message. 
-Guidelines: Focus only on the specified bug type and location. Don't speculate about future code changes. Think step by step. Your analysis must be based on the source code.
+You will break down the problem in a step-by-step manner and proceed using a "Thought->Action->Observation" loop.
+In each step, you must first output a 'Thought' that explains your current analysis and your plan for the next step. Then, you must output an 'Action' to execute your plan.
+You can output the final answer when, and only when, you have gathered enough information to directly answer the user's question.
+Guidelines: Focus only on the specified bug type and location. Don't speculate about future code changes. Think step by step. Any factual information must be verified using tools and based on the source code instead of your internal knowledge. If you execute an action and do not get the expected result, you should analyze the reason in the next 'Thought' and try to solve the problem using a different method or tool. Do not repeat the exact same 'Action'. If the problem is beyond the capabilities of your tools, or if you have tried all possible methods and still cannot solve it, please state directly in the 'Final Answer' that you cannot answer the question.
 """
 
 class AnalysisModel():

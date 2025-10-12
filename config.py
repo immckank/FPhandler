@@ -8,7 +8,7 @@ PUT_NAME = "memcached"
 PROJECT_NAME = "memcached"
 
 SARIF_ROOT_PATH = "SARIF"
-sarif_name = "memcached_PARTIALLEAKTEST.txt"
+sarif_name = "memcached_NEVERFREETEST.txt"
 alter_index = 0
 
 RES_ROOT_PATH = "RES"

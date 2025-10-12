@@ -760,11 +760,9 @@ def dump_source_snippet(file_name: str, start_line: int, end_line: int) -> Optio
             lines = f.readlines()
             return "".join(lines[int(start_line) - 1:int(end_line)])
     except FileNotFoundError:
-        logging.error(f"File not found: {file_path}")
-        return None
+        return f"File not found: {file_path}"
     except IndexError:
-        logging.error(f"Line numbers out of range for file {file_path}")
-        return None
+        return f"Line numbers out of range for file {file_path}"
 
 def dump_source_line(file_name: str, line_number: int) -> Optional[str]:
     """Dumps a single line of source code from a file.
@@ -779,11 +777,15 @@ def dump_source_line(file_name: str, line_number: int) -> Optional[str]:
     file_path = find_file_path(file_name)
     file_path = os.path.join(PUT_ROOT_PATH, file_path)
     snippet = dump_source_snippet(file_name, line_number, line_number)
-    return snippet.strip() if snippet else None
+    return snippet.strip() if snippet else "The line number is invalid or out of range for the file."
 
 if __name__ == '__main__':
     # {'start_location': 'items.c:1557', 'start_code': 'calloc(1, sizeof(struct crawler_expired_data))', 
     # 'target_location': 'items.c:1629', 'target_code': 'free(cdata)'}
+    #1556     struct crawler_expired_data *cdata =
+    #1557 calloc(1, sizeof(struct crawler_expired_data));
+    #1630     free(cdata);
+
     print(get_path_cond_func_(start_location="items.c:1557", start_code="struct",
                               target_location="items.c:1629", target_code="free(cdata)"))
     # # printFunctionCallSites(icfg, "stats_prefix_record_get");
