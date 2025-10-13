@@ -14,6 +14,9 @@ def setup_logger(log_type):
         # 内容： sarif警报名/sarif目录名称 共计几个sarif警报名 几个报错条目 使用的模型
         sarif = SARIF_ROOT_PATH if sarif_name is None else sarif_name.split('.')[0]
         log_file_name = f"{sarif}-{time_str}.log"
+        # 如果不存在os.path.join(RES_ROOT_PATH, "RUN")创建一个
+        if not os.path.exists(os.path.join(RES_ROOT_PATH, "RUN")):
+            os.makedirs(os.path.join(RES_ROOT_PATH, "RUN"))
         log_file_path = os.path.join(RES_ROOT_PATH, "RUN", log_file_name)
         logger = logging.getLogger("main")
         logger.setLevel(logging.INFO)
@@ -26,6 +29,8 @@ def setup_logger(log_type):
         # 命名： result sarif警报名 报错条目序号 模型名 时间
         # 内容： 全部用户提示词 模型结果
         log_file_name = f"result_{sarif_name.split('.')[0]}_{alter_index}_{LLM_TYPE}-{time_str}.log"
+        if not os.path.exists(os.path.join(RES_ROOT_PATH, "RESULT")):
+            os.makedirs(os.path.join(RES_ROOT_PATH, "RESULT"))
         log_file_path = os.path.join(RES_ROOT_PATH, "RESULT", log_file_name)
         logger = logging.getLogger(f"result_{sarif_name.split('.')[0]}_{alter_index}_{LLM_TYPE}")
         logger.setLevel(logging.INFO)
@@ -38,6 +43,8 @@ def setup_logger(log_type):
         # 命名： analysis sarif警报名 报错条目序号 模型名 时间
         # 内容： 全部用户提示词 {模型思考 模型工具调用 工具返回} {模型思考 模型工具调用 工具返回} ...
         log_file_name = f"analysis_{sarif_name.split('.')[0]}_{alter_index}_{LLM_TYPE}-{time_str}.log"
+        if not os.path.exists(os.path.join(RES_ROOT_PATH, "TRACE")):
+            os.makedirs(os.path.join(RES_ROOT_PATH, "TRACE"))
         log_file_path = os.path.join(RES_ROOT_PATH, "TRACE", log_file_name)
         logger = logging.getLogger(f"analysis_{sarif_name.split('.')[0]}_{alter_index}_{LLM_TYPE}")
         logger.setLevel(logging.INFO)
