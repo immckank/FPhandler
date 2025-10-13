@@ -135,15 +135,4 @@ class AlterAnalyzer():
         return
 
 if __name__ == "__main__":
-    # handler = AlterHandler()
-    # if not SARIF_NAME:
-    #     # 处理SARIF_ROOT_PATH下每一个SARIF文件
-    #     for root, dirs, files in os.walk(SARIF_ROOT_PATH):
-    #         for file in files:
-    #             if file.endswith(".sarif"):
-    #                 SARIF_NAME = file
-    #                 handler.read_alter_file(SARIF_ROOT_PATH, file)
-    # else:
-    #     handler.read_alter_file(SARIF_ROOT_PATH, SARIF_NAME)
-    # handler.handle_memory_leak()
     pass

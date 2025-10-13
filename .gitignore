@@ -7,6 +7,6 @@ pipcache/
 /GRAPH
 /PUT/*
 /RES/*
-/SARIF/*
+/SAR/*
 /REF/*
 /FP
