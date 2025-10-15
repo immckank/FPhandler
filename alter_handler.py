@@ -31,6 +31,9 @@ class AlterAnalyzer():
             # The detail string is not a valid JSON object, needs enclosing braces.
             details = json.loads(node_detail_str)
             file_name = details.get("fl")
+            # 如果是形如dir/file.c的 取最后文件名
+            if file_name:
+                file_name = file_name.split('/')[-1]
             line_number = details.get("ln")
             if not file_name or line_number is None:
                 return None
@@ -58,6 +61,8 @@ class AlterAnalyzer():
                 leak_type, node_detail_str = leak_match.groups()
                 # print(leak_type, node_detail_str)
                 location = self._parse_location(node_detail_str)
+                # 如果location中包含路径 只去最后的部分
+                
                 if not location:
                     continue
 

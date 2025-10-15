@@ -52,14 +52,14 @@ def find_file_path(file_name):
         if file_name in files:
             # 路径中不包含PUT_ROOT_PATH
             full_path = os.path.join(root, file_name)
-            return full_path.replace(PUT_ROOT_PATH, "").replace("\\", "/").lstrip("/")
+            return os.path.relpath(full_path, PUT_ROOT_PATH)
     return None
 
 # 根据指定scource_location找到对应的代码行
 def find_code_line(source_location):
     file_name = source_location.split(":")[0]
     file_path = find_file_path(file_name)
-    file_path = os.path.join(PUT_ROOT_PATH, file_path).replace("\\", "/").lstrip("/")
+    file_path = os.path.join(PUT_ROOT_PATH, file_path)
     if not file_path:
         return None
     with open(file_path, 'r') as f:

@@ -265,6 +265,7 @@ class DeepSeek(AnalysisModel):
         while response.tool_calls:
             for tool_call in response.tool_calls:
                 tool_function_name = tool_call.function.name
+                print(tool_call.function.arguments)
                 tool_arguments = json.loads(tool_call.function.arguments)
                 self.analysis_logger.info(f"Calling tool: {tool_function_name} with args: {tool_arguments}")
                 if tool_function_name == "set_conclusion":
