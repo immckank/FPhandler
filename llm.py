@@ -265,13 +265,12 @@ class DeepSeek(AnalysisModel):
         while response.tool_calls:
             for tool_call in response.tool_calls:
                 tool_function_name = tool_call.function.name
-                print(tool_call.function.arguments)
+                # print(tool_call.function.arguments)
                 tool_arguments = json.loads(tool_call.function.arguments)
                 self.analysis_logger.info(f"Calling tool: {tool_function_name} with args: {tool_arguments}")
                 if tool_function_name == "set_conclusion":
                     function_response = set_conclusion(**tool_arguments)
-                    if not isinstance(function_response, str):
-                        function_response = json.dumps(function_response)
+                    # function_response = json.loads(function_response)
                     # 查询response中有没有error字段
                     if "error" in function_response:
                         continue

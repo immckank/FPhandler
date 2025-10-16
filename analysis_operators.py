@@ -753,9 +753,10 @@ def dump_source_snippet(file_name: str, start_line: int, end_line: int) -> Optio
         The source code snippet as a string, or None if the file cannot be read
         or line numbers are out of range.
     """
-    file_path = find_file_path(file_name)
-    file_path = os.path.join(PUT_ROOT_PATH, file_path)
+    file_path = find_file_path(file_name) 
+    if not file_path: return "No such file, please check filename."
     try:
+        file_path = os.path.join(PUT_ROOT_PATH, file_path)
         with open(file_path, "r") as f:
             lines = f.readlines()
             return "".join(lines[int(start_line) - 1:int(end_line)])
@@ -775,19 +776,21 @@ def dump_source_line(file_name: str, line_number: int) -> Optional[str]:
         The content of the specified line as a string, or None if an error occurs.
     """
     file_path = find_file_path(file_name)
+    if not file_path: return "No such file, please check filename."
     file_path = os.path.join(PUT_ROOT_PATH, file_path)
     snippet = dump_source_snippet(file_name, line_number, line_number)
     return snippet.strip() if snippet else "The line number is invalid or out of range for the file."
 
 if __name__ == '__main__':
+    # print(dump_source_snippet("slabs_automove.c", 1, 50))
     # {'start_location': 'items.c:1557', 'start_code': 'calloc(1, sizeof(struct crawler_expired_data))', 
     # 'target_location': 'items.c:1629', 'target_code': 'free(cdata)'}
     #1556     struct crawler_expired_data *cdata =
     #1557 calloc(1, sizeof(struct crawler_expired_data));
     #1630     free(cdata);
 
-    print(get_path_cond_func_(start_location="items.c:1557", start_code="struct",
-                              target_location="items.c:1629", target_code="free(cdata)"))
+    # print(get_path_cond_func_(start_location="items.c:1557", start_code="struct",
+    #                           target_location="items.c:1629", target_code="free(cdata)"))
     # # printFunctionCallSites(icfg, "stats_prefix_record_get");
     # print(find_callers("stats_prefix_record_get"))
     # # printCalleeFunctionBodyByLocation(icfg, "stats_prefix.c:118");
@@ -797,3 +800,4 @@ if __name__ == '__main__':
     # print(find_current_function("stats_prefix.c:118"))
     # print(get_shortest_path_cond("restart.c:76", "restart.c:121"))
     # print(find_var_definitions("memcached.c:18", "total_prefix_size"))
+    pass        
