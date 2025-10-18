@@ -29,9 +29,20 @@ try:
     from clang import cindex
     from clang.cindex import CursorKind
     libclang_available = _configure_libclang()
+    if not _configure_libclang():
+        # Python 包已找到，但底层的共享库未配置成功
+        logging.warning("libclang Python bindings found, but the libclang shared library could not be configured. "
+                        "Please ensure LLVM/Clang is installed and LIBCLANG_PATH is set correctly. "
+                        "Features requiring libclang will be disabled.")
+        libclang_available = False
+    else:
+        libclang_available = True
 except ImportError:
     libclang_available = False
     logging.warning("libclang not available. Some features will be disabled.")
+    # Python包本身未找到
+    logging.warning("Python package for libclang not found. Please run 'pip install libclang'. "
+                    "Features requiring libclang will be disabled.")
 
 
 from command_caller import CommandCaller
@@ -799,5 +810,6 @@ if __name__ == '__main__':
     # # printFunctionBodyByLocation(icfg, "stats_prefix.c:118");
     # print(find_current_function("stats_prefix.c:118"))
     # print(get_shortest_path_cond("restart.c:76", "restart.c:121"))
-    # print(find_var_definitions("memcached.c:18", "total_prefix_size"))
-    pass        
+    print(find_var_definitions("items.c:1573", "do_run_lru_maintainer_thread"))
+    print(find_var_decl("items.c:1573", "do_run_lru_maintainer_thread"))
+     

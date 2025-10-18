@@ -123,7 +123,7 @@ class AlterAnalyzer():
             # TODO: better user prompt
             project_prompt += PROJECT_DESC + "\n"
             user_prompt = project_prompt + "Please assume that the project can run in a correct environment without being forcibly shut down by external interference. Also, When it needs to be terminated, the project can be shut down correctly.\n"
-            allowed_tools = ["dump_source_snippet", "dump_source_line"]
+            allowed_tools = ["dump_source_snippet", "dump_source_line", "find_var_decl", "find_var_definitions"]
             if alter.get_leak_type() == "NeverFree":
                 allowed_tools.append("find_current_function")
                 allowed_tools.append("find_callers")

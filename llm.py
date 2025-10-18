@@ -250,6 +250,44 @@ class DeepSeek(AnalysisModel):
                         }
                     }
                 })
+            elif tool_name == "find_var_definitions":
+                allowed_tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": "find_var_definitions",
+                        "description": "Finds all definitions of a given variable across the project.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "source_location": {
+                                    "type": "string",
+                                    "description": "The source location to provide context, in the format 'filename.c:line_number'."
+                                },
+                                "var_name": {
+                                    "type": "string",
+                                    "description": "The name of the variable to find definitions for."
+                                }
+                            },
+                            "required": ["source_location", "var_name"]
+                        }
+                    }
+                })
+            elif tool_name == "find_var_decl":
+                allowed_tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": "find_var_decl",
+                        "description": "Finds all declarations of a given identifier across the project.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "source_location": {"type": "string", "description": "A source location within the project to provide context, in format 'filename.c:line_number'."},
+                                "var_name": {"type": "string", "description": "The name of the identifier to find declarations for."}
+                            },
+                            "required": ["source_location", "var_name"]
+                        }
+                    }
+                })
             else:
                 raise ValueError(f"Unknown tool name: {tool_name}")
         prompt = alter_prompt + "\n" + user_prompt
@@ -293,6 +331,10 @@ class DeepSeek(AnalysisModel):
                     function_response = find_function_body(**tool_arguments)
                 elif tool_function_name == "get_path_cond_func_":
                     function_response = get_path_cond_func_(**tool_arguments)
+                elif tool_function_name == "find_var_definitions":
+                    function_response = find_var_definitions(**tool_arguments)
+                elif tool_function_name == "find_var_decl":
+                    function_response = find_var_decl(**tool_arguments)
                 else:
                     # It's good practice to handle unknown tool calls
                     self.analysis_logger.error(f"Unknown tool call: {tool_function_name}")
