@@ -119,9 +119,9 @@ class AlterAnalyzer():
             alter_index = self.alter_list.index(alter)
             main_logger.info(f"analysing alter index : {alter_index} / {len(self.alter_list)}")
             source_location = alter.get_source_location()
-            # TODO: better user prompt
             project_prompt = f"You are now working for project {PROJECT_NAME}. "
-            project_prompt += "Memcached is a long-running background service (daemon) that continuously runs in the background after the server starts. It listens on a specified network port and manages a pre-allocated block of memory.\n" 
+            # TODO: better user prompt
+            project_prompt += PROJECT_DESC + "\n"
             user_prompt = project_prompt + "Please assume that the project can run in a correct environment without being forcibly shut down by external interference. Also, When it needs to be terminated, the project can be shut down correctly.\n"
             allowed_tools = ["dump_source_snippet", "dump_source_line"]
             if alter.get_leak_type() == "NeverFree":

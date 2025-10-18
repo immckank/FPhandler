@@ -42,7 +42,12 @@ class NeverFree(MemoryLeak):
 
     def to_prompt(self):
         Type_prompt = f"Type of bug: {self.leak_type}. \n"
-        Guidance_prompt = f"Guidance on triaging this type of bug: The warning at a specific source line is a false positive if the memory has been freed, or it has been transferred to a longer-lived context.\n"
+        Guidance_prompt = ("Guidance on triaging this type of bug based on memory reachability:" 
+            "The warning at a specific source line is a false positive if" 
+                "the memory has been freed, or it remains accessible to the program after the function exits and can be freed later."
+                "(This usually happens if the pointer is the function's return value, stored in a global variable, or passed to an output parameter.)"
+            "The warning at a specific source line is a true positive if"
+                "there exist a path on control-flow that reaches the end of the function without freeing the memory. Upon the function's exit, the memory has become unreachable and can never be freed.\n")
         Location_prompt = f"Source location: {self.source_location}  \n"
         Code_prompt = f"Source code at {self.source_location} here is : {find_code_line(self.source_location)}\n"
         variable_name = extract_lhs_variable(find_code_line(self.source_location))
@@ -77,7 +82,12 @@ class PartialLeak(MemoryLeak):
 
     def to_prompt(self):
         Type_prompt = f"Type of bug: {self.leak_type}. \n"
-        Guidance_prompt = f"Guidance on triaging this type of bug: The warning at a specific source line is a false positive if the member is freed by other means, or its ownership is managed separately from the parent structure.\n"
+        Guidance_prompt = ("Guidance on triaging this type of bug based on memory reachability:" 
+            "The warning at a specific source line is a false positive if" 
+                "the memory has been freed, or it remains accessible to the program after the function exits and can be freed later."
+                "(This usually happens if the pointer is the function's return value, stored in a global variable, or passed to an output parameter.)"
+            "The warning at a specific source line is a true positive if"
+                "there exist a path on control-flow that reaches the end of the function without freeing the memory. Upon the function's exit, the memory has become unreachable and can never be freed.\n")
         Location_prompt = f"Source location: {self.source_location}  \n"
         Code_prompt = f"Source code at {self.source_location} here is : {find_code_line(self.source_location)}\n"
         variable_name = extract_lhs_variable(find_code_line(self.source_location))
@@ -121,6 +131,7 @@ class DoubleFree(MemoryLeak):
 
     def to_prompt(self):
         Type_prompt = f"Type of bug: {self.leak_type}. \n"
+        # TP if a feasible control-flow path exists in which the same memory is freed more than once without a reallocation in between.
         Guidance_prompt = f"Guidance on triaging this type of bug: The warning at a specific source line is a false positive if \n"
         Location_prompt = f"Source location: {self.source_location}  \n"
         Code_prompt = f"Source code at {self.source_location} here is : {find_code_line(self.source_location)}\n"
@@ -143,4 +154,5 @@ class UseAfterFree(MemoryDefect):
         super().__init__("UseAfterFree", source_location)
 
     def to_prompt(self):
+        # feasible
         return super().to_prompt()

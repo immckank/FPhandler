@@ -410,7 +410,7 @@ def find_var_definitions(source_location: str, var_name: str) -> List[Dict[str, 
 
 # find_var_decl
 # 找到变量声明的位置
-# return: str: 'memcached/slab_automove.c:37'
+# return: str: 'slab_automove.c:37'
 def find_var_decl(source_location: str, var_name: str) -> List[Dict[str, str]]:
     """Finds all declarations of a given identifier across the project.
 

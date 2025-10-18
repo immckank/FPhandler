@@ -21,7 +21,8 @@ class CommandCaller:
         Calls the graph-reader command-line tool with a variable number of arguments.
         This is useful for commands with complex parameter structures.
         """
-        command = ['graph-reader'] + list(args)
+        # 添加一个默认的选项-stat=false来避免打印不相关信息
+        command = ['graph-reader', '-stat=false'] + list(args)
         result = subprocess.run(command, capture_output=True, text=True)
         if result.returncode != 0:
             print(f"Error calling graph-reader with command: {' '.join(command)}", result.stderr)
