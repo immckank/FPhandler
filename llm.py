@@ -293,6 +293,7 @@ class DeepSeek(AnalysisModel):
         prompt = alter_prompt + "\n" + user_prompt
         self.analysis_logger.info(f"Prompt: {prompt}")
         self.result_logger.info(f"Prompt: {prompt}")
+        self.result_logger.info(f"Index: {alter_index}")
         messages = [
             {"role": "system", "content": SYS_PROMPT},
             {"role": "user", "content": prompt}

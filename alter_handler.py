@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import sys
 
 from memory_defect import NeverFree, DoubleFree, PartialLeak
 from llm import Gemini, DeepSeek
@@ -116,14 +117,18 @@ class AlterAnalyzer():
         main_logger = logging.getLogger("main")
         main_logger.info(f"total alter number: {len(self.alter_list)}")
         for alter in self.alter_list:
-            alter_index = self.alter_list.index(alter)
+            module = sys.modules["config"]
+            setattr(module, "alter_index", self.alter_list.index(alter))
+            # alter_index = self.alter_list.index(alter)
             main_logger.info(f"analysing alter index : {alter_index} / {len(self.alter_list)}")
             source_location = alter.get_source_location()
             project_prompt = f"You are now working for project {PROJECT_NAME}. "
             # TODO: better user prompt
             project_prompt += PROJECT_DESC + "\n"
             user_prompt = project_prompt + "Please assume that the project can run in a correct environment without being forcibly shut down by external interference. Also, When it needs to be terminated, the project can be shut down correctly.\n"
-            allowed_tools = ["dump_source_snippet", "dump_source_line", "find_var_decl", "find_var_definitions"]
+            user_prompt += "Assuming this project is officially operational, all assert statements should be considered true.\n"
+            allowed_tools = ["dump_source_snippet", "dump_source_line"]
+            # allowed_tools = ["dump_source_snippet", "dump_source_line", "find_var_decl", "find_var_definitions"]
             if alter.get_leak_type() == "NeverFree":
                 allowed_tools.append("find_current_function")
                 allowed_tools.append("find_callers")
