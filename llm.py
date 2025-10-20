@@ -16,9 +16,29 @@ class judgeResult(BaseModel):
     classification: str
     reasoning: str
     
-# 你将以一步一步的方式分解问题，并通过“思考->行动->观察”的循环来推进。
-# 在每一步，你都必须首先输出一个'Thought'，阐述你当前的分析和下一步计划。然后，你必须输出一个'Action'来执行你的计划。
-# 当且仅当你收集到足够的信息来直接回答用户的问题时，你才能输出最终答案。
+
+ASSUMPTION_PROMPT = """
+Guiding Principles for Static Analysis Triage
+Objective: To accurately and efficiently triage static analysis findings by applying a formalized set of constraints. These principles help differentiate true positives from false positives by establishing a consistent model of expected program behavior and analysis scope.
+
+P0: Scoping Principle: Focus on relevant and impactful code.
+0.1 [Scope of Responsibility]: Focus exclusively on first-party code maintained by our team. Deprioritize or ignore findings that originate solely within the internal implementations of third-party libraries, auto-generated code, or external dependencies.
+0.2 [Threat Model Alignment]: Evaluate all security findings against the project's defined threat model. Prioritize vulnerabilities that are exploitable under realistic attack scenarios and de-prioritize those that are not.
+
+P1: Ideal Execution Principle: Assume a correct and stable runtime environment.
+1.1 [Correct Environment]: Assume the program operates in its intended production environment with correct system configurations, adequate resources, and all necessary dependencies present.
+1.2 [Well-Formed Inputs]: Assume well-formed and type-correct inputs for all internal and trusted APIs. This assumption does not apply to data originating from untrusted sources (e.g., user input, network data), which must be treated as potentially malicious.
+1.3 [Normal Lifecycle]: Assume a normal program lifecycle. Disregard scenarios involving forced termination (e.g., via kill -9). Presume that all cleanup logic, such as destructors or finally blocks, will execute upon graceful shutdown.
+
+P2: Programmer Intent Principle: Trust explicit contracts and common coding practices.
+2.1 [Assertions as Contracts]: Treat all assertions (assert, assume, etc.) as unbreakable contracts. Any code path that violates an assertion is considered unreachable. Use these contracts to prune infeasible analysis paths and suppress related findings.
+2.2 [Trust in Idioms]: Trust common and idiomatic coding patterns. For example, if code explicitly checks a pointer against null before dereferencing it (if (p) { p->... }), treat it as safe, even if the analyzer flags it due to complex control flow.
+2.3 [Trust in Core Libraries]: Assume the correctness of standard libraries (e.g., C++ STL, libc) and established core frameworks. Triage should focus on the usage of their APIs, not potential bugs within their internal implementations.
+
+P3: Terminal Path Principle: Prioritize root causes over subsequent effects.
+3.1 [Ignore Consequence on Terminal Paths]: On any code path that deterministically leads to program termination (e.g., via calls to abort(), exit(), panic()), the only relevant finding is the root cause of that termination. Subsequent issues on the same path (e.g., memory leaks) are considered inconsequential and should be ignored.
+3.2 [Focus on Realistic Paths]: Prioritize findings based on path feasibility in production scenarios. Downgrade or ignore findings located in non-production code, such as debug-only blocks (#ifdef DEBUG), unit tests, or code known to be unreachable (dead code).
+"""
 
 SYS_PROMPT = """
 You are a software security researcher tasked with classifying SAST alerts on C code.
@@ -49,7 +69,7 @@ class Gemini(AnalysisModel):
                  
     def resposeToAlter(self, alter_prompt, user_prompt=""):
         config = types.GenerateContentConfig(
-            system_instruction=SYS_PROMPT,
+            system_instruction=SYS_PROMPT+ASSUMPTION_PROMPT,
             response_schema=judgeResult,
             response_mime_type="application/json",
         )
@@ -81,7 +101,7 @@ class Gemini(AnalysisModel):
             else:
                 raise ValueError(f"Unknown tool name: {tool_name}")
         config = types.GenerateContentConfig(
-            system_instruction=SYS_PROMPT,
+            system_instruction=SYS_PROMPT+ASSUMPTION_PROMPT,
             # response_schema=judgeResult,
             # response_mime_type="application/json",
             tools=allowed_tools
@@ -295,7 +315,7 @@ class DeepSeek(AnalysisModel):
         self.result_logger.info(f"Prompt: {prompt}")
         self.result_logger.info(f"Index: {alter_index}")
         messages = [
-            {"role": "system", "content": SYS_PROMPT},
+            {"role": "system", "content": SYS_PROMPT+ASSUMPTION_PROMPT},
             {"role": "user", "content": prompt}
         ]
         response = self.send_message(messages, allowed_tools)
@@ -304,7 +324,8 @@ class DeepSeek(AnalysisModel):
         while response.tool_calls:
             for tool_call in response.tool_calls:
                 tool_function_name = tool_call.function.name
-                # print(tool_call.function.arguments)
+                # {"file_name": "tif_dirread.c", "start_line": 2310, "end_line": 2330"} 不合理的args 多了一个后引号
+                print(tool_call.function.arguments)
                 tool_arguments = json.loads(tool_call.function.arguments)
                 self.analysis_logger.info(f"Calling tool: {tool_function_name} with args: {tool_arguments}")
                 if tool_function_name == "set_conclusion":

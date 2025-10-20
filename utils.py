@@ -22,22 +22,22 @@ def setup_logger(log_type):
         logger.addHandler(file_handler)
         return logger
     elif log_type == "result":
-        log_file_name = f"result_{sar_name.split('.')[0]}_{alter_index}_{LLM_TYPE}-{time_str}.log"
+        log_file_name = f"result_{sar_name.split('.')[0]}_{LLM_TYPE}-{time_str}.log"
         if not os.path.exists(os.path.join(RES_ROOT_PATH, "RESULT")):
             os.makedirs(os.path.join(RES_ROOT_PATH, "RESULT"))
         log_file_path = os.path.join(RES_ROOT_PATH, "RESULT", log_file_name)
-        logger = logging.getLogger(f"result_{sar_name.split('.')[0]}_{alter_index}_{LLM_TYPE}")
+        logger = logging.getLogger(f"result_{sar_name.split('.')[0]}_{LLM_TYPE}")
         logger.setLevel(logging.INFO)
         file_handler = logging.FileHandler(log_file_path, mode="a")
         file_handler.setFormatter(llm_formatter)
         logger.addHandler(file_handler)
         return logger
     elif log_type == "analysis":
-        log_file_name = f"analysis_{sar_name.split('.')[0]}_{alter_index}_{LLM_TYPE}-{time_str}.log"
+        log_file_name = f"analysis_{sar_name.split('.')[0]}_{LLM_TYPE}-{time_str}.log"
         if not os.path.exists(os.path.join(RES_ROOT_PATH, "TRACE")):
             os.makedirs(os.path.join(RES_ROOT_PATH, "TRACE"))
         log_file_path = os.path.join(RES_ROOT_PATH, "TRACE", log_file_name)
-        logger = logging.getLogger(f"analysis_{sar_name.split('.')[0]}_{alter_index}_{LLM_TYPE}")
+        logger = logging.getLogger(f"analysis_{sar_name.split('.')[0]}_{LLM_TYPE}")
         logger.setLevel(logging.INFO)
         file_handler = logging.FileHandler(log_file_path, mode="a")
         file_handler.setFormatter(llm_formatter)

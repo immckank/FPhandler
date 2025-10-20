@@ -812,5 +812,6 @@ if __name__ == '__main__':
     # print(get_shortest_path_cond("restart.c:76", "restart.c:121"))
     # print(find_var_definitions("items.c:1573", "do_run_lru_maintainer_thread"))
     # print(find_var_decl("items.c:1573", "do_run_lru_maintainer_thread"))
-    print(libclang_available)
-    print(find_var_definitions("tiffinfo.c:303", "TIFFTAG_IMAGEWIDTH"))
+    # print(libclang_available)
+    # print(find_var_definitions("tiffinfo.c:303", "TIFFTAG_IMAGEWIDTH"))
+    print(dump_source_snippet("tif_dirread.c", 2310, 2330))

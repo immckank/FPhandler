@@ -125,8 +125,6 @@ class AlterAnalyzer():
             project_prompt = f"You are now working for project {PROJECT_NAME}. "
             # TODO: better user prompt
             project_prompt += PROJECT_DESC + "\n"
-            user_prompt = project_prompt + "Please assume that the project can run in a correct environment without being forcibly shut down by external interference. Also, When it needs to be terminated, the project can be shut down correctly.\n"
-            user_prompt += "Assuming this project is officially operational, all assert statements should be considered true.\n"
             allowed_tools = ["dump_source_snippet", "dump_source_line"]
             # allowed_tools = ["dump_source_snippet", "dump_source_line", "find_var_decl", "find_var_definitions"]
             if alter.get_leak_type() == "NeverFree":
@@ -139,9 +137,9 @@ class AlterAnalyzer():
                 allowed_tools.append("find_function_body")
                 # allowed_tools.append("get_path_cond_func")
             main_logger.info(f"Model : {LLM_TYPE}")
-            main_logger.info(f"User Prompt : \n{user_prompt}")
+            main_logger.info(f"Project Prompt : \n{project_prompt}")
             main_logger.info(f"Alter Prompt : \n{alter.to_prompt()}")
-            self.analyzer.responseForAlter(user_prompt, alter.to_prompt(), allowed_tools)
+            self.analyzer.responseForAlter(project_prompt, alter.to_prompt(), allowed_tools)
         return
 
 if __name__ == "__main__":
