@@ -2,6 +2,8 @@ import os
 from config import *
 import logging
 import datetime
+import json
+import re
 
 # 设置日志
 def setup_logger(log_type):
@@ -104,6 +106,50 @@ def extract_alter(sar_path, sar_file_name):
     with open(os.path.join(sar_path, sar_file_name.replace('.txt', '_alter.txt')), 'w') as f:
         f.writelines(extracted_lines)
     return extracted_lines
+
+
+def safe_load_json(s: str):
+    # quick shortcut for empty
+    if not s:
+        return {}
+    # Try direct load first
+    try:
+        return json.loads(s)
+    except Exception:
+        pass
+    # Common fixes:
+    # 1) Trim surrounding backticks or stray surrounding quotes
+    s_clean = s.strip()
+    # remove wrapping backticks
+    if s_clean.startswith('`') and s_clean.endswith('`'):
+        s_clean = s_clean[1:-1].strip()
+    # remove a single extra trailing quote if present
+    if s_clean.count('"') % 2 == 1 and s_clean.endswith('"'):
+        s_clean = s_clean[:-1]
+    # Replace single quotes with double quotes when it's safe
+    if "'" in s_clean and '"' not in s_clean:
+        s_try = s_clean.replace("'", '"')
+        try:
+            return json.loads(s_try)
+        except Exception:
+            pass
+    # Remove trailing commas before array/object close
+    s_try = re.sub(r",\s*(\]|})", r"\1", s_clean)
+    # Try to json.loads again
+    try:
+        return json.loads(s_try)
+    except Exception:
+        pass
+    # As a last resort, try to extract a JSON object substring
+    m = re.search(r"({[\s\S]*})", s_clean)
+    if m:
+        try:
+            return json.loads(m.group(1))
+        except Exception:
+            pass
+    # Could not parse safely
+    raise ValueError(f"Unable to parse tool arguments as JSON: {s!r}")
+
 
 # 读取 dot 文件为 networkx 有向图
 # def load_dot_to_nx(dot_path):

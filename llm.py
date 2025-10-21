@@ -10,6 +10,7 @@ import logging
 from analysis_operators import *
 from config import *
 from utils import *
+import re
 
 
 class judgeResult(BaseModel):
@@ -19,7 +20,6 @@ class judgeResult(BaseModel):
 
 ASSUMPTION_PROMPT = """
 Guiding Principles for Static Analysis Triage
-Objective: To accurately and efficiently triage static analysis findings by applying a formalized set of constraints. These principles help differentiate true positives from false positives by establishing a consistent model of expected program behavior and analysis scope.
 
 P0: Scoping Principle: Focus on relevant and impactful code.
 0.1 [Scope of Responsibility]: Focus exclusively on first-party code maintained by our team. Deprioritize or ignore findings that originate solely within the internal implementations of third-party libraries, auto-generated code, or external dependencies.
@@ -37,7 +37,8 @@ P2: Programmer Intent Principle: Trust explicit contracts and common coding prac
 
 P3: Terminal Path Principle: Prioritize root causes over subsequent effects.
 3.1 [Ignore Consequence on Terminal Paths]: On any code path that deterministically leads to program termination (e.g., via calls to abort(), exit(), panic()), the only relevant finding is the root cause of that termination. Subsequent issues on the same path (e.g., memory leaks) are considered inconsequential and should be ignored.
-3.2 [Focus on Realistic Paths]: Prioritize findings based on path feasibility in production scenarios. Downgrade or ignore findings located in non-production code, such as debug-only blocks (#ifdef DEBUG), unit tests, or code known to be unreachable (dead code).
+3.2 [Check Error Handling Paths]: pay special attention to error handling mechanisms. You must trace the propagation of error states to determine if a code path deterministically leads to process termination. If a program decides to terminate due to a specific error condition (e.g., "file not found," "memory allocation failure," "network connection interrupted"), then any other issues that occur *after* this decision point but *before* the actual termination call, and which are *unrelated* to that root error condition (e.g., failure to release previously allocated memory, unclosed handles), must be considered **"Consequential Issues"**. If the type of alert being reviewed (e.g., a memory leak) is not the *root cause* of the termination, you must downgrade or ignore that alert when it occurs on this specific terminal path. This is because the operating system will reclaim all resources upon process termination.
+3.3 [Focus on Realistic Paths]: Prioritize findings based on path feasibility in production scenarios. Downgrade or ignore findings located in non-production code, such as debug-only blocks (#ifdef DEBUG), unit tests, or code known to be unreachable (dead code).
 """
 
 SYS_PROMPT = """
@@ -47,7 +48,7 @@ Each user input will include: the bug type, source file name and line number of 
 You will break down the problem in a step-by-step manner and proceed using a "Thought->Action->Observation" loop.
 In each step, you must first output a 'Thought' that explains your current analysis and your plan for the next step. Then, you must output an 'Action' to execute your plan.
 You can output the final answer when, and only when, you have gathered enough information to directly answer the user's question.
-Guidelines: Focus only on the specified bug type and location. Don't speculate about future code changes. Think step by step. Any factual information must be verified using tools and based on the source code instead of your internal knowledge. If you execute an action and do not get the expected result, you should analyze the reason in the next 'Thought' and try to solve the problem using a different method or tool. Do not repeat the exact same 'Action'. If the problem is beyond the capabilities of your tools, or if you have tried all possible methods and still cannot solve it, please state directly in the 'Final Answer' that you cannot answer the question.
+Guidelines: Obey the "Guiding Principles for Static Analysis Triage". Focus only on the specified bug type and location. Don't speculate about future code changes. Think step by step. Any factual information must be verified using tools and based on the source code instead of your internal knowledge. If you execute an action and do not get the expected result, you should analyze the reason in the next 'Thought' and try to solve the problem using a different method or tool. Do not repeat the exact same 'Action'. If the problem is beyond the capabilities of your tools, or if you have tried all possible methods and still cannot solve it, please state directly in the 'Final Answer' that you cannot answer the question.
 """
 
 class AnalysisModel():
@@ -324,9 +325,21 @@ class DeepSeek(AnalysisModel):
         while response.tool_calls:
             for tool_call in response.tool_calls:
                 tool_function_name = tool_call.function.name
-                # {"file_name": "tif_dirread.c", "start_line": 2310, "end_line": 2330"} 不合理的args 多了一个后引号
-                print(tool_call.function.arguments)
-                tool_arguments = json.loads(tool_call.function.arguments)
+                try:
+                    tool_arguments = safe_load_json(tool_call.function.arguments)
+                except Exception as e:
+                    # Log and respond with an error so the model can recover
+                    self.analysis_logger.error(f"Failed to parse tool arguments: {e}")
+                    function_response = json.dumps({"error": f"failed to parse arguments: {str(e)}"})
+                    messages.append(
+                        {
+                            "tool_call_id": tool_call.id,
+                            "role": "tool",
+                            "content": function_response,
+                        }
+                    )
+                    # ask the model for next action by continuing the loop
+                    continue
                 self.analysis_logger.info(f"Calling tool: {tool_function_name} with args: {tool_arguments}")
                 if tool_function_name == "set_conclusion":
                     function_response = set_conclusion(**tool_arguments)
