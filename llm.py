@@ -19,26 +19,26 @@ class judgeResult(BaseModel):
     
 
 ASSUMPTION_PROMPT = """
-Guiding Principles for Static Analysis Triage
+Principles for Static Analysis Triage
 
-P0: Scoping Principle: Focus on relevant and impactful code.
-0.1 [Scope of Responsibility]: Focus exclusively on first-party code maintained by our team. Deprioritize or ignore findings that originate solely within the internal implementations of third-party libraries, auto-generated code, or external dependencies.
-0.2 [Threat Model Alignment]: Evaluate all security findings against the project's defined threat model. Prioritize vulnerabilities that are exploitable under realistic attack scenarios and de-prioritize those that are not.
+P0: Scoping Principle - Focus on relevant code
+Analyze only first-party code maintained by our team. Ignore findings from third-party libraries, auto-generated code, or internal implementations of external dependencies.
+Assess findings based on the defined threat model: prioritize vulnerabilities that are exploitable in realistic attack scenarios, and deprioritize those that aren't.
 
-P1: Ideal Execution Principle: Assume a correct and stable runtime environment.
-1.1 [Correct Environment]: Assume the program operates in its intended production environment with correct system configurations, adequate resources, and all necessary dependencies present.
-1.2 [Well-Formed Inputs]: Assume well-formed and type-correct inputs for all internal and trusted APIs. This assumption does not apply to data originating from untrusted sources (e.g., user input, network data), which must be treated as potentially malicious.
-1.3 [Normal Lifecycle]: Assume a normal program lifecycle. Disregard scenarios involving forced termination (e.g., via kill -9). Presume that all cleanup logic, such as destructors or finally blocks, will execute upon graceful shutdown.
+P1: Ideal Execution Assumption
+Assume the program is running in a correct production environment, with proper configuration, adequate resources, and all necessary dependencies present.
+Internal inputs are assumed well-formed and correctly typed; external inputs (e.g., user input, network data) must be treated as potentially malicious.
+Assume a normal program lifecycle, disregarding scenarios with forced terminations (e.g., kill -9) and ensuring that cleanup logic runs on graceful shutdown.
 
-P2: Programmer Intent Principle: Trust explicit contracts and common coding practices.
-2.1 [Assertions as Contracts]: Treat all assertions (assert, assume, etc.) as unbreakable contracts. Any code path that violates an assertion is considered unreachable. Use these contracts to prune infeasible analysis paths and suppress related findings.
-2.2 [Trust in Idioms]: Trust common and idiomatic coding patterns. For example, if code explicitly checks a pointer against null before dereferencing it (if (p) { p->... }), treat it as safe, even if the analyzer flags it due to complex control flow.
-2.3 [Trust in Core Libraries]: Assume the correctness of standard libraries (e.g., C++ STL, libc) and established core frameworks. Triage should focus on the usage of their APIs, not potential bugs within their internal implementations.
+P2: Programmer Intent Trust
+Assertions are treated as unbreakable contracts: any path that violates an assertion is considered unreachable and should be pruned.
+Trust common coding patterns: for example, a null-pointer check before dereferencing should be trusted as safe, even if flagged by analysis due to complex control flow.
+Standard libraries and core frameworks are assumed correct: focus on how their APIs are used, not internal bugs.
 
-P3: Terminal Path Principle: Prioritize root causes over subsequent effects.
-3.1 [Ignore Consequence on Terminal Paths]: On any code path that deterministically leads to program termination (e.g., via calls to abort(), exit(), panic()), the only relevant finding is the root cause of that termination. Subsequent issues on the same path (e.g., memory leaks) are considered inconsequential and should be ignored.
-3.2 [Check Error Handling Paths]: pay special attention to error handling mechanisms. You must trace the propagation of error states to determine if a code path deterministically leads to process termination. If a program decides to terminate due to a specific error condition (e.g., "file not found," "memory allocation failure," "network connection interrupted"), then any other issues that occur *after* this decision point but *before* the actual termination call, and which are *unrelated* to that root error condition (e.g., failure to release previously allocated memory, unclosed handles), must be considered **"Consequential Issues"**. If the type of alert being reviewed (e.g., a memory leak) is not the *root cause* of the termination, you must downgrade or ignore that alert when it occurs on this specific terminal path. This is because the operating system will reclaim all resources upon process termination.
-3.3 [Focus on Realistic Paths]: Prioritize findings based on path feasibility in production scenarios. Downgrade or ignore findings located in non-production code, such as debug-only blocks (#ifdef DEBUG), unit tests, or code known to be unreachable (dead code).
+P3: Terminal Path Focus
+On paths that deterministically terminate the program (e.g., via abort(), exit(), panic()), only the root cause of termination is relevant.
+Pay special attention to error handling, you should first check whether the path leads to program termination, then check for if the given error is handled properly. Ignore subsequent issues on such paths (e.g., memory leaks), as they are inconsequential—the OS will reclaim resources after termination.
+Prioritize realistic paths: focus on feasible execution paths in production scenarios, downgrading or ignoring code related to debugging, unit tests, or unreachable code.
 """
 
 SYS_PROMPT = """
@@ -48,7 +48,7 @@ Each user input will include: the bug type, source file name and line number of 
 You will break down the problem in a step-by-step manner and proceed using a "Thought->Action->Observation" loop.
 In each step, you must first output a 'Thought' that explains your current analysis and your plan for the next step. Then, you must output an 'Action' to execute your plan.
 You can output the final answer when, and only when, you have gathered enough information to directly answer the user's question.
-Guidelines: Obey the "Guiding Principles for Static Analysis Triage". Focus only on the specified bug type and location. Don't speculate about future code changes. Think step by step. Any factual information must be verified using tools and based on the source code instead of your internal knowledge. If you execute an action and do not get the expected result, you should analyze the reason in the next 'Thought' and try to solve the problem using a different method or tool. Do not repeat the exact same 'Action'. If the problem is beyond the capabilities of your tools, or if you have tried all possible methods and still cannot solve it, please state directly in the 'Final Answer' that you cannot answer the question.
+Guidelines: Obey the "Principles for Static Analysis Triage". Focus only on the specified bug type and location. Don't speculate about future code changes. Think step by step. Any factual information must be verified using tools and based on the source code instead of your internal knowledge. If you execute an action and do not get the expected result, you should analyze the reason in the next 'Thought' and try to solve the problem using a different method or tool. Do not repeat the exact same 'Action'. If the problem is beyond the capabilities of your tools, or if you have tried all possible methods and still cannot solve it, please state directly in the 'Final Answer' that you cannot answer the question.
 """
 
 class AnalysisModel():
