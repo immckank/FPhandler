@@ -44,7 +44,6 @@ except ImportError:
     logging.warning("Python package for libclang not found. Please run 'pip install libclang'. "
                     "Features requiring libclang will be disabled.")
 
-
 from command_caller import CommandCaller
 
 import config
@@ -227,6 +226,23 @@ def find_current_function(source_location: str) -> Optional[Dict[str, Any]]:
             res_json["function_body"] = func_body
             return res_json
     return {"error": "Unknown error"}
+
+def find_all_callees(function_name: str) -> List[Dict[str, Any]]:
+    command_caller = CommandCaller()
+    res = command_caller.call_graph_reader_with_args(
+        f"-find-all-callees={function_name}",
+        os.path.join(PUT_ROOT_PATH, f"{PUT_NAME}.bc")
+    )
+    if res:
+        res_json = json.loads(res)
+        error = res_json.get("error", None)
+        if error:
+            return [{"error": f"error in finding all callees"}]
+        else:
+            # 删除error属性
+            del res_json["error"]
+            return res_json.get("callees", [])
+    return []
 
 '''
 structure ctags
@@ -814,4 +830,5 @@ if __name__ == '__main__':
     # print(find_var_decl("items.c:1573", "do_run_lru_maintainer_thread"))
     # print(libclang_available)
     # print(find_var_definitions("tiffinfo.c:303", "TIFFTAG_IMAGEWIDTH"))
-    print(dump_source_snippet("tif_dirread.c", 2310, 2330))
+    # print(dump_source_snippet("tif_dirread.c", 2310, 2330))
+    print(find_callers("EVP_CIPHER_CTX_free"))

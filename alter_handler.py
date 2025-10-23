@@ -26,6 +26,9 @@ class AlterAnalyzer():
             r"^\s*-->\s*\(\s*({.*?})\s*\|\s*(.*?)\s*\)"
         )
 
+    def get_alter_list(self):
+        return self.alter_list
+
     def _parse_location(self, node_detail_str):
         """Parses location details from a JSON-like string and returns a formatted location string."""
         try:
