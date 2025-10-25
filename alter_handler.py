@@ -4,19 +4,18 @@ import json
 import sys
 
 from memory_defect import NeverFree, DoubleFree, PartialLeak
-from llm import Gemini, DeepSeek
 
 from config import *
 from utils import *
 
 class AlterAnalyzer():
     def __init__(self):
-        if LLM_TYPE == "Gemini":
-            self.analyzer = Gemini(model_name="gemini-2.5-flash")
-        elif LLM_TYPE == "DeepSeek":
-            self.analyzer = DeepSeek(model_name="deepseek-chat")
-        else:
-            raise ValueError(f"Unknown LLM type: {LLM_TYPE}")
+        # if LLM_TYPE == "Gemini":
+        #     self.analyzer = Gemini(model_name="gemini-2.5-flash")
+        # elif LLM_TYPE == "DeepSeek":
+        #     self.analyzer = DeepSeek(model_name="deepseek-chat")
+        # else:
+        #     raise ValueError(f"Unknown LLM type: {LLM_TYPE}")
         self.alter_list = []
         self.alter_file_name = None
         self.LEAK_RE = re.compile(
@@ -114,36 +113,7 @@ class AlterAnalyzer():
                         except StopIteration:
                             break
                     self.alter_list.append(DoubleFree(location, double_free_paths))
-        return 
-
-    def handle_memory_leak(self):
-        main_logger = logging.getLogger("main")
-        main_logger.info(f"total alter number: {len(self.alter_list)}")
-        for alter in self.alter_list:
-            module = sys.modules["config"]
-            setattr(module, "alter_index", self.alter_list.index(alter))
-            # alter_index = self.alter_list.index(alter)
-            main_logger.info(f"analysing alter index : {alter_index} / {len(self.alter_list)}")
-            source_location = alter.get_source_location()
-            project_prompt = f"You are now working for project {PROJECT_NAME}. "
-            # TODO: better user prompt
-            project_prompt += PROJECT_DESC + "\n"
-            allowed_tools = ["dump_source_snippet", "dump_source_line"]
-            # allowed_tools = ["dump_source_snippet", "dump_source_line", "find_var_decl", "find_var_definitions"]
-            if alter.get_leak_type() == "NeverFree":
-                allowed_tools.append("find_current_function")
-                allowed_tools.append("find_callers")
-                allowed_tools.append("find_function_body")
-            elif alter.get_leak_type() == "PartialLeak" or alter.get_leak_type() == "Double Free":
-                allowed_tools.append("find_current_function")
-                allowed_tools.append("find_callers")
-                allowed_tools.append("find_function_body")
-                # allowed_tools.append("get_path_cond_func")
-            main_logger.info(f"Model : {LLM_TYPE}")
-            main_logger.info(f"Project Prompt : \n{project_prompt}")
-            main_logger.info(f"Alter Prompt : \n{alter.to_prompt()}")
-            self.analyzer.responseForAlter(project_prompt, alter.to_prompt(), allowed_tools)
-        return
+        return self.alter_list
 
 if __name__ == "__main__":
     pass
