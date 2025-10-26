@@ -59,17 +59,18 @@ def find_file_path(file_name):
 
 # 根据指定scource_location找到对应的代码行
 def find_code_line(source_location):
-    file_name = source_location.split(":")[0]
-    file_path = find_file_path(file_name)
-    file_path = os.path.join(PUT_ROOT_PATH, file_path)
-    if not file_path:
-        return None
-    with open(file_path, 'r') as f:
-        lines = f.readlines()
-        line_number = int(source_location.split(":")[1]) - 1
-        if line_number < 0 or line_number >= len(lines):
-            return None
-        return lines[line_number].strip()
+    # file_name = source_location.split(":")[0]
+    # file_path = find_file_path(file_name)
+    # file_path = os.path.join(PUT_ROOT_PATH, file_path)
+    # if not file_path:
+    #     return None
+    # with open(file_path, 'r') as f:
+    #     lines = f.readlines()
+    #     line_number = int(source_location.split(":")[1]) - 1
+    #     if line_number < 0 or line_number >= len(lines):
+    #         return None
+    #     return lines[line_number].strip()
+    return "111111"
 
 # 提取赋值表达式的左值变量名
 def extract_lhs_variable(assignment):

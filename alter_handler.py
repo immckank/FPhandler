@@ -4,6 +4,9 @@ import json
 import sys
 import itertools
 
+from networkx.classes import nodes
+from networkx.utils.misc import nodes_equal
+
 from memory_defect import NeverFree, DoubleFree, PartialLeak, UseAfterFree
 
 from config import *
@@ -11,12 +14,6 @@ from utils import *
 
 class AlterAnalyzer():
     def __init__(self):
-        # if LLM_TYPE == "Gemini":
-        #     self.analyzer = Gemini(model_name="gemini-2.5-flash")
-        # elif LLM_TYPE == "DeepSeek":
-        #     self.analyzer = DeepSeek(model_name="deepseek-chat")
-        # else:
-        #     raise ValueError(f"Unknown LLM type: {LLM_TYPE}")
         self.alter_list = []
         self.alter_file_name = None
         self.LEAK_RE = re.compile(
@@ -121,78 +118,99 @@ class AlterAnalyzer():
                             break
                     self.alter_list.append(DoubleFree(location, double_free_paths))
                 elif leak_type == "Use After Free":
-                    # 解析Use After Free缺陷报告
-                    event_pairs = []
+                    nodes_pairs = []
+
+                    # 跳过内存分配行后的所有空行
+                    while True:
+                        try:
+                            line = next(lines).strip()
+                            if line:
+                                lines = itertools.chain([line], lines)
+                                break
+                        except StopIteration:
+                            break
+
                     # 收集所有free-use事件对
                     while True:
                         try:
-                            # 读取Free行
                             free_line = next(lines).strip()
                             if not free_line:
-                                # 空行表示事件对结束
                                 continue
 
-                            # 解析free位置
                             free_match = self.FREE_RE.match(free_line)
                             if not free_match:
-                                # 如果不是free行，可能是下一个缺陷的开始，回退
                                 lines = itertools.chain([free_line], lines)
                                 break
 
                             free_node_detail_str = free_match.group(1)
                             free_location = self._parse_location(free_node_detail_str)
 
-                            # 跳过free path行
                             try:
                                 free_path_line = next(lines).strip()
                                 if free_path_line != "free path:":
-                                    # 如果不是预期的free path行，回退
                                     lines = itertools.chain([free_path_line], lines)
                             except StopIteration:
                                 break
 
-                            # 收集该free位置对应的所有use位置
-                            use_locations = []
+                            # 收集该free位置对应的所有use位置和条件路径
+                            use_nodes = []  # 存储UseNode对象
                             while True:
                                 try:
-                                    # 读取Use行
                                     use_line = next(lines).strip()
                                     if not use_line:
-                                        break
+                                        continue
 
-                                    # 解析use位置
                                     use_match = self.USE_RE.match(use_line)
                                     if not use_match:
-                                        # 如果不是use行，可能是下一个free或结束
                                         lines = itertools.chain([use_line], lines)
                                         break
 
                                     use_node_detail_str = use_match.group(1)
                                     use_location = self._parse_location(use_node_detail_str)
-                                    if use_location:
-                                        use_locations.append(use_location)
-                                    # 跳过use path行
+
                                     try:
                                         use_path_line = next(lines).strip()
                                         if use_path_line != "use path:":
-                                            # 如果不是预期的use path行，回退
                                             lines = itertools.chain([use_path_line], lines)
+
+                                        condition = None
+                                        condition_location = None
+                                        try:
+                                            cond_line = next(lines).strip()
+                                            cond_match = self.COND_PATH_RE.match(cond_line)
+                                            if cond_match:
+                                                cond_node_detail_str, cond = cond_match.groups()
+                                                condition_location = self._parse_location(cond_node_detail_str)
+                                                condition = cond
+                                        except StopIteration:
+                                            pass
                                     except StopIteration:
                                         break
+
+                                    if use_location:
+                                        # 创建UseNode对象而不是元组
+                                        use_node = UseAfterFree.UseNode(
+                                            use_location=use_location,
+                                            condition=condition,
+                                            condition_location=condition_location
+                                        )
+                                        use_nodes.append(use_node)
+
                                 except StopIteration:
                                     break
-                            if free_location and use_locations:
-                                event_pair = UseAfterFree.EventPair(free_location, use_locations)
-                                event_pairs.append(event_pair)
+
+                            if free_location and use_nodes:
+                                node_pair = UseAfterFree.NodePair(free_location, use_nodes)
+                                nodes_pairs.append(node_pair)
 
                         except StopIteration:
-                            break  # 文件结束
+                            break
 
-                    # 创建UseAfterFree对象
-                    if event_pairs:
-                        self.alter_list.append(UseAfterFree(location, event_pairs))
+                    if nodes_pairs:
+                        self.alter_list.append(UseAfterFree(location, nodes_pairs))
 
-        return self.alter_list
+                return self.alter_list
+
 
 if __name__ == "__main__":
     analyzer = AlterAnalyzer()
