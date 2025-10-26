@@ -20,7 +20,7 @@ alter_index = 0
 # result
 RES_ROOT_PATH = "RES"
 
-LLM_TYPE = "DeepSeek"
+LLM_TYPE = "Qwen"
 
 # free / function
 ANALYZER_TYPE = "function"

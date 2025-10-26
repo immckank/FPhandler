@@ -15,7 +15,18 @@ from config import *
 from utils import *
 from prompts import *
 import re
-from func_analyzer import DeepSeekFunctionAnalyzer
+from func_analyzer import (
+    DeepSeekFunctionAnalyzer,
+    QwenFunctionAnalyzer
+)
+from tools import (
+    set_conclusion_desc_free,
+    dump_source_snippet_desc_free,
+    dump_source_line_desc_free,
+    find_current_function_desc_free,
+    find_function_body_desc_free,
+    find_callers_desc_free
+)
 
 class judgeResult(BaseModel):
     classification: str
@@ -25,6 +36,18 @@ class FreeAnalysisModel(ABC):
     def __init__(self):
         self.analysis_logger = setup_logger(log_type="analysis") 
         self.result_logger = setup_logger(log_type="result")
+        self.tool_functions = {
+            "set_conclusion": set_conclusion,
+            "dump_source_snippet": dump_source_snippet,
+            "dump_source_line": dump_source_line,
+            "find_callee": find_callee,
+            "find_current_function": find_current_function,
+            "find_callers": find_callers,
+            "find_function_body": find_function_body,
+            "get_path_cond_func_": get_path_cond_func_,
+            "find_var_definitions": find_var_definitions,
+            "find_var_decl": find_var_decl,
+        }   
         pass
     
     @abstractmethod
@@ -32,7 +55,7 @@ class FreeAnalysisModel(ABC):
         pass
 
     @abstractmethod
-    def responseForAlter(self, alter, user_prompt=""):
+    def responseForAlter(self, alter):
         pass
 
 class GeminiFreeAnalyzer(FreeAnalysisModel):
@@ -108,93 +131,11 @@ class DeepSeekFreeAnalyzer(FreeAnalysisModel):
         return None
     
     def responseForAlter(self, alter:memory_defect.MemoryLeak):
-        allowed_tools = []
-        # set conclusion
-        allowed_tools.append({
-            "type": "function",
-            "function": {
-                "name": "set_conclusion",
-                "description": "Sets the final conclusion for an alert analysis. This function should be called at the end of an analysis to provide a definitive classification and the reasoning behind it.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "classification": {
-                            "type": "string",
-                            "description": "The classification of the alert, must be one of 'FP' (False Positive), 'TP' (True Positive), or 'UNCERTAIN'.",
-                            "enum": ["FP", "TP", "UNCERTAIN"]
-                        },
-                        "reason": {
-                            "type": "string",
-                            "description": "A detailed explanation for the given classification."
-                        }
-                    },
-                    "required": ["classification", "reason"]
-                }
-            }
-        })
-        # dump_source_snippet
-        allowed_tools.append({
-            "type": "function",
-            "function": {
-                "name": "dump_source_snippet",
-                "description": "Dumps a snippet of source code from a file between the given line numbers.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "file_name": {"type": "string", "description": "The name of the file relative to the project root."},
-                        "start_line": {"type": "integer", "description": "The starting line number (inclusive)."},
-                        "end_line": {"type": "integer", "description": "The ending line number (inclusive)."}
-                    },
-                    "required": ["file_name", "start_line", "end_line"]
-                }
-            }
-        })
-        # dump_source_line
-        allowed_tools.append({
-            "type": "function",
-            "function": {
-                "name": "dump_source_line",
-                "description": "Dumps a single line of source code from a file.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "file_name": {"type": "string", "description": "The name of the file relative to the project root."},
-                        "line_number": {"type": "integer", "description": "The line number to retrieve."}
-                    },
-                    "required": ["file_name", "line_number"]
-                }
-            }
-        })
-        # find current function
-        allowed_tools.append({
-            "type": "function",
-            "function": {
-                "name": "find_current_function",
-                "description": "Finds the function in which the given source location exists.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "source_location": {"type": "string", "description": "The source location, in the format 'filename.c:line_number'."}
-                    },
-                    "required": ["source_location"]
-                }
-            }
-        })
-        # find function body
-        allowed_tools.append({
-            "type": "function",
-            "function": {
-                "name": "find_function_body",
-                "description": "Finds the function body by its name.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "function_name": {"type": "string", "description": "The name of the function to find."}
-                    },
-                    "required": ["function_name"]
-                }
-            }
-        })
+        allowed_tools = [
+            set_conclusion_desc_free, dump_source_snippet_desc_free, dump_source_line_desc_free, 
+            find_current_function_desc_free, find_function_body_desc_free, find_callers_desc_free
+        ]
+        # unused tools
         # find callee
         # allowed_tools.append({
         #     "type": "function",
@@ -210,19 +151,6 @@ class DeepSeekFreeAnalyzer(FreeAnalysisModel):
         #         }
         #     }
         # })
-        # find callers
-        allowed_tools.append({
-            "type": "function",
-            "function": {
-                "name": "find_callers",
-                "description": "Finds all functions that call a given target function.",
-                "parameters": {
-                    "type": "object",
-                    "properties": { "function_name": {"type": "string", "description": "The name of the target function to find callers for."} },
-                    "required": ["function_name"]
-                }
-            }
-        })
         # for tool_name in allowed_tool_names:
         #     elif tool_name == "get_path_cond_func":
         #         allowed_tools.append({
@@ -287,7 +215,7 @@ class DeepSeekFreeAnalyzer(FreeAnalysisModel):
         self.analysis_logger.info(f"Prompt: {alter.to_prompt()}")
         self.result_logger.info(f"Prompt: {alter.to_prompt()}")
         messages = [
-            {"role": "system", "content": SYS_PROMPT+ASSUMPTION_PROMPT},
+            {"role": "system", "content": SYS_PROMPT + ASSUMPTION_PROMPT},
             {"role": "user", "content": alter.to_prompt() + "\n" + project_prompt}
         ]
         response = self.send_message(messages, allowed_tools)
@@ -314,35 +242,14 @@ class DeepSeekFreeAnalyzer(FreeAnalysisModel):
                 self.analysis_logger.info(f"Calling tool: {tool_function_name} with args: {tool_arguments}")
                 if tool_function_name == "set_conclusion":
                     function_response = set_conclusion(**tool_arguments)
-                    # function_response = json.loads(function_response)
-                    # 查询response中有没有error字段
                     if "error" in function_response:
                         continue
-                    else:
-                        # 说明正常得出了结论 可以返回
-                        self.analysis_logger.info(f"Tool response: {function_response}")
-                        self.result_logger.info(f"{function_response}")
-                        return
-                if tool_function_name == "dump_source_snippet":
-                    function_response = dump_source_snippet(**tool_arguments)
-                elif tool_function_name == "dump_source_line":
-                    function_response = dump_source_line(**tool_arguments)
-                elif tool_function_name == "find_callee":
-                    function_response = find_callee(**tool_arguments)
-                elif tool_function_name == "find_current_function":
-                    function_response = find_current_function(**tool_arguments)
-                elif tool_function_name == "find_callers":
-                    function_response = find_callers(**tool_arguments)
-                elif tool_function_name == "find_function_body":
-                    function_response = find_function_body(**tool_arguments)
-                elif tool_function_name == "get_path_cond_func_":
-                    function_response = get_path_cond_func_(**tool_arguments)
-                elif tool_function_name == "find_var_definitions":
-                    function_response = find_var_definitions(**tool_arguments)
-                elif tool_function_name == "find_var_decl":
-                    function_response = find_var_decl(**tool_arguments)
+                    self.analysis_logger.info(f"Tool response: {function_response}")
+                    self.result_logger.info(f"{function_response}")
+                    return
+                elif tool_function_name in self.tool_functions:
+                    function_response = self.tool_functions[tool_function_name](**tool_arguments)
                 else:
-                    # It's good practice to handle unknown tool calls
                     self.analysis_logger.error(f"Unknown tool call: {tool_function_name}")
                     function_response = f"Error: Tool '{tool_function_name}' not found."
                 # Convert response to JSON string if it's not already a string
@@ -363,6 +270,93 @@ class DeepSeekFreeAnalyzer(FreeAnalysisModel):
             messages.append(response)
         return
 
+class QwenFreeAnalyzer(FreeAnalysisModel):
+    def __init__(self, model_name="qwen3-max"):
+        super().__init__()
+        self.model_name = model_name
+        self.client = OpenAI(
+            api_key=os.environ.get("QWEN_API_KEY"),
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        )
+    
+    def get_response(self, messages, tools):
+        completion = self.client.chat.completions.create(
+            model=self.model_name,
+            messages=messages,
+            tools=tools,
+        )
+        return completion.choices[0].message
+        
+    def responseToAlter(self, alter_prompt, user_prompt=""):
+        return None
+    
+    def responseForAlter(self, alter:memory_defect.MemoryLeak):
+        allowed_tools = [
+            set_conclusion_desc_free, dump_source_snippet_desc_free, dump_source_line_desc_free, 
+            find_current_function_desc_free, find_function_body_desc_free, find_callers_desc_free
+        ]
+        project_prompt = f"You are now working for project {PROJECT_NAME}. "
+        project_prompt += PROJECT_DESC + "\n"        
+        self.analysis_logger.info(f"Prompt: {alter.to_prompt()}")
+        self.result_logger.info(f"Prompt: {alter.to_prompt()}")
+        messages = [
+            {"role": "system", "content": SYS_PROMPT + ASSUMPTION_PROMPT},
+            {"role": "user", "content": alter.to_prompt() + "\n" + project_prompt}
+        ]
+        response = self.get_response(messages, allowed_tools)
+        if not response.content: response.content = ""
+        self.analysis_logger.info(f"Model response: {response.content}")
+        messages.append(response)
+        while response.tool_calls:
+            for tool_call in response.tool_calls:
+                tool_function_name = tool_call.function.name
+                try:
+                    tool_arguments = safe_load_json(tool_call.function.arguments)
+                except Exception as e:
+                    # Log and respond with an error so the model can recover
+                    self.analysis_logger.error(f"Failed to parse tool arguments: {e}")
+                    function_response = json.dumps({"error": f"failed to parse arguments: {str(e)}"})
+                    messages.append(
+                        {
+                            "tool_call_id": tool_call.id,
+                            "role": "tool",
+                            "content": function_response,
+                        }
+                    )
+                    # ask the model for next action by continuing the loop
+                    continue
+                self.analysis_logger.info(f"Calling tool: {tool_function_name} with args: {tool_arguments}")
+                if tool_function_name == "set_conclusion":
+                    function_response = set_conclusion(**tool_arguments)
+                    if "error" in function_response:
+                        continue
+                    self.analysis_logger.info(f"Tool response: {function_response}")
+                    self.result_logger.info(f"{function_response}")
+                    return
+                elif tool_function_name in self.tool_functions:
+                    function_response = self.tool_functions[tool_function_name](**tool_arguments)
+                else:
+                    self.analysis_logger.error(f"Unknown tool call: {tool_function_name}")
+                    function_response = f"Error: Tool '{tool_function_name}' not found."
+                # Convert response to JSON string if it's not already a string
+                if not isinstance(function_response, str):
+                    function_response = json.dumps(function_response)
+                
+                self.analysis_logger.info(f"Tool response: {function_response}")   
+                messages.append(
+                    {
+                        "tool_call_id": tool_call.id,
+                        "role": "tool",
+                        "content": function_response,
+                    }
+                )
+            # Send the tool responses back to the model
+            response = self.get_response(messages, allowed_tools)
+            if not response.content: response.content = ""
+            self.analysis_logger.info(f"Model response: {response.content}")
+            messages.append(response)
+        return
+
 def create_analyzer(analyzer_type: str) -> FreeAnalysisModel:
     """Factory function to create an analyzer based on its type."""
     if analyzer_type == "free":
@@ -370,11 +364,15 @@ def create_analyzer(analyzer_type: str) -> FreeAnalysisModel:
             return GeminiFreeAnalyzer()
         elif LLM_TYPE == "DeepSeek":
             return DeepSeekFreeAnalyzer()
+        elif LLM_TYPE == "Qwen":
+            return QwenFreeAnalyzer()
         else:
             raise ValueError(f"Unknown LLM type: {LLM_TYPE}")
     elif analyzer_type == "function":
         if LLM_TYPE == "DeepSeek":
             return DeepSeekFunctionAnalyzer()
+        if LLM_TYPE == "Qwen":
+            return QwenFunctionAnalyzer()
         else:
             raise ValueError(f"Unknown LLM type: {LLM_TYPE}")
     else:
