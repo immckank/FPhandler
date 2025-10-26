@@ -141,10 +141,10 @@ call_function_desc_function = {
     }
 }
 
-ret_desc_function = {
+return_function_desc_function = {
     "type": "function",
     "function": {
-        "name": "ret",
+        "name": "return_function",
         "description": "Return to the caller of the current function. If the current function is the initial function of the analysis, this action will find all its call sites to create a worklist for further investigation.",
         "parameters": {
             "type": "object",

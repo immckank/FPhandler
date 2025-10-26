@@ -15,7 +15,7 @@ from tools import (
     check_source_line_desc_function,
     check_source_snippet_desc_function,
     call_function_desc_function,
-    ret_desc_function,
+    return_function_desc_function,
     check_current_function_desc_function,
     check_call_stack_desc_function,
     get_back_to_initial_function_desc_function,
@@ -27,18 +27,6 @@ import re
 from abc import ABC, abstractmethod
 from openai import OpenAI
 import memory_defect
-
-from tools import (
-    set_conclusion_desc_function,
-    check_source_line_desc_function,
-    check_source_snippet_desc_function,
-    check_current_function_desc_function,
-    check_call_stack_desc_function,
-    call_function_desc_function,
-    ret_desc_function,
-    get_back_to_initial_function_desc_function,
-    jump_to_function_desc_function,
-)
 
 
 class FunctionAnalysisModel(ABC):
@@ -54,7 +42,7 @@ class FunctionAnalysisModel(ABC):
             "check_source_line": self.check_source_line_Tool,
             "check_source_snippet": self.check_source_snippet_Tool,
             "call_function": self.call_function_Tool,
-            "ret": self.ret_function_Tool,
+            "return_function": self.return_function_Tool,
             "check_current_function": self.check_current_function_Tool,
             "get_back_to_initial_function": self.get_back_to_initial_function_Tool,
             "jump_to_function": self.jump_to_function_Tool,
@@ -123,8 +111,8 @@ class FunctionAnalysisModel(ABC):
             return "You are now working in function " + function_name + "\n" + json.dumps(callee_function, indent=4) + "\n"
         else:
             return "failed to call function " + function_name + "\n" + "the function is not a callee of " + current_function_name + "\n"
-    
-    def ret_function_Tool(self):
+
+    def return_function_Tool(self):
         if len(self.call_stack) > 1:
             self.call_stack.pop()
             return f"You are now working in function {self.call_stack[-1]["function_name"]}\n The function is from lien {self.call_stack[-1]['start_line']} to line {self.call_stack[-1]['end_line']}.\n {self.call_stack[-1]['called_info']} \n"
@@ -192,7 +180,7 @@ class FunctionAnalysisModel(ABC):
     def responseForAlter(self, alter : memory_defect.MemoryLeak):
         allowed_tools = [
             set_conclusion_desc_function, check_source_line_desc_function, check_source_snippet_desc_function, 
-            check_current_function_desc_function, call_function_desc_function, ret_desc_function,
+            check_current_function_desc_function, call_function_desc_function, return_function_desc_function,
             get_back_to_initial_function_desc_function, check_call_stack_desc_function
         ]
         malloc_loc = alter.get_source_location()
@@ -208,10 +196,10 @@ class FunctionAnalysisModel(ABC):
         project_prompt += PROJECT_DESC + "\n"
         function_prompt = f"You are now working in function {self.call_stack[-1]['function_name']}, which contains the source location of the alert.\n{json.dumps(self.call_stack[-1], indent=4)}"
         messages = [
-            {"role": "system", "content": SYS_PROMPT+ASSUMPTION_PROMPT},
+            {"role": "system", "content": SYS_PROMPT + ASSUMPTION_PROMPT + FUNCTION_PROMPT},
             {"role": "user", "content": project_prompt + alter.to_prompt() + function_prompt}
         ]   
-        self.analysis_logger.info(f"SYS prompt: {SYS_PROMPT+ASSUMPTION_PROMPT}")
+        self.analysis_logger.info(f"SYS prompt: {SYS_PROMPT + ASSUMPTION_PROMPT + FUNCTION_PROMPT}")
         self.analysis_logger.info(f"USER prompt: {project_prompt + alter.to_prompt() + function_prompt}")
         self.result_logger.info(f"\nUSER prompt: {alter.to_prompt()}\n")
         response = self.send_message(messages, allowed_tools)
