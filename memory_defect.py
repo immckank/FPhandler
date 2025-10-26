@@ -150,9 +150,68 @@ class DoubleFree(MemoryLeak):
         return Type_prompt + Guidance_prompt + Location_prompt + Code_prompt + Message_prompt + Code_prompt + Task_prompt
 
 class UseAfterFree(MemoryDefect):
-    def __init__(self, source_location):
+    class EventPair:
+        def __init__(self, free_location, use_locations):
+            self.free_location = free_location
+            self.use_locations = use_locations  # list of use locations
+
+        def get_free_location(self):
+            return self.free_location
+
+        def get_use_locations(self):
+            return self.use_locations
+
+    def __init__(self, source_location, event_pairs):
         super().__init__("UseAfterFree", source_location)
+        self.event_pairs = event_pairs  # list of EventPair objects
+
+    def get_event_pairs(self):
+        return self.event_pairs
 
     def to_prompt(self):
-        # feasible
-        return super().to_prompt()
+        type_prompt = f"Type of bug: {self.defect_type}.\n"
+        guidance_prompt = (
+            "Guidance on triaging this type of bug:\n"
+            "The warning is a true positive (TP) if:\n"
+            "  - There exists a feasible execution path where memory is freed and then used without reallocation\n"
+            "  - The use occurs after the free in program execution order\n"
+            "  - The same memory block is accessed after being freed\n\n"
+            "The warning is a false positive (FP) if:\n"
+            "  - The free and use are on mutually exclusive paths\n"
+            "  - The pointer is reallocated before use\n"
+            "  - The use occurs before the free in execution order\n"
+            "  - Different memory blocks are involved in free and use operations\n"
+        )
+        alloc_prompt = f"Memory allocation at: {self.source_location}\n"
+        alloc_code = f"Allocation code: {find_code_line(self.source_location)}\n\n"
+        events_prompt = "Free-Use Event Pairs:\n"
+        for i, pair in enumerate(self.event_pairs):
+            free_loc = pair.get_free_location()
+            events_prompt += f"Pair {i + 1}:\n"
+            events_prompt += f"  Free at: {free_loc}\n"
+            events_prompt += f"  Free code: {find_code_line(free_loc)}\n"
+
+            events_prompt += "  Use sites after this free:\n"
+            for use_loc in pair.get_use_locations():
+                events_prompt += f"    - Use at: {use_loc}\n"
+                events_prompt += f"      Use code: {find_code_line(use_loc)}\n"
+            events_prompt += "\n"
+
+        variable_name = extract_lhs_variable(find_code_line(self.source_location))
+        message_prompt = (
+            f"Message: Memory allocated to '{variable_name}' at {self.source_location} "
+            "is accessed after being freed in the paths shown above. "
+            "This results in undefined behavior and potential security vulnerabilities.\n"
+        )
+
+        task_prompt = "Task: Please classify this alert as TP, FP, or UNCERTAIN, and provide your reasoning."
+
+        return (
+                type_prompt +
+                guidance_prompt +
+                alloc_prompt +
+                alloc_code +
+                events_prompt +
+                message_prompt +
+                task_prompt
+        )
