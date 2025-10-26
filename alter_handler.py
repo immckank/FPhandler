@@ -1,15 +1,6 @@
-import os
-import re
-import json
-import sys
 import itertools
 
-from networkx.classes import nodes
-from networkx.utils.misc import nodes_equal
-
 from memory_defect import NeverFree, DoubleFree, PartialLeak, UseAfterFree
-
-from config import *
 from utils import *
 
 class AlterAnalyzer():
