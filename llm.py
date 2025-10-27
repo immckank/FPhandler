@@ -298,7 +298,7 @@ class QwenFreeAnalyzer(FreeAnalysisModel):
         project_prompt = f"You are now working for project {PROJECT_NAME}. "
         project_prompt += PROJECT_DESC + "\n"        
         self.analysis_logger.info(f"Prompt: {alter.to_prompt()}")
-        self.result_logger.info(f"Prompt: {alter.to_prompt()}")
+        self.result_logger.info(f"\nPrompt: {alter.to_prompt()}\n")
         messages = [
             {"role": "system", "content": SYS_PROMPT + ASSUMPTION_PROMPT},
             {"role": "user", "content": alter.to_prompt() + "\n" + project_prompt}

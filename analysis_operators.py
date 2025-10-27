@@ -824,11 +824,11 @@ if __name__ == '__main__':
     # print(find_callee("items.c:499"))
     # print(type(find_callee("stats_prefix.c:118")))
     # # printFunctionBodyByLocation(icfg, "stats_prefix.c:118");
-    # print(find_current_function("stats_prefix.c:118"))
+    print(find_current_function("tiff_jpeg.c:798"))
     # print(get_shortest_path_cond("restart.c:76", "restart.c:121"))
     # print(find_var_definitions("items.c:1573", "do_run_lru_maintainer_thread"))
     # print(find_var_decl("items.c:1573", "do_run_lru_maintainer_thread"))
     # print(libclang_available)
     # print(find_var_definitions("tiffinfo.c:303", "TIFFTAG_IMAGEWIDTH"))
     # print(dump_source_snippet("tif_dirread.c", 2310, 2330))
-    print(find_callers("EVP_CIPHER_CTX_free"))
+    # print(find_callers("EVP_CIPHER_CTX_free"))

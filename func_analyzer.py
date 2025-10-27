@@ -57,6 +57,12 @@ class FunctionAnalysisModel(ABC):
         )
         return response.choices[0].message  
 
+    def clear(self):
+        self.call_stack = []
+        self.call_sites_worklist = []
+        self.initial_function = None
+        self.call_graph = CallGraph()
+
 
     def check_call_stack_Tool(self):
         current_function_info = self.call_stack[-1]
@@ -183,13 +189,11 @@ class FunctionAnalysisModel(ABC):
             check_current_function_desc_function, call_function_desc_function, return_function_desc_function,
             get_back_to_initial_function_desc_function, check_call_stack_desc_function
         ]
+        self.clear()
         malloc_loc = alter.get_source_location()
         current_function = analysis_operators.find_current_function(malloc_loc)
-        self.call_stack = []
         self.call_stack.append(current_function)
         self.initial_function = current_function
-        self.call_sites_worklist = []
-        self.call_graph = CallGraph()
         self.call_graph.create_node(current_function)
         
         project_prompt = f"You are now working for project {PROJECT_NAME}. "
@@ -202,38 +206,41 @@ class FunctionAnalysisModel(ABC):
         self.analysis_logger.info(f"SYS prompt: {SYS_PROMPT + ASSUMPTION_PROMPT + FUNCTION_PROMPT}")
         self.analysis_logger.info(f"USER prompt: {project_prompt + alter.to_prompt() + function_prompt}")
         self.result_logger.info(f"\nUSER prompt: {alter.to_prompt()}\n")
+        
+        # 初始化第一次对话
         response = self.send_message(messages, allowed_tools)
-        if not response.content: response.content = ""
+        if not response.content: 
+            response.content = ""
         self.analysis_logger.info(f"Model response: {response.content}")
         messages.append(response)
-        while response.tool_calls:
+        
+        # 处理工具调用的循环
+        while True:
+            # 如果没有工具调用，退出循环
+            if not response.tool_calls:
+                break
+                
+            # 处理每个工具调用
             for tool_call in response.tool_calls:
                 tool_function_name = tool_call.function.name
+                
+                # 解析工具参数
                 try:
                     tool_arguments = safe_load_json(tool_call.function.arguments)
                 except Exception as e:
-                    # Log and respond with an error so the model can recover
                     self.analysis_logger.error(f"Failed to parse tool arguments: {e}")
                     function_response = json.dumps({"error": f"failed to parse arguments: {str(e)}"})
-                    messages.append(
-                        {
-                            "tool_call_id": tool_call.id,
-                            "role": "tool",
-                            "content": function_response,
-                        }
-                    )
-                    # ask the model for next action by continuing the loop
+                    messages.append({ "tool_call_id": tool_call.id, "role": "tool", "content": function_response })
                     continue
+                    
                 self.analysis_logger.info(f"Tool call: {tool_function_name} with arguments: {tool_arguments}")
                 
+                # 执行工具调用
                 if tool_function_name in self.tool_method_map:
                     tool_method = self.tool_method_map[tool_function_name]
-                    if tool_arguments:
-                        function_response = tool_method(**tool_arguments)
-                    else:
-                        function_response = tool_method()
-                        
-                    # Special handling for set_conclusion
+                    function_response = tool_method(**tool_arguments) if tool_arguments else tool_method()
+                    
+                    # 特殊处理set_conclusion工具的响应
                     if tool_function_name == "set_conclusion":
                         if "error" in function_response:
                             pass
@@ -247,29 +254,28 @@ class FunctionAnalysisModel(ABC):
                 else:
                     self.analysis_logger.error(f"Unknown tool call: {tool_function_name}")
                     function_response = f"Error: Tool '{tool_function_name}' not found."
+                    
+                # 格式化响应并添加到消息列表
                 if not isinstance(function_response, str):
                     function_response = json.dumps(function_response)
                 self.analysis_logger.info(f"Tool response: {function_response}")
-                messages.append(
-                    {
-                    "tool_call_id": tool_call.id,
-                    "role": "tool",
-                    "content": function_response,
-                    }
-                )
-            # 如果有未完成!done的call sites list 
-            #   允许模型使用工具jump_to_function
-            # 如果没有 检查有没有工具jump_to_function 有则删除
+                messages.append({ "tool_call_id": tool_call.id, "role": "tool", "content": function_response })
+            
+            # 更新允许的工具列表
             if any(not call_site['done'] for call_site in self.call_sites_worklist):
                 if jump_to_function_desc_function not in allowed_tools:
                     allowed_tools.append(jump_to_function_desc_function)
             else:
                 if jump_to_function_desc_function in allowed_tools:
                     allowed_tools.remove(jump_to_function_desc_function)
+            
+            # 获取下一轮响应
             response = self.send_message(messages, allowed_tools)
-            if not response.content: response.content = ""
+            if not response.content:
+                response.content = ""
             self.analysis_logger.info(f"Model response: {response.content}")
             messages.append(response)
+        
         return
 
 class DeepSeekFunctionAnalyzer(FunctionAnalysisModel):
@@ -289,7 +295,130 @@ class QwenFunctionAnalyzer(FunctionAnalysisModel):
             api_key=os.environ.get("QWEN_API_KEY"),
             base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         ) 
+    
+    def conclusion_xml_handling(self, response_content):
+        # 识别模式<>
+        pattern = r"<function=(.*?)>\s*<parameter=classification>\s*(.*?)\s*</parameter>\s*<parameter=reason>\s*(.*?)\s*</parameter>\s*</function>"
+        match = re.search(pattern, response_content, re.DOTALL)
+        if match:
+            classification = match.group(2)
+            reason = match.group(3)
+            return {"classification": classification, "reason": reason}
+        return None
+
+    def responseForAlter(self, alter : memory_defect.MemoryLeak):
+        allowed_tools = [
+            set_conclusion_desc_function, check_source_line_desc_function, check_source_snippet_desc_function, 
+            check_current_function_desc_function, call_function_desc_function, return_function_desc_function,
+            get_back_to_initial_function_desc_function, check_call_stack_desc_function
+        ]
+        self.clear()
+        malloc_loc = alter.get_source_location()
+        print(f"malloc_loc: {malloc_loc}")
+        current_function = analysis_operators.find_current_function(malloc_loc)
+        print(f"current_function: {current_function}")
+        self.call_stack.append(current_function)
+        self.initial_function = current_function
+        self.call_graph.create_node(current_function)
         
+        project_prompt = f"You are now working for project {PROJECT_NAME}. "
+        project_prompt += PROJECT_DESC + "\n"
+        function_prompt = f"You are now working in function {self.call_stack[-1]['function_name']}, which contains the source location of the alert.\n{json.dumps(self.call_stack[-1], indent=4)}"
+        messages = [
+            {"role": "system", "content": SYS_PROMPT + ASSUMPTION_PROMPT + FUNCTION_PROMPT},
+            {"role": "user", "content": project_prompt + alter.to_prompt() + function_prompt}
+        ]   
+        self.analysis_logger.info(f"SYS prompt: {SYS_PROMPT + ASSUMPTION_PROMPT + FUNCTION_PROMPT}")
+        self.analysis_logger.info(f"USER prompt: {project_prompt + alter.to_prompt() + function_prompt}")
+        self.result_logger.info(f"\nUSER prompt: {alter.to_prompt()}\n")
+        
+        # 初始化第一次对话
+        response = self.send_message(messages, allowed_tools)
+        if not response.content: 
+            response.content = ""
+        self.analysis_logger.info(f"Model response: {response.content}")
+        messages.append(response)
+        
+        # 处理工具调用的循环
+        while True:
+            # 如果没有工具调用，退出循环
+            if not response.tool_calls:
+                break
+                
+            # 处理每个工具调用
+            for tool_call in response.tool_calls:
+                tool_function_name = tool_call.function.name
+                
+                # 解析工具参数
+                try:
+                    tool_arguments = safe_load_json(tool_call.function.arguments)
+                except Exception as e:
+                    self.analysis_logger.error(f"Failed to parse tool arguments: {e}")
+                    function_response = json.dumps({"error": f"failed to parse arguments: {str(e)}"})
+                    messages.append({ "tool_call_id": tool_call.id, "role": "tool", "content": function_response })
+                    continue
+                    
+                self.analysis_logger.info(f"Tool call: {tool_function_name} with arguments: {tool_arguments}")
+                
+                # 执行工具调用
+                if tool_function_name in self.tool_method_map:
+                    tool_method = self.tool_method_map[tool_function_name]
+                    function_response = tool_method(**tool_arguments) if tool_arguments else tool_method()
+                    
+                    # 特殊处理set_conclusion工具的响应
+                    if tool_function_name == "set_conclusion":
+                        if "error" in function_response:
+                            pass
+                        elif not "classification" in function_response or not "reason" in function_response:
+                            # 返回的不是json格式 字段classification reason
+                            pass
+                        else:
+                            self.analysis_logger.info(f"Tool response: {function_response}")
+                            self.result_logger.info(f"{function_response}")
+                            return
+                else:
+                    self.analysis_logger.error(f"Unknown tool call: {tool_function_name}")
+                    function_response = f"Error: Tool '{tool_function_name}' not found."
+                    
+                # 格式化响应并添加到消息列表
+                if not isinstance(function_response, str):
+                    function_response = json.dumps(function_response)
+                self.analysis_logger.info(f"Tool response: {function_response}")
+                messages.append({ "tool_call_id": tool_call.id, "role": "tool", "content": function_response })
+            
+            # 更新允许的工具列表
+            if any(not call_site['done'] for call_site in self.call_sites_worklist):
+                if jump_to_function_desc_function not in allowed_tools:
+                    allowed_tools.append(jump_to_function_desc_function)
+            else:
+                if jump_to_function_desc_function in allowed_tools:
+                    allowed_tools.remove(jump_to_function_desc_function)
+            
+            # 获取下一轮响应
+            response = self.send_message(messages, allowed_tools)
+            if not response.content:
+                response.content = ""
+            conclusion = self.conclusion_xml_handling(response.content)
+            if conclusion:
+                # 表明模型尝试使用set_conclusion工具
+                # {"classification": classification, "reason": reason} 以这个参数尝试调用set_conclusion工具
+                classification = conclusion["classification"]
+                reason = conclusion["reason"]
+                function_response = self.set_conclusion_Tool(classification, reason)
+                if "error" in function_response or not "classification" in function_response or not "reason" in function_response:
+                    # 组装工具返回给模型
+                    self.analysis_logger.info(f"Tool response: {function_response}")
+                    messages.append({ "role": "user", "content": f"You should use tool set conclusion and an error occurred: {function_response}" })
+                else:
+                    # 模型实际上已经成功给出结论了
+                    self.analysis_logger.info(f"Tool response: {function_response}")
+                    self.result_logger.info(f"conclusion with xml: {function_response}")
+                    break
+            else:
+                self.analysis_logger.info(f"Model response: {response.content}")
+                messages.append(response)
+        
+        return 
 
 if __name__ == "__main__":
     # TIFFFillStrip
