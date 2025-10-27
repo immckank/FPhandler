@@ -11,6 +11,17 @@ from utils import *
 from prompts import *
 from call_graph import *
 from alter_handler import AlterAnalyzer
+from tools import (
+    check_source_line_desc_function,
+    check_source_snippet_desc_function,
+    call_function_desc_function,
+    return_function_desc_function,
+    check_current_function_desc_function,
+    check_call_stack_desc_function,
+    get_back_to_initial_function_desc_function,
+    jump_to_function_desc_function,
+    set_conclusion_desc_function
+)
 import re
 
 from abc import ABC, abstractmethod
@@ -26,24 +37,33 @@ class FunctionAnalysisModel(ABC):
         self.call_sites_worklist = []
         self.initial_function = None
         self.call_graph = None
-    
-    @abstractmethod
-    def responseToAlter(self, alter_prompt, user_prompt=""):
-        pass
-    
-    @abstractmethod
-    def responseForAlter(self, alter_prompt, user_prompt=""):
-        pass
-
-class DeepSeekFunctionAnalyzer(FunctionAnalysisModel):
-    def __init__(self, model_name="deepseek-chat"):
-        super().__init__()
-        self.model_name = model_name
-        self.client = OpenAI(
-            api_key=os.environ.get("DEEPSEEK_API_KEY"),
-            base_url="https://api.deepseek.com",
+        self.tool_method_map = {
+            "set_conclusion": self.set_conclusion_Tool,
+            "check_source_line": self.check_source_line_Tool,
+            "check_source_snippet": self.check_source_snippet_Tool,
+            "call_function": self.call_function_Tool,
+            "return_function": self.return_function_Tool,
+            "check_current_function": self.check_current_function_Tool,
+            "get_back_to_initial_function": self.get_back_to_initial_function_Tool,
+            "jump_to_function": self.jump_to_function_Tool,
+            "check_call_stack": self.check_call_stack_Tool
+        }
+        
+    def send_message(self, messages, tools=""):
+        response = self.client.chat.completions.create(
+            model=self.model_name,
+            messages=messages,
+            tools=tools
         )
-    
+        return response.choices[0].message  
+
+    def clear(self):
+        self.call_stack = []
+        self.call_sites_worklist = []
+        self.initial_function = None
+        self.call_graph = CallGraph()
+
+
     def check_call_stack_Tool(self):
         current_function_info = self.call_stack[-1]
         res_str = "You are now working in function " + current_function_info["function_name"] + "\n"
@@ -97,8 +117,8 @@ class DeepSeekFunctionAnalyzer(FunctionAnalysisModel):
             return "You are now working in function " + function_name + "\n" + json.dumps(callee_function, indent=4) + "\n"
         else:
             return "failed to call function " + function_name + "\n" + "the function is not a callee of " + current_function_name + "\n"
-    
-    def ret_function_Tool(self):
+
+    def return_function_Tool(self):
         if len(self.call_stack) > 1:
             self.call_stack.pop()
             return f"You are now working in function {self.call_stack[-1]["function_name"]}\n The function is from lien {self.call_stack[-1]['start_line']} to line {self.call_stack[-1]['end_line']}.\n {self.call_stack[-1]['called_info']} \n"
@@ -150,7 +170,7 @@ class DeepSeekFunctionAnalyzer(FunctionAnalysisModel):
         return "You are now working in function triggers alter " + self.initial_function["function_name"] + "\n" + json.dumps(self.initial_function, indent=4) + "\n"
 
     def set_conclusion_Tool(self, classification, reason):
-        res_str = "You should check all the function call sites first."
+        res_str = "You should check all the function call sites first.\n"
         permission = True
         if self.initial_function["function_name"] in [cs["function_name"] for cs in self.call_stack] and self.initial_function["function_name"] != self.call_stack[-1]["function_name"]:
             return "You should check along the return path to the initial function to come to a conclusion.\n" + self.check_call_stack_Tool()
@@ -159,286 +179,247 @@ class DeepSeekFunctionAnalyzer(FunctionAnalysisModel):
                 res_str += f"function {call_site['function_name']} called {call_site['callee']} at {call_site['location']} : {call_site['code']} has not done yet\n"
                 permission = False
         if not permission:
-            return res_str
+            return res_str + "You can jump to one of the unfinished call sites using the 'jump_to_function' tool to finish your analysis.\n"
         else:
             return analysis_operators.set_conclusion(classification, reason)
 
-    def send_message(self, messages, tools=""):
-        response = self.client.chat.completions.create(
-            model=self.model_name,
-            messages=messages,
-            tools=tools
-        )
-        return response.choices[0].message  
-
-    def responseToAlter(self, alter_prompt, user_prompt=""):
-        return None
-    
     def responseForAlter(self, alter : memory_defect.MemoryLeak):
-        allowed_tools = []
-        # set conclusion
-        allowed_tools.append({
-            "type": "function",
-            "function": {
-                "name": "set_conclusion",
-                "description": "Sets the final conclusion for an alert analysis. This function should be called at the end of an analysis to provide a definitive classification and the reasoning behind it.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "classification": {
-                            "type": "string",
-                            "description": "The classification of the alert, must be one of 'FP' (False Positive), 'TP' (True Positive), or 'UNCERTAIN'.",
-                            "enum": ["FP", "TP", "UNCERTAIN"]
-                        },
-                        "reason": {
-                            "type": "string",
-                            "description": "A detailed explanation for the given classification."
-                        }
-                    },
-                    "required": ["classification", "reason"]
-                }
-            }
-        })
-        # check source line
-        allowed_tools.append({
-            "type": "function",
-            "function": {
-                "name": "check_source_line",
-                "description": "Dumps a single line of source code from a file and check whether it is in the current function.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "file_name": {"type": "string", "description": "The name of the file relative to the project root."},
-                        "line_number": {"type": "integer", "description": "The line number of the source code."}
-                    },
-                    "required": ["file_name", "line_number"]
-                }
-            }
-        })
-        # check source snippet
-        allowed_tools.append({
-            "type": "function",
-            "function": {
-                "name": "check_source_snippet",
-                "description": "Dumps code snippet of source code inside current function from a file between the given line numbers.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "file_name": {"type": "string", "description": "The name of the file relative to the project root."},
-                        "start_line": {"type": "integer", "description": "The starting line number of the snippet."},
-                        "end_line": {"type": "integer", "description": "The ending line number of the snippet."}
-                    },
-                    "required": ["file_name", "start_line", "end_line"]
-                }
-            }
-        })
-        # call function
-        allowed_tools.append({
-            "type": "function",
-            "function": {
-                "name": "call_function",
-                "description": "Get to work in a new function called by the current function.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "function_name": {"type": "string", "description": "The name of the function to call."},
-                        "line_number": {"type": "integer", "description": "The line number where the function is called."}
-                    },
-                    "required": ["function_name", "line_number"]
-                }
-            }
-        })
-        # ret 
-        allowed_tools.append({
-            "type": "function",
-            "function": {
-                "name": "ret",
-                "description": "Return to the caller of the current function. If the current function is the initial function of the analysis, this action will find all its call sites to create a worklist for further investigation.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {},
-                    "required": []
-                }
-            }
-        })
-        # check current function
-        allowed_tools.append({
-            "type": "function",
-            "function": {
-                "name": "check_current_function",
-                "description": "Check the current function name and function body in source code.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {},
-                    "required": []
-                }                
-            }
-        })
-        # check call stack
-        allowed_tools.append({
-            "type": "function",
-            "function": {
-                "name": "check_call_stack",
-                "description": "Check your call chain to the current function.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {},
-                    "required": []
-                }  
-            }
-        })                
-        # get back to initial function
-        allowed_tools.append({
-            "type": "function",
-            "function": {
-                "name": "get_back_to_initial_function",
-                "description": "Get back to the initial function of the analysis.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {},
-                    "required": []
-                } 
-            }
-        })
-        
-        jump_tool = {
-            "type": "function",
-            "function": {
-                "name": "jump_to_function",
-                "description": "Jump to a specific function from the call site worklist to continue the analysis there. This is used after returning from the initial function to investigate its callers.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "function_name": {
-                            "type": "string", 
-                            "description": "The name of the function to jump to. Must be one of the functions from the call site worklist that has not been marked as 'done'."
-                        }
-                    },
-                    "required": ["function_name"]
-                }
-            }
-        }
-
-        # 模型应该从变量创建的函数出发
-        # case 在当前函数内被free 只需要分析当前函数内的分支跳转等就可以
-        # case 在其他函数内被free 让模型沿着调用图向图深处发生call 在某个子位置发生了free
-        # case 作为返回值传递给了调用者后 由外部函数free 要找到所有callsites 是不是都进行负责了free
-        # 数据结构 调用栈 栈顶是current 
-        # 调用栈存func info信息 
-        # filename function_name start_line end_line function_body
-
+        allowed_tools = [
+            set_conclusion_desc_function, check_source_line_desc_function, check_source_snippet_desc_function, 
+            check_current_function_desc_function, call_function_desc_function, return_function_desc_function,
+            get_back_to_initial_function_desc_function, check_call_stack_desc_function
+        ]
+        self.clear()
         malloc_loc = alter.get_source_location()
         current_function = analysis_operators.find_current_function(malloc_loc)
-        self.call_stack = []
         self.call_stack.append(current_function)
         self.initial_function = current_function
-        self.call_sites_worklist = []
-        self.call_graph = CallGraph()
         self.call_graph.create_node(current_function)
         
         project_prompt = f"You are now working for project {PROJECT_NAME}. "
         project_prompt += PROJECT_DESC + "\n"
         function_prompt = f"You are now working in function {self.call_stack[-1]['function_name']}, which contains the source location of the alert.\n{json.dumps(self.call_stack[-1], indent=4)}"
         messages = [
-            {"role": "system", "content": SYS_PROMPT+ASSUMPTION_PROMPT},
+            {"role": "system", "content": SYS_PROMPT + ASSUMPTION_PROMPT + FUNCTION_PROMPT},
             {"role": "user", "content": project_prompt + alter.to_prompt() + function_prompt}
         ]   
-        self.analysis_logger.info(f"SYS prompt: {SYS_PROMPT+ASSUMPTION_PROMPT}")
+        self.analysis_logger.info(f"SYS prompt: {SYS_PROMPT + ASSUMPTION_PROMPT + FUNCTION_PROMPT}")
         self.analysis_logger.info(f"USER prompt: {project_prompt + alter.to_prompt() + function_prompt}")
         self.result_logger.info(f"\nUSER prompt: {alter.to_prompt()}\n")
+        
+        # 初始化第一次对话
         response = self.send_message(messages, allowed_tools)
+        if not response.content: 
+            response.content = ""
         self.analysis_logger.info(f"Model response: {response.content}")
         messages.append(response)
-        while response.tool_calls:
+        
+        # 处理工具调用的循环
+        while True:
+            # 如果没有工具调用，退出循环
+            if not response.tool_calls:
+                break
+                
+            # 处理每个工具调用
             for tool_call in response.tool_calls:
                 tool_function_name = tool_call.function.name
+                
+                # 解析工具参数
                 try:
                     tool_arguments = safe_load_json(tool_call.function.arguments)
                 except Exception as e:
-                    # Log and respond with an error so the model can recover
                     self.analysis_logger.error(f"Failed to parse tool arguments: {e}")
                     function_response = json.dumps({"error": f"failed to parse arguments: {str(e)}"})
-                    messages.append(
-                        {
-                            "tool_call_id": tool_call.id,
-                            "role": "tool",
-                            "content": function_response,
-                        }
-                    )
-                    # ask the model for next action by continuing the loop
+                    messages.append({ "tool_call_id": tool_call.id, "role": "tool", "content": function_response })
                     continue
+                    
                 self.analysis_logger.info(f"Tool call: {tool_function_name} with arguments: {tool_arguments}")
-                if tool_function_name == "set_conclusion":
-                    function_response = self.set_conclusion_Tool(**tool_arguments)
-                    if "error" in function_response:
-                        pass
-                    elif not "classification" in function_response or not "reason" in function_response:
-                        # 返回的不是json格式 字段classification reason
-                        pass
-                    else:
-                        self.analysis_logger.info(f"Tool response: {function_response}")
-                        self.result_logger.info(f"{function_response}")
-                        return
-                elif tool_function_name == "check_source_line":
-                    function_response = self.check_source_line_Tool(**tool_arguments)
-                elif tool_function_name == "check_source_snippet":
-                    function_response = self.check_source_snippet_Tool(**tool_arguments)
-                elif tool_function_name == "call_function":
-                    function_response = self.call_function_Tool(**tool_arguments)
-                elif tool_function_name == "ret":
-                    function_response = self.ret_function_Tool()
-                elif tool_function_name == "check_current_function":
-                    function_response = self.check_current_function_Tool()
-                elif tool_function_name == "get_back_to_initial_function":
-                    function_response = self.get_back_to_initial_function_Tool()
-                elif tool_function_name == "jump_to_function":
-                    function_response = self.jump_to_function_Tool(**tool_arguments)
-                elif tool_function_name == "check_call_stack":
-                    function_response = self.check_call_stack_Tool()
+                
+                # 执行工具调用
+                if tool_function_name in self.tool_method_map:
+                    tool_method = self.tool_method_map[tool_function_name]
+                    function_response = tool_method(**tool_arguments) if tool_arguments else tool_method()
+                    
+                    # 特殊处理set_conclusion工具的响应
+                    if tool_function_name == "set_conclusion":
+                        if "error" in function_response:
+                            pass
+                        elif not "classification" in function_response or not "reason" in function_response:
+                            # 返回的不是json格式 字段classification reason
+                            pass
+                        else:
+                            self.analysis_logger.info(f"Tool response: {function_response}")
+                            self.result_logger.info(f"{function_response}")
+                            return
                 else:
                     self.analysis_logger.error(f"Unknown tool call: {tool_function_name}")
                     function_response = f"Error: Tool '{tool_function_name}' not found."
+                    
+                # 格式化响应并添加到消息列表
                 if not isinstance(function_response, str):
                     function_response = json.dumps(function_response)
                 self.analysis_logger.info(f"Tool response: {function_response}")
-                messages.append(
-                    {
-                    "tool_call_id": tool_call.id,
-                    "role": "tool",
-                    "content": function_response,
-                    }
-                )
-            # 如果有未完成!done的call sites list 
-            #   允许模型使用工具jump_to_function
-            # 如果没有 检查有没有工具jump_to_function 有则删除
+                messages.append({ "tool_call_id": tool_call.id, "role": "tool", "content": function_response })
+            
+            # 更新允许的工具列表
             if any(not call_site['done'] for call_site in self.call_sites_worklist):
-                if jump_tool not in allowed_tools:
-                    allowed_tools.append(jump_tool)
+                if jump_to_function_desc_function not in allowed_tools:
+                    allowed_tools.append(jump_to_function_desc_function)
             else:
-                if jump_tool in allowed_tools:
-                    allowed_tools.remove(jump_tool)
+                if jump_to_function_desc_function in allowed_tools:
+                    allowed_tools.remove(jump_to_function_desc_function)
+            
+            # 获取下一轮响应
             response = self.send_message(messages, allowed_tools)
+            if not response.content:
+                response.content = ""
             self.analysis_logger.info(f"Model response: {response.content}")
             messages.append(response)
         
-        # 在一个函数内模型需要的工具
-        # check line(line num) 函数内 函数外两套说明
-        # check value flow in func(varname/loc)
-        # check global() 告诉模型所有全局变量/对象名？这个能实现吗
+        return
 
-        # 函数调用
-        # call func(func name) 检查当前函数是不是能调用所给的函数名
-        # 若能 告知模型跳转到新的函数内部工作
-        # 若不能 告知模型依然在当前函数 仅提供模型需要的函数的展示信息
-
-        # 函数返回
-        # ret func() 检查当前调用栈内的信息
-        # 如果超过1个 弹出栈顶 更新新的目前的函数信息 告诉模型
-        # 如果只有1个 告诉模型所有当前函数的caller 再进行一次特殊对话使用工具ret to func(func name)
-
-        # 回到最一开始的函数位置
-        # reset func() 同时会重置调用栈
+class DeepSeekFunctionAnalyzer(FunctionAnalysisModel):
+    def __init__(self, model_name="deepseek-chat"):
+        super().__init__()
+        self.model_name = model_name
+        self.client = OpenAI(
+            api_key=os.environ.get("DEEPSEEK_API_KEY"),
+            base_url="https://api.deepseek.com",
+        )
         
+class QwenFunctionAnalyzer(FunctionAnalysisModel):
+    def __init__(self, model_name="qwen3-max"):
+        super().__init__()
+        self.model_name = model_name
+        self.client = OpenAI(
+            api_key=os.environ.get("QWEN_API_KEY"),
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        ) 
+    
+    def conclusion_xml_handling(self, response_content):
+        # 识别模式<>
+        pattern = r"<function=(.*?)>\s*<parameter=classification>\s*(.*?)\s*</parameter>\s*<parameter=reason>\s*(.*?)\s*</parameter>\s*</function>"
+        match = re.search(pattern, response_content, re.DOTALL)
+        if match:
+            classification = match.group(2)
+            reason = match.group(3)
+            return {"classification": classification, "reason": reason}
+        return None
+
+    def responseForAlter(self, alter : memory_defect.MemoryLeak):
+        allowed_tools = [
+            set_conclusion_desc_function, check_source_line_desc_function, check_source_snippet_desc_function, 
+            check_current_function_desc_function, call_function_desc_function, return_function_desc_function,
+            get_back_to_initial_function_desc_function, check_call_stack_desc_function
+        ]
+        self.clear()
+        malloc_loc = alter.get_source_location()
+        print(f"malloc_loc: {malloc_loc}")
+        current_function = analysis_operators.find_current_function(malloc_loc)
+        print(f"current_function: {current_function}")
+        self.call_stack.append(current_function)
+        self.initial_function = current_function
+        self.call_graph.create_node(current_function)
+        
+        project_prompt = f"You are now working for project {PROJECT_NAME}. "
+        project_prompt += PROJECT_DESC + "\n"
+        function_prompt = f"You are now working in function {self.call_stack[-1]['function_name']}, which contains the source location of the alert.\n{json.dumps(self.call_stack[-1], indent=4)}"
+        messages = [
+            {"role": "system", "content": SYS_PROMPT + ASSUMPTION_PROMPT + FUNCTION_PROMPT},
+            {"role": "user", "content": project_prompt + alter.to_prompt() + function_prompt}
+        ]   
+        self.analysis_logger.info(f"SYS prompt: {SYS_PROMPT + ASSUMPTION_PROMPT + FUNCTION_PROMPT}")
+        self.analysis_logger.info(f"USER prompt: {project_prompt + alter.to_prompt() + function_prompt}")
+        self.result_logger.info(f"\nUSER prompt: {alter.to_prompt()}\n")
+        
+        # 初始化第一次对话
+        response = self.send_message(messages, allowed_tools)
+        if not response.content: 
+            response.content = ""
+        self.analysis_logger.info(f"Model response: {response.content}")
+        messages.append(response)
+        
+        # 处理工具调用的循环
+        while True:
+            # 如果没有工具调用，退出循环
+            if not response.tool_calls:
+                break
+                
+            # 处理每个工具调用
+            for tool_call in response.tool_calls:
+                tool_function_name = tool_call.function.name
+                
+                # 解析工具参数
+                try:
+                    tool_arguments = safe_load_json(tool_call.function.arguments)
+                except Exception as e:
+                    self.analysis_logger.error(f"Failed to parse tool arguments: {e}")
+                    function_response = json.dumps({"error": f"failed to parse arguments: {str(e)}"})
+                    messages.append({ "tool_call_id": tool_call.id, "role": "tool", "content": function_response })
+                    continue
+                    
+                self.analysis_logger.info(f"Tool call: {tool_function_name} with arguments: {tool_arguments}")
+                
+                # 执行工具调用
+                if tool_function_name in self.tool_method_map:
+                    tool_method = self.tool_method_map[tool_function_name]
+                    function_response = tool_method(**tool_arguments) if tool_arguments else tool_method()
+                    
+                    # 特殊处理set_conclusion工具的响应
+                    if tool_function_name == "set_conclusion":
+                        if "error" in function_response:
+                            pass
+                        elif not "classification" in function_response or not "reason" in function_response:
+                            # 返回的不是json格式 字段classification reason
+                            pass
+                        else:
+                            self.analysis_logger.info(f"Tool response: {function_response}")
+                            self.result_logger.info(f"{function_response}")
+                            return
+                else:
+                    self.analysis_logger.error(f"Unknown tool call: {tool_function_name}")
+                    function_response = f"Error: Tool '{tool_function_name}' not found."
+                    
+                # 格式化响应并添加到消息列表
+                if not isinstance(function_response, str):
+                    function_response = json.dumps(function_response)
+                self.analysis_logger.info(f"Tool response: {function_response}")
+                messages.append({ "tool_call_id": tool_call.id, "role": "tool", "content": function_response })
+            
+            # 更新允许的工具列表
+            if any(not call_site['done'] for call_site in self.call_sites_worklist):
+                if jump_to_function_desc_function not in allowed_tools:
+                    allowed_tools.append(jump_to_function_desc_function)
+            else:
+                if jump_to_function_desc_function in allowed_tools:
+                    allowed_tools.remove(jump_to_function_desc_function)
+            
+            # 获取下一轮响应
+            response = self.send_message(messages, allowed_tools)
+            if not response.content:
+                response.content = ""
+            conclusion = self.conclusion_xml_handling(response.content)
+            if conclusion:
+                # 表明模型尝试使用set_conclusion工具
+                # {"classification": classification, "reason": reason} 以这个参数尝试调用set_conclusion工具
+                classification = conclusion["classification"]
+                reason = conclusion["reason"]
+                function_response = self.set_conclusion_Tool(classification, reason)
+                if "error" in function_response or not "classification" in function_response or not "reason" in function_response:
+                    # 组装工具返回给模型
+                    self.analysis_logger.info(f"Tool response: {function_response}")
+                    messages.append({ "role": "user", "content": f"You should use tool set conclusion and an error occurred: {function_response}" })
+                else:
+                    # 模型实际上已经成功给出结论了
+                    self.analysis_logger.info(f"Tool response: {function_response}")
+                    self.result_logger.info(f"conclusion with xml: {function_response}")
+                    break
+            else:
+                self.analysis_logger.info(f"Model response: {response.content}")
+                messages.append(response)
+        
+        return 
+
 if __name__ == "__main__":
     # TIFFFillStrip
     print(analysis_operators.find_function_body("TIFFFillStrip"))
