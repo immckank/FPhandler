@@ -99,10 +99,11 @@ def find_callers(function_name: str) -> List[Dict[str, Any]]:
         Returns an empty list if no callers are found or an error occurs.
     """
     command_caller = CommandCaller()
-    res = command_caller.call_graph_reader_with_args(
-        f"-find-call-sites={function_name}",
-        os.path.join(PUT_ROOT_PATH, f"{PUT_NAME}.bc")
-    )
+    query = {
+        "command": "find-all-function-call-sites",
+        "name": function_name
+    }
+    res = command_caller.send_query(query)
     call_sites_list = []
     if res:
         res_json = json.loads(res)
@@ -120,47 +121,52 @@ def find_callers(function_name: str) -> List[Dict[str, Any]]:
             return call_sites_list
     return []
 
-# 暂时不用了
-def find_callee(source_location: str) -> Optional[List[Dict[str, Any]]]:
-    """Finds the function body of functions called at a specific source location.
+# # 暂时不用了
+# def find_callee(source_location: str) -> Optional[List[Dict[str, Any]]]:
+#     """Finds the function body of functions called at a specific source location.
 
-    Args:
-        source_location: The source location of the call site, in the format
-                         'filename.c:line_number'.
+#     Args:
+#         source_location: The source location of the call site, in the format
+#                          'filename.c:line_number'.
 
-    Returns:
-        A list of dictionaries, each representing a callee function, including its
-        name, file, line numbers, and full body. Returns None if the location
-        is invalid or no callee is found.
-        Example:
-        [{'function_name': 'callee_func', 'filename': 'a.c', 'start_line': 10,
-          'end_line': 20, 'function_body': '...'}]
-    """
-    # 基于LLVM来实现不要使用基于文本的查找
-    # 检查source_location是否合法
-    if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', source_location):
-        logging.error(f"Invalid source location format: {source_location}")
-        return None
-    command_caller = CommandCaller()
-    res = command_caller.call_graph_reader_with_args(
-        f"-find-callee-body={source_location}",
-        os.path.join(PUT_ROOT_PATH, f"{PUT_NAME}.bc")
-    )
-    if res:
-        res_json = json.loads(res)
-        error = res_json.get("error", None)
-        if error:
-            logging.error(f"Error finding callee for {source_location}: {error} {res_json}")
-        else:
-            # 删除error属性
-            del res_json["error"]
-            callee_functions = res_json.get("callee_functions", [])
-            for func in callee_functions:
-                func_body = dump_source_snippet(func["filename"], func['start_line'], func['end_line'])
-                # 为func添加func_body属性
-                func["function_body"] = func_body
-            return callee_functions
-    return None
+#     Returns:
+#         A list of dictionaries, each representing a callee function, including its
+#         name, file, line numbers, and full body. Returns None if the location
+#         is invalid or no callee is found.
+#         Example:
+#         [{'function_name': 'callee_func', 'filename': 'a.c', 'start_line': 10,
+#           'end_line': 20, 'function_body': '...'}]
+#     """
+#     # 基于LLVM来实现不要使用基于文本的查找
+#     # 检查source_location是否合法
+#     if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', source_location):
+#         logging.error(f"Invalid source location format: {source_location}")
+#         return None
+#     command_caller = CommandCaller()
+#     res = command_caller.call_graph_reader_with_args(
+#         f"-find-callee-body={source_location}",
+#         os.path.join(PUT_ROOT_PATH, f"{PUT_NAME}.bc")
+#     )
+#     query = {
+#         "command": "find-callee-body",
+#         "location": source_location
+#     }
+#     res = command_caller.send_query(query)
+#     if res:
+#         res_json = json.loads(res)
+#         error = res_json.get("error", None)
+#         if error:
+#             logging.error(f"Error finding callee for {source_location}: {error} {res_json}")
+#         else:
+#             # 删除error属性
+#             del res_json["error"]
+#             callee_functions = res_json.get("callee_functions", [])
+#             for func in callee_functions:
+#                 func_body = dump_source_snippet(func["filename"], func['start_line'], func['end_line'])
+#                 # 为func添加func_body属性
+#                 func["function_body"] = func_body
+#             return callee_functions
+#     return None
 
 def find_function_body(function_name: str) -> Optional[Dict[str, Any]]:
     """Finds the function body by its name.
@@ -176,10 +182,11 @@ def find_function_body(function_name: str) -> Optional[Dict[str, Any]]:
          'end_line': 25, 'function_body': '...'}
     """
     command_caller = CommandCaller()
-    res = command_caller.call_graph_reader_with_args(
-        f"-find-body-by-name={function_name}",
-        os.path.join(PUT_ROOT_PATH, f"{PUT_NAME}.bc")
-    )
+    query = {
+        "command": "find-function-body-by-name",
+        "name": function_name
+    }
+    res = command_caller.send_query(query)
     if res:
         res_json = json.loads(res)
         error = res_json.get("error", None)
@@ -209,10 +216,11 @@ def find_current_function(source_location: str) -> Optional[Dict[str, Any]]:
     if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', source_location):
         return {"error": "Invalid source location format, source_location should be in the format 'filename.c:line_number'."}
     command_caller = CommandCaller()
-    res = command_caller.call_graph_reader_with_args(
-        f"-find-function-body={source_location}", 
-        os.path.join(PUT_ROOT_PATH, f"{PUT_NAME}.bc")
-    )
+    query = {
+        "command": "find-function-body-by-location",
+        "location": source_location
+    }
+    res = command_caller.send_query(query)
     if res:
         res_json = json.loads(res)
         error = res_json.get("error", None)
@@ -229,10 +237,11 @@ def find_current_function(source_location: str) -> Optional[Dict[str, Any]]:
 
 def find_all_callees(function_name: str) -> List[Dict[str, Any]]:
     command_caller = CommandCaller()
-    res = command_caller.call_graph_reader_with_args(
-        f"-find-all-callees={function_name}",
-        os.path.join(PUT_ROOT_PATH, f"{PUT_NAME}.bc")
-    )
+    query = {
+        "command": "find-all-function-callees",
+        "name": function_name
+    }
+    res = command_caller.send_query(query)
     if res:
         res_json = json.loads(res)
         error = res_json.get("error", None)
@@ -569,6 +578,12 @@ def get_shortest_path_cond(start_location: str, target_location: str):
         f"-path-cond-func-end={target_location}",
         os.path.join(PUT_ROOT_PATH, f"{PUT_NAME}.bc")
     )
+    query = {
+        "command": "path-cond-func", # Assuming this is the command name in C++
+        "start_location": start_location,
+        "target_location": target_location
+    }
+    res = command_caller_instance.send_query(query)
     if res:
         res_json = json.loads(res)
         error = res_json.get("error", None)
@@ -668,6 +683,12 @@ def get_path_cond_func_(start_location: str, start_code: str, target_location: s
         f"-path-cond-func-end={target_location}",
         os.path.join(PUT_ROOT_PATH, f"{PROJECT_NAME}.bc")
     )
+    query = {
+        "command": "path-cond-func",
+        "start_location": start_location,
+        "target_location": target_location
+    }
+    res = command_caller.send_query(query)
     if res:
         res_json = json.loads(res)
         error = res_json.get("error", None)
@@ -723,6 +744,12 @@ def get_path_cond_func(start_location: str, target_location: str) -> Optional[Li
         f"-path-cond-func-end={target_location}",
         os.path.join(PUT_ROOT_PATH, f"{PROJECT_NAME}.bc")
     )
+    query = {
+        "command": "path-cond-func",
+        "start_location": start_location,
+        "target_location": target_location
+    }
+    res = command_caller.send_query(query)
     if res:
         res_json = json.loads(res)
         error = res_json.get("error", None)

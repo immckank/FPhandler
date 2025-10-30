@@ -198,7 +198,7 @@ class FunctionAnalysisModel(ABC):
         
         project_prompt = f"You are now working for project {PROJECT_NAME}. "
         project_prompt += PROJECT_DESC + "\n"
-        function_prompt = f"You are now working in function {self.call_stack[-1]['function_name']}, which contains the source location of the alert.\n{json.dumps(self.call_stack[-1], indent=4)}"
+        function_prompt = f"\nYou are now working in function {self.call_stack[-1]['function_name']}, which contains the source location of the alert.\n{json.dumps(self.call_stack[-1], indent=4)}"
         messages = [
             {"role": "system", "content": SYS_PROMPT + ASSUMPTION_PROMPT + FUNCTION_PROMPT},
             {"role": "user", "content": project_prompt + alter.to_prompt() + function_prompt}
@@ -323,7 +323,7 @@ class QwenFunctionAnalyzer(FunctionAnalysisModel):
         
         project_prompt = f"You are now working for project {PROJECT_NAME}. "
         project_prompt += PROJECT_DESC + "\n"
-        function_prompt = f"You are now working in function {self.call_stack[-1]['function_name']}, which contains the source location of the alert.\n{json.dumps(self.call_stack[-1], indent=4)}"
+        function_prompt = f"\nYou are now working in function {self.call_stack[-1]['function_name']}, which contains the source location of the alert.\n{json.dumps(self.call_stack[-1], indent=4)}"
         messages = [
             {"role": "system", "content": SYS_PROMPT + ASSUMPTION_PROMPT + FUNCTION_PROMPT},
             {"role": "user", "content": project_prompt + alter.to_prompt() + function_prompt}
