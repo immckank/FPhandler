@@ -49,13 +49,78 @@ def setup_logger(log_type):
         raise ValueError("Invalid log type")
 
 # 找到指定项目中指定文件名的路径
+# def find_file_path(file_name):
+#     for root, dirs, files in os.walk(os.path.join(PUT_ROOT_PATH, PROJECT_NAME)):
+#         if file_name in files:
+#             # 路径中不包含PUT_ROOT_PATH
+#             full_path = os.path.join(root, file_name)
+#             return os.path.relpath(full_path, PUT_ROOT_PATH)
+#     return None
+
 def find_file_path(file_name):
+    """
+    找到指定项目中指定文件名的路径。
+    
+    支持两种输入格式：
+    1. 简单文件名：如 "tiffcrop.c"
+    2. 相对路径：如 "libtiff/tiffcrop.c" 或 "crypto/evp/e_des3.c"
+    
+    如果有多个同名文件，优先返回路径匹配度最高的那个。
+    """
+    # 提取文件名部分
+    base_name = os.path.basename(file_name)
+    
+    # 提取传入的相对路径部分（用于匹配）
+    input_dir = os.path.dirname(file_name) if os.sep in file_name or '/' in file_name else ""
+    # 标准化路径分隔符
+    input_dir = input_dir.replace('\\', '/').replace(os.sep, '/')
+    
+    # 移除 PROJECT_NAME 前缀（如果存在）
+    if input_dir.startswith(PROJECT_NAME + '/'):
+        input_dir = input_dir[len(PROJECT_NAME) + 1:]
+    
+    # 搜索所有匹配的文件路径
+    matching_paths = []
     for root, dirs, files in os.walk(os.path.join(PUT_ROOT_PATH, PROJECT_NAME)):
-        if file_name in files:
-            # 路径中不包含PUT_ROOT_PATH
-            full_path = os.path.join(root, file_name)
-            return os.path.relpath(full_path, PUT_ROOT_PATH)
-    return None
+        if base_name in files:
+            full_path = os.path.join(root, base_name)
+            rel_path = os.path.relpath(full_path, PUT_ROOT_PATH)
+            matching_paths.append(rel_path)
+    
+    # 如果没找到任何匹配
+    if not matching_paths:
+        return None
+    
+    # 如果只有一个匹配，直接返回
+    if len(matching_paths) == 1:
+        return matching_paths[0]
+    
+    # 如果有多个匹配且传入的是路径，选择最匹配的
+    if input_dir:
+        best_match = None
+        best_score = -1
+        
+        for path in matching_paths:
+            # 标准化路径用于比较
+            normalized_path = path.replace('\\', '/').replace(os.sep, '/')
+            
+            # 如果完全包含输入的相对路径，优先选择
+            if input_dir in normalized_path:
+                # 计算匹配度：路径结尾匹配越长，得分越高
+                if normalized_path.endswith(input_dir + '/' + base_name):
+                    return path  # 完美匹配，直接返回
+                
+                # 计算路径相似度
+                score = len(input_dir)
+                if score > best_score:
+                    best_score = score
+                    best_match = path
+        
+        if best_match:
+            return best_match
+    
+    # 如果没有匹配成功或只传入文件名，返回第一个找到的
+    return matching_paths[0]
 
 # 根据指定scource_location找到对应的代码行
 def find_code_line(source_location):

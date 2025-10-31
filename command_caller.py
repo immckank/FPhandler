@@ -13,7 +13,7 @@ class CommandCaller:
             cls._instance = super(CommandCaller, cls).__new__(cls)
         return cls._instance
 
-    def __init__(self, setupbash_path="../SVFmemplus/setup.sh", startup_timeout_sec: float = 120.0):
+    def __init__(self, setupbash_path="../SVFmemplus/setup.sh", startup_timeout_sec: float = 12120.0):
         if getattr(self, "_initialized", False):
             return
         self._initialized = True
@@ -25,10 +25,10 @@ class CommandCaller:
 
         # 2) start graph-reader <bitcode_path>
         self._start_graph_reader_process()
-
+        
         # 3) wait until we see the ready signal from C++
         self._wait_until_ready()
-
+        
         # 4) register cleanup
         atexit.register(self._cleanup_process)
 
@@ -50,6 +50,7 @@ class CommandCaller:
         bitcode_path = os.path.join(PUT_ROOT_PATH, f"{PUT_NAME}.bc")
 
         command = ['graph-reader', '-stat=false', bitcode_path]
+        # command = ['graph-reader', bitcode_path]
         # start graph-reader
         CommandCaller._process = subprocess.Popen(
             command,
@@ -99,16 +100,16 @@ class CommandCaller:
         CommandCaller._process.stdin.flush()
 
         response_line = CommandCaller._process.stdout.readline()
-
-        # Optionally read a stderr line if present (non-blocking would need threads; keep simple)
-        try:
-            if CommandCaller._process.stderr and not CommandCaller._process.stderr.closed:
-                err_line = CommandCaller._process.stderr.readline()
-                if err_line:
-                    pass
-        except Exception:
-            pass
-
+        # # Optionally read a stderr line if present (non-blocking would need threads; keep simple)
+        # try:
+        #     if CommandCaller._process.stderr and not CommandCaller._process.stderr.closed:
+        #         err_line = CommandCaller._process.stderr.readline()
+        #         if err_line:
+        #             pass
+        # except Exception:
+        #     pass
+        
+        # print(f"response_line: {response_line}")
         return response_line
 
     def _cleanup_process(self):
@@ -137,6 +138,7 @@ if __name__ == '__main__':
     ]
 
     for t in tests:
+        print(f"sending query: {t}")
         resp = caller.send_query(t)
         print(resp.strip())
 

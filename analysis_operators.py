@@ -842,7 +842,9 @@ if __name__ == '__main__':
     #1556     struct crawler_expired_data *cdata =
     #1557 calloc(1, sizeof(struct crawler_expired_data));
     #1630     free(cdata);
-
+    func_body = dump_source_snippet("crypto/x509v3/v3_prn.c", 69, 136)
+    print(func_body)
+            
     # print(get_path_cond_func_(start_location="items.c:1557", start_code="struct",
     #                           target_location="items.c:1629", target_code="free(cdata)"))
     # # printFunctionCallSites(icfg, "stats_prefix_record_get");
@@ -851,7 +853,7 @@ if __name__ == '__main__':
     # print(find_callee("items.c:499"))
     # print(type(find_callee("stats_prefix.c:118")))
     # # printFunctionBodyByLocation(icfg, "stats_prefix.c:118");
-    print(find_current_function("tiff_jpeg.c:798"))
+    # print(find_current_function("tiff_jpeg.c:798"))
     # print(get_shortest_path_cond("restart.c:76", "restart.c:121"))
     # print(find_var_definitions("items.c:1573", "do_run_lru_maintainer_thread"))
     # print(find_var_decl("items.c:1573", "do_run_lru_maintainer_thread"))
