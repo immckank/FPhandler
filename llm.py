@@ -19,6 +19,10 @@ from func_analyzer import (
     DeepSeekFunctionAnalyzer,
     QwenFunctionAnalyzer
 )
+from path_analyzer import (
+    DeepSeekPathAnalyzer,
+    QwenPathAnalyzer
+)
 from tools import (
     set_conclusion_desc_free,
     dump_source_snippet_desc_free,
@@ -373,6 +377,13 @@ def create_analyzer(analyzer_type: str) -> FreeAnalysisModel:
             return DeepSeekFunctionAnalyzer()
         if LLM_TYPE == "Qwen":
             return QwenFunctionAnalyzer()
+        else:
+            raise ValueError(f"Unknown LLM type: {LLM_TYPE}")
+    elif analyzer_type == "path":
+        if LLM_TYPE == "DeepSeek":
+            return DeepSeekPathAnalyzer()
+        if LLM_TYPE == "Qwen":
+            return QwenPathAnalyzer()
         else:
             raise ValueError(f"Unknown LLM type: {LLM_TYPE}")
     else:

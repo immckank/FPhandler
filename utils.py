@@ -96,31 +96,20 @@ def find_file_path(file_name):
         return matching_paths[0]
     
     # 如果有多个匹配且传入的是路径，选择最匹配的
+    print(f"matching_paths: {matching_paths}")
     if input_dir:
-        best_match = None
-        best_score = -1
-        
+        # 收集所有包含 input_dir 的匹配路径
         for path in matching_paths:
             # 标准化路径用于比较
             normalized_path = path.replace('\\', '/').replace(os.sep, '/')
             
-            # 如果完全包含输入的相对路径，优先选择
-            if input_dir in normalized_path:
-                # 计算匹配度：路径结尾匹配越长，得分越高
-                if normalized_path.endswith(input_dir + '/' + base_name):
-                    return path  # 完美匹配，直接返回
-                
-                # 计算路径相似度
-                score = len(input_dir)
-                if score > best_score:
-                    best_score = score
-                    best_match = path
-        
-        if best_match:
-            return best_match
+            # 必须路径结尾能够匹配
+            if not normalized_path.endswith(input_dir + '/' + base_name):
+                # 在当前path list中删除这个path
+                matching_paths.remove(path)
+                continue
     
-    # 如果没有匹配成功或只传入文件名，返回第一个找到的
-    return matching_paths[0]
+    return min(matching_paths, key=len)
 
 # 根据指定scource_location找到对应的代码行
 def find_code_line(source_location):
@@ -138,16 +127,131 @@ def find_code_line(source_location):
 
 # 提取赋值表达式的左值变量名
 def extract_lhs_variable(assignment):
+    """
+    从赋值表达式中提取左值变量名。
+    
+    处理情况：
+    1. 简单赋值: x = 5 -> "x"
+    2. 指针赋值: *ptr = value -> "ptr"
+    3. 嵌套赋值: if ((value = func()) == NULL) -> "value"
+    4. 无赋值: func(); -> None
+    5. return语句: return func(); -> None
+    
+    Args:
+        assignment: 赋值表达式字符串
+        
+    Returns:
+        str: 变量名，如果不是赋值表达式则返回 None
+    """
     assignment = assignment.strip()
-    if '=' in assignment:
-        lhs = assignment.split('=')[0].strip()
-        # 变量名通常是LHS（左手边）的最后一个词
-        parts = lhs.split()
-        if not parts:
-            return None
-        # 移除所有前缀的星号和后缀的方括号
-        variable_name = parts[-1].lstrip('*').rstrip('[]')
-        return variable_name
+    
+    # 检查是否是return语句（不是赋值）
+    if assignment.startswith('return '):
+        return None
+    
+    # 查找赋值运算符（排除 ==, !=, <=, >= 等比较运算符）
+    # 需要找到真正的赋值 =，而不是比较运算符中的 =
+    # 策略：找到所有可能的赋值位置，选择最合适的一个
+    assign_candidates = []
+    paren_depth = 0
+    i = 0
+    
+    while i < len(assignment):
+        c = assignment[i]
+        
+        if c == '(':
+            paren_depth += 1
+            i += 1
+        elif c == ')':
+            paren_depth -= 1
+            i += 1
+        elif c == '=':
+            # 检查这是不是一个赋值运算符
+            next_char = assignment[i + 1] if i + 1 < len(assignment) else ''
+            prev_char = assignment[i - 1] if i > 0 else ''
+            
+            # 排除 ==, !=, <=, >=, +=, -=, *=, /= 等
+            if next_char not in ['='] and prev_char not in ['!', '<', '>', '=', '+', '-', '*', '/', '%', '&', '|', '^']:
+                # 记录候选位置和括号深度
+                assign_candidates.append((i, paren_depth))
+            i += 1
+        else:
+            i += 1
+    
+    # 没有找到赋值运算符
+    if not assign_candidates:
+        return None
+    
+    # 选择最合适的赋值位置：
+    # 1. 优先选择括号深度为0的（最外层）
+    # 2. 如果没有深度为0的，选择深度最大的（最内层，通常在条件语句的括号内）
+    depth_zero = [pos for pos, depth in assign_candidates if depth == 0]
+    if depth_zero:
+        assign_pos = depth_zero[0]  # 第一个深度为0的
+    else:
+        # 选择深度最大的第一个
+        max_depth = max(depth for _, depth in assign_candidates)
+        assign_pos = next(pos for pos, depth in assign_candidates if depth == max_depth)
+    
+    # 提取左值部分
+    lhs = assignment[:assign_pos].strip()
+    
+    # 移除外层的括号和if/while等关键字
+    # 例如: "if ((value" -> "value"
+    while True:
+        lhs = lhs.strip()
+        changed = False
+        
+        # 移除开头的关键字
+        for keyword in ['if', 'while', 'for', 'switch']:
+            if lhs.startswith(keyword + ' '):
+                lhs = lhs[len(keyword):].strip()
+                changed = True
+                break
+            if lhs.startswith(keyword + '('):
+                lhs = lhs[len(keyword):].strip()
+                changed = True
+                break
+        
+        # 移除开头的单个左括号（如果没有匹配的右括号）
+        # 这种情况出现在 "((value" 这样的左值中
+        if lhs.startswith('('):
+            lhs = lhs[1:].strip()
+            changed = True
+        
+        if not changed:
+            break
+    
+    # 现在lhs应该是类似 "value" 或 "*ptr" 或 "arr[0]" 的形式
+    # 提取实际的变量名
+    lhs = lhs.strip()
+    
+    # 移除类型声明（如果存在）
+    # 例如: "int *ptr" -> "ptr", "char* str" -> "str"
+    parts = lhs.split()
+    if len(parts) > 1:
+        # 最后一个部分通常是变量名
+        lhs = parts[-1]
+    
+    # 移除前缀的 * (指针解引用)
+    lhs = lhs.lstrip('*')
+    
+    # 移除数组下标 [...]
+    if '[' in lhs:
+        lhs = lhs[:lhs.index('[')]
+    
+    # 移除成员访问符号 -> 和 .
+    if '->' in lhs:
+        lhs = lhs.split('->')[-1]
+    if '.' in lhs:
+        lhs = lhs.split('.')[-1]
+    
+    lhs = lhs.strip()
+    
+    # 检查是否为有效的变量名（只包含字母、数字、下划线）
+    if lhs and re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', lhs):
+        return lhs
+    
     return None
 
 # 提取SAR文件中的alter部分

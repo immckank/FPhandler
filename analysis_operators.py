@@ -253,6 +253,26 @@ def find_all_callees(function_name: str) -> List[Dict[str, Any]]:
             return res_json.get("callees", [])
     return []
 
+def find_return_locations(function_name: str, source_location: str) -> List[Dict[str, Any]]:
+    # { "command" : "find-return-locations", "name" : "TIFFFetchNormalTag",  "location" : "tif_dirread.c:4981"}
+    command_caller = CommandCaller()
+    query = {
+        "command": "find-return-locations",
+        "name": function_name,
+        "location": source_location
+    }
+    res = command_caller.send_query(query)
+    if res:
+        res_json = json.loads(res)
+        error = res_json.get("error", None)
+        if error:
+            return [{"error": f"error in finding return locations for function {function_name} at {source_location}, check if the name and location are right. {error}"}]
+        else:
+            # 删除error属性
+            del res_json["error"]
+            return res_json.get("return_locations", [])
+    return []
+
 '''
 structure ctags
 '''
@@ -808,6 +828,7 @@ def dump_source_snippet(file_name: str, start_line: int, end_line: int) -> Optio
         or line numbers are out of range.
     """
     file_path = find_file_path(file_name) 
+    print(f"file_path: {file_path}")
     if not file_path: return "No such file, please check filename."
     try:
         file_path = os.path.join(PUT_ROOT_PATH, file_path)
@@ -842,8 +863,8 @@ if __name__ == '__main__':
     #1556     struct crawler_expired_data *cdata =
     #1557 calloc(1, sizeof(struct crawler_expired_data));
     #1630     free(cdata);
-    func_body = dump_source_snippet("crypto/x509v3/v3_prn.c", 69, 136)
-    print(func_body)
+    # print(dump_source_snippet("crypto/x509v3/v3_prn.c", 69, 136))
+    print(dump_source_snippet("crypto/x509/x_crl.c", 82, 146))
             
     # print(get_path_cond_func_(start_location="items.c:1557", start_code="struct",
     #                           target_location="items.c:1629", target_code="free(cdata)"))

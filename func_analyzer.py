@@ -90,7 +90,7 @@ class FunctionAnalysisModel(ABC):
         if file_name != self.call_stack[-1]["filename"]:
             return f"You are now in file {self.call_stack[-1]["filename"]} and function {self.call_stack[-1]['function_name']} from line {self.call_stack[-1]['start_line']} to line {self.call_stack[-1]['end_line']}, please use correct file name.\n"
         if start_line > self.call_stack[-1]["start_line"] or end_line < self.call_stack[-1]["end_line"]:
-            return f"You are now in function {self.call_stack[-1]['function_name']} from line {self.call_stack[-1]['start_line']} to line {self.call_stack[-1]['end_line']}, please check line number.\n"
+            return f"You are now in function {self.call_stack[-1]['function_name']} from line {self.call_stack[-1]['start_line']} to line {self.call_stack[-1]['end_line']}, please use 'check_source_line' tool to check line number.\n"
         # 有交集曾返回如下信息
         return f"some lines are not in current function, get snippet from line {max(start_line, self.call_stack[-1]['start_line'])} to line {min(end_line, self.call_stack[-1]['end_line'])}:\n" + analysis_operators.dump_source_snippet(file_name, min(start_line, self.call_stack[-1]['start_line']), max(end_line, self.call_stack[-1]['end_line']))
 

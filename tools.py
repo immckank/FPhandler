@@ -233,3 +233,34 @@ set_conclusion_desc_function = {
         }
     }
 }
+
+set_conclusion_desc_path = {
+    "type": "function",
+    "function": {
+        "name": "set_conclusion",
+        "description": "Set the final classification for a memory handling path at a specific return location. This function analyzes how memory is handled (e.g., null pointer, transferred ownership, freed, leaked) and marks the corresponding return location as analyzed. Use this tool when you have determined the final fate of a memory allocation or pointer along a specific execution path.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "classification": {
+                    "type": "string",
+                    "description": "The classification type for the memory handling: 'NullPointer' (pointer remains null, no arg needed), 'Transferred' (ownership transferred, requires arg with transfer location), 'Returned' (memory returned to caller, requires arg with return statement location), 'Freed' (memory explicitly freed, requires arg with free call location), 'Leak' (memory leaked, no arg needed), or 'Unreachable' (code path is unreachable, no arg needed).",
+                    "enum": ["NullPointer", "Transferred", "Returned", "Freed", "Leak", "Unreachable"]
+                },
+                "arg": {
+                    "type": "string",
+                    "description": "The code location related to the classification, required for 'Transferred', 'Returned', and 'Freed' classifications. Must be in the format 'filename.c:line_number' or 'filename.h:line_number' (e.g., 'crypto/rsa.c:245'). Not required for 'NullPointer', 'Leak', or 'Unreachable'."
+                },
+                "return_location": {
+                    "type": "string",
+                    "description": "The specific return location being analyzed. This should match one of the return locations in the current analysis context. After setting the conclusion, this return location will be marked as done."
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "A detailed explanation for the given classification, including the evidence and reasoning that led to this conclusion."
+                }
+            },
+            "required": ["classification", "return_location", "reason"]
+        }
+    }
+}

@@ -15,6 +15,10 @@ class MemoryDefect:
     def to_prompt(self):
         return f"{self.defect_type} at {self.source_location}"
     
+    def to_base_prompt(self):
+        # Potential <Error Type> for <Variable Name> at <Location>.
+        return f"Potential {self.defect_type} for {extract_lhs_variable(find_code_line(self.source_location))} at {self.source_location}"
+    
 class MemoryLeak(MemoryDefect):
     def __init__(self, leak_type=None, source_location=None):
         super().__init__("MemoryLeak", source_location)
