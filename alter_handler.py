@@ -1,28 +1,23 @@
-import os
-import re
-import json
-import sys
+import itertools
 
-from memory_defect import NeverFree, DoubleFree, PartialLeak
-
-from config import *
+from memory_defect import NeverFree, DoubleFree, PartialLeak, UseAfterFree
 from utils import *
 
 class AlterAnalyzer():
     def __init__(self):
-        # if LLM_TYPE == "Gemini":
-        #     self.analyzer = Gemini(model_name="gemini-2.5-flash")
-        # elif LLM_TYPE == "DeepSeek":
-        #     self.analyzer = DeepSeek(model_name="deepseek-chat")
-        # else:
-        #     raise ValueError(f"Unknown LLM type: {LLM_TYPE}")
         self.alter_list = []
         self.alter_file_name = None
         self.LEAK_RE = re.compile(
-            r"^\s*(NeverFree|PartialLeak|Double Free)\s*:\s*memory allocation at\s*:\s*\(CallICFGNode:\s*({.*})\)"
+            r"^\s*(NeverFree|PartialLeak|Double Free|Use After Free)\s*:\s*memory allocation at\s*:\s*\(CallICFGNode:\s*({.*})\)"
         )
         self.COND_PATH_RE = re.compile(
             r"^\s*-->\s*\(\s*({.*?})\s*\|\s*(.*?)\s*\)"
+        )
+        self.FREE_RE = re.compile(
+            r"^\s*Free at :\s*\(CallICFGNode:\s*({.*})\)"
+        )
+        self.USE_RE = re.compile(
+            r"^\s*Use at :\s*\(\s*({.*?})\)"
         )
 
     def get_alter_list(self):
@@ -112,7 +107,103 @@ class AlterAnalyzer():
                         except StopIteration:
                             break
                     self.alter_list.append(DoubleFree(location, double_free_paths))
-        return self.alter_list
+                elif leak_type == "Use After Free":
+                    nodes_pairs = []
+
+                    # 跳过内存分配行后的所有空行
+                    while True:
+                        try:
+                            line = next(lines).strip()
+                            if line:
+                                lines = itertools.chain([line], lines)
+                                break
+                        except StopIteration:
+                            break
+
+                    # 收集所有free-use事件对
+                    while True:
+                        try:
+                            free_line = next(lines).strip()
+                            if not free_line:
+                                continue
+
+                            free_match = self.FREE_RE.match(free_line)
+                            if not free_match:
+                                lines = itertools.chain([free_line], lines)
+                                break
+
+                            free_node_detail_str = free_match.group(1)
+                            free_location = self._parse_location(free_node_detail_str)
+
+                            try:
+                                free_path_line = next(lines).strip()
+                                if free_path_line != "free path:":
+                                    lines = itertools.chain([free_path_line], lines)
+                            except StopIteration:
+                                break
+
+                            # 收集该free位置对应的所有use位置和条件路径
+                            use_nodes = []  # 存储UseNode对象
+                            while True:
+                                try:
+                                    use_line = next(lines).strip()
+                                    if not use_line:
+                                        continue
+
+                                    use_match = self.USE_RE.match(use_line)
+                                    if not use_match:
+                                        lines = itertools.chain([use_line], lines)
+                                        break
+
+                                    use_node_detail_str = use_match.group(1)
+                                    use_location = self._parse_location(use_node_detail_str)
+
+                                    try:
+                                        use_path_line = next(lines).strip()
+                                        if use_path_line != "use path:":
+                                            lines = itertools.chain([use_path_line], lines)
+
+                                        condition = None
+                                        condition_location = None
+                                        try:
+                                            cond_line = next(lines).strip()
+                                            cond_match = self.COND_PATH_RE.match(cond_line)
+                                            if cond_match:
+                                                cond_node_detail_str, cond = cond_match.groups()
+                                                condition_location = self._parse_location(cond_node_detail_str)
+                                                condition = cond
+                                        except StopIteration:
+                                            pass
+                                    except StopIteration:
+                                        break
+
+                                    if use_location:
+                                        # 创建UseNode对象而不是元组
+                                        use_node = UseAfterFree.UseNode(
+                                            use_location=use_location,
+                                            condition=condition,
+                                            condition_location=condition_location
+                                        )
+                                        use_nodes.append(use_node)
+
+                                except StopIteration:
+                                    break
+
+                            if free_location and use_nodes:
+                                node_pair = UseAfterFree.NodePair(free_location, use_nodes)
+                                nodes_pairs.append(node_pair)
+
+                        except StopIteration:
+                            break
+
+                    if nodes_pairs:
+                        self.alter_list.append(UseAfterFree(location, nodes_pairs))
+
+                return self.alter_list
+
 
 if __name__ == "__main__":
-    pass
+    analyzer = AlterAnalyzer()
+    alter_list = analyzer.read_alter_file("ALTER_EXAMPLE", "use_after_free.txt")
+    for alter in alter_list:
+        print(alter.to_prompt())

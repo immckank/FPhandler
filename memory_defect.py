@@ -1,3 +1,6 @@
+from networkx.classes import nodes
+from networkx.utils.misc import nodes_equal
+
 from utils import *
 
 class MemoryDefect:
@@ -153,10 +156,96 @@ class DoubleFree(MemoryLeak):
         Task_prompt = f"Task: Please classify this alert as TP, FP, or UNCERTAIN, and provide your reasoning."
         return Type_prompt + Guidance_prompt + Location_prompt + Code_prompt + Message_prompt + Code_prompt + Task_prompt
 
+
 class UseAfterFree(MemoryDefect):
-    def __init__(self, source_location):
+    class UseNode:
+        def __init__(self, use_location, condition=None, condition_location=None):
+            self.use_location = use_location
+            self.condition = condition
+            self.condition_location = condition_location
+
+        def get_use_location(self):
+            return self.use_location
+
+        def get_condition(self):
+            return self.condition
+
+        def get_condition_location(self):
+            return self.condition_location
+
+    class NodePair:
+        def __init__(self, free_location, use_nodes):
+            self.free_location = free_location
+            self.use_nodes = use_nodes  # list of UseNode objects
+
+        def get_free_location(self):
+            return self.free_location
+
+        def get_use_nodes(self):
+            return self.use_nodes
+
+    def __init__(self, source_location, node_pairs):
         super().__init__("UseAfterFree", source_location)
+        self.node_pairs = node_pairs  # list of NodePair objects
+
+    def get_node_pairs(self):
+        return self.node_pairs
 
     def to_prompt(self):
-        # feasible
-        return super().to_prompt()
+        type_prompt = f"Type of bug: {self.defect_type}.\n"
+        guidance_prompt = (
+            "Guidance on triaging this type of bug:\n"
+            "The warning is a true positive (TP) if:\n"
+            "  - There exists a feasible execution path where memory is freed and then used without reallocation\n"
+            "  - The use occurs after the free in program execution order\n"
+            "  - The same memory block is accessed after being freed\n\n"
+            "The warning is a false positive (FP) if:\n"
+            "  - The free and use are on mutually exclusive paths\n"
+            "  - The pointer is reallocated before use\n"
+            "  - The use occurs before the free in execution order\n"
+            "  - Different memory blocks are involved in free and use operations\n"
+        )
+        alloc_prompt = f"Memory allocation at: {self.source_location}\n"
+        alloc_code = f"Allocation code: {find_code_line(self.source_location)}\n\n"
+
+        nodes_prompt = "Free-Use Node Pairs:\n"
+        for i, pair in enumerate(self.node_pairs):
+            free_loc = pair.get_free_location()
+            nodes_prompt += f"Pair {i + 1}:\n"
+            nodes_prompt += f"  Free at: {free_loc}\n"
+            nodes_prompt += f"  Free code: {find_code_line(free_loc)}\n"
+
+            nodes_prompt += "  Use sites after this free:\n"
+            for use_node in pair.get_use_nodes():
+                use_loc = use_node.get_use_location()
+                nodes_prompt += f"    - Use at: {use_loc}\n"
+                nodes_prompt += f"      Use code: {find_code_line(use_loc)}\n"
+
+                # 添加条件路径信息
+                condition = use_node.get_condition()
+                condition_location = use_node.get_condition_location()
+                if condition and condition_location:
+                    nodes_prompt += f"      Condition '{condition}' at {condition_location}\n"
+
+            nodes_prompt += "\n"
+
+        variable_name = extract_lhs_variable(find_code_line(self.source_location))
+        if variable_name is None:
+            variable_name = "unknown"
+        message_prompt = (
+            f"Message: Memory allocated to '{variable_name}' at {self.source_location} "
+            "is accessed after being freed in the paths shown above. "
+            "This results in undefined behavior and potential security vulnerabilities.\n\n"
+        )
+
+        task_prompt = "Task: Please classify this alert as TP, FP, or UNCERTAIN, and provide your reasoning."
+
+        return (
+                type_prompt +
+                guidance_prompt +
+                alloc_prompt +
+                alloc_code +
+                nodes_prompt +
+                message_prompt +
+                task_prompt
+        )
