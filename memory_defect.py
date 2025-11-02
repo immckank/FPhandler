@@ -1,6 +1,3 @@
-from networkx.classes import nodes
-from networkx.utils.misc import nodes_equal
-
 from utils import *
 
 class MemoryDefect:

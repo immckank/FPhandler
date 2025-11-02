@@ -199,7 +199,7 @@ class AlterAnalyzer():
                     if nodes_pairs:
                         self.alter_list.append(UseAfterFree(location, nodes_pairs))
 
-                return self.alter_list
+        return self.alter_list
 
 
 if __name__ == "__main__":

@@ -248,11 +248,14 @@ class PathAnalyzerModel(ABC):
             return_locations.append(return_location)
         project_prompt = f"You are now working for project {PROJECT_NAME}. "
         project_prompt += PROJECT_DESC + "\n"
-        previous_analysis_path_prompt = "The previous analysis path is as follows:\n"
-        for previous_analysis_path_item in previous_analysis_path:
-            previous_analysis_path_prompt += f"The memory of {previous_analysis_path_item['value_object']} at {previous_analysis_path_item['start_location']} : {find_code_line(previous_analysis_path_item['start_location'])}"
-            previous_analysis_path_prompt += f"is {previous_analysis_path_item['classification']} in the function {previous_analysis_path_item['function_name']} by {previous_analysis_path_item['source_location']} : {find_code_line(previous_analysis_path_item['source_location'])} and returned at {previous_analysis_path_item['return_location']} : {find_code_line(previous_analysis_path_item['return_location'])}.\n"
-            previous_analysis_path_prompt += f"explanation: {previous_analysis_path_item['reason']}\n"
+        if previous_analysis_path:
+            previous_analysis_path_prompt = "The previous analysis path is as follows:\n"
+            for previous_analysis_path_item in previous_analysis_path:
+                previous_analysis_path_prompt += f"The memory of {previous_analysis_path_item['value_object']} at {previous_analysis_path_item['start_location']} : {find_code_line(previous_analysis_path_item['start_location'])}"
+                previous_analysis_path_prompt += f"is {previous_analysis_path_item['classification']} in the function {previous_analysis_path_item['function_name']} by {previous_analysis_path_item['source_location']} : {find_code_line(previous_analysis_path_item['source_location'])} and returned at {previous_analysis_path_item['return_location']} : {find_code_line(previous_analysis_path_item['return_location'])}.\n"
+                previous_analysis_path_prompt += f"explanation: {previous_analysis_path_item['reason']}\n"
+        else:
+            previous_analysis_path_prompt = ""
         function_prompt = ""
         if arg:
             function_prompt += f"\nYou are now working with the {start_loc}th argument of the function {current_function['function_name']}.\n"
@@ -393,6 +396,7 @@ class PathAnalyzerModel(ABC):
                 elif last_analysis_path_item["classification"] == "Freed":
                     # 检查使用的free函数
                     # 构造新的分析
+                    # TODO 这里找函数的逻辑还需要推敲一下
                     free_loc = last_analysis_path_item["source_location"]
                     free_function_name, free_arg_index = get_arg_index(find_code_line(free_loc), variable_name)
                     if free_function_name is None:
