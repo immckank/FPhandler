@@ -122,51 +122,42 @@ def find_callers(function_name: str) -> List[Dict[str, Any]]:
     return []
 
 # # 暂时不用了
-# def find_callee(source_location: str) -> Optional[List[Dict[str, Any]]]:
-#     """Finds the function body of functions called at a specific source location.
+def find_callee(source_location: str) -> Optional[List[Dict[str, Any]]]:
+    """Finds the function body of functions called at a specific source location.
 
-#     Args:
-#         source_location: The source location of the call site, in the format
-#                          'filename.c:line_number'.
+    Args:
+        source_location: The source location of the call site, in the format
+                         'filename.c:line_number'.
 
-#     Returns:
-#         A list of dictionaries, each representing a callee function, including its
-#         name, file, line numbers, and full body. Returns None if the location
-#         is invalid or no callee is found.
-#         Example:
-#         [{'function_name': 'callee_func', 'filename': 'a.c', 'start_line': 10,
-#           'end_line': 20, 'function_body': '...'}]
-#     """
-#     # 基于LLVM来实现不要使用基于文本的查找
-#     # 检查source_location是否合法
-#     if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', source_location):
-#         logging.error(f"Invalid source location format: {source_location}")
-#         return None
-#     command_caller = CommandCaller()
-#     res = command_caller.call_graph_reader_with_args(
-#         f"-find-callee-body={source_location}",
-#         os.path.join(PUT_ROOT_PATH, f"{PUT_NAME}.bc")
-#     )
-#     query = {
-#         "command": "find-callee-body",
-#         "location": source_location
-#     }
-#     res = command_caller.send_query(query)
-#     if res:
-#         res_json = json.loads(res)
-#         error = res_json.get("error", None)
-#         if error:
-#             logging.error(f"Error finding callee for {source_location}: {error} {res_json}")
-#         else:
-#             # 删除error属性
-#             del res_json["error"]
-#             callee_functions = res_json.get("callee_functions", [])
-#             for func in callee_functions:
-#                 func_body = dump_source_snippet(func["filename"], func['start_line'], func['end_line'])
-#                 # 为func添加func_body属性
-#                 func["function_body"] = func_body
-#             return callee_functions
-#     return None
+    Returns:
+        A list of dictionaries, each representing a callee function, including its
+        name, file, line numbers, and full body. Returns None if the location
+        is invalid or no callee is found.
+        Example:
+        [{'function_name': 'callee_func', 'filename': 'a.c', 'start_line': 10,
+          'end_line': 20, 'function_body': '...'}]
+    """
+    # 基于LLVM来实现不要使用基于文本的查找
+    # 检查source_location是否合法
+    if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', source_location):
+        logging.error(f"Invalid source location format: {source_location}")
+        return None
+    command_caller = CommandCaller()
+    query = {
+        "command": "find-function-body-by-location",
+        "location": source_location
+    }
+    res = command_caller.send_query(query)
+    if res:
+        print(f"res: {res}")
+        res_json = json.loads(res)
+        error = res_json.get("error", None)
+        if error:
+            return {"error": f"Error finding callee for {source_location}: {error} {res_json}"}
+        function_body = dump_source_snippet(res_json["filename"], res_json['start_line'], res_json['end_line'])
+        res_json["function_body"] = function_body
+        return res_json
+    return None
 
 def find_function_body(function_name: str) -> Optional[Dict[str, Any]]:
     """Finds the function body by its name.
@@ -583,6 +574,52 @@ def find_var_decl(source_location: str, var_name: str) -> List[Dict[str, str]]:
 '''
 path condition
 '''
+
+def get_value_sensitive_icfg_return_path(start_location: str, eq_position: int) -> Optional[List[Dict[str, Any]]]:
+    if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', start_location):
+        logging.error(f"Invalid source location format: {start_location}")
+        return None
+    command_caller = CommandCaller()
+    query = {
+        "command" : "find-lvalue-path-inside",
+        "location" : start_location,
+        "eq_position" : str(eq_position)
+    }
+    # Print the actual JSON string that will be sent (not the Python dict representation)
+    print(f"query: {json.dumps(query)}")
+    res = command_caller.send_query(query)
+    if res:
+        print(f"res: {res}")
+        res_json = json.loads(res)
+        error = res_json.get("error", None)
+        if error:
+            logging.error(f"Error finding value sensitive icfg return path for {start_location} with eq_position {eq_position}: {error}")
+            return None
+        else:
+            del res_json["error"]
+            return_locations = res_json.get("return_locations", [])
+            return return_locations
+    return None
+
+def get_value_sensitive_arg_icfg_return_path(function_name: str, index: int) -> Optional[List[Dict[str, Any]]]:
+    command_caller = CommandCaller()
+    query = {
+        "command" : "find-arg-value-path-inside",
+        "function_name" : function_name,
+        "index" : str(index)
+    }
+    res = command_caller.send_query(query)
+    if res:
+        res_json = json.loads(res)
+        error = res_json.get("error", None)
+        if error:
+            logging.error(f"Error finding value sensitive arg icfg return path for {function_name} with index {index}: {error}")
+            return None
+        else:
+            del res_json["error"]
+            return_locations = res_json.get("return_locations", [])
+            return return_locations
+    return None
 
 # TODO: 注释说明
 def get_shortest_path_cond(start_location: str, target_location: str):

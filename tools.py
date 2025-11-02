@@ -247,9 +247,13 @@ set_conclusion_desc_path = {
                     "description": "The classification type for the memory handling: 'NullPointer' (pointer remains null, no arg needed), 'Transferred' (ownership transferred, requires arg with transfer location), 'Returned' (memory returned to caller, requires arg with return statement location), 'Freed' (memory explicitly freed, requires arg with free call location), 'Leak' (memory leaked, no arg needed), or 'Unreachable' (code path is unreachable, no arg needed).",
                     "enum": ["NullPointer", "Transferred", "Returned", "Freed", "Leak", "Unreachable"]
                 },
-                "arg": {
+                "source_location": {
                     "type": "string",
                     "description": "The code location related to the classification, required for 'Transferred', 'Returned', and 'Freed' classifications. Must be in the format 'filename.c:line_number' or 'filename.h:line_number' (e.g., 'crypto/rsa.c:245'). Not required for 'NullPointer', 'Leak', or 'Unreachable'."
+                },
+                "code_line": {
+                    "type": "string",
+                    "description": "The code line of the source location, required for 'Transferred', 'Returned', and 'Freed' classifications. Not required for 'NullPointer', 'Leak', or 'Unreachable'."
                 },
                 "return_location": {
                     "type": "string",
