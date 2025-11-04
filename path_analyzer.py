@@ -41,6 +41,7 @@ class PathAnalyzerModel(ABC):
         }
         self.global_variables = []
         self.memcached = []
+        self.alter_prompt = ""
 
     def send_message(self, messages, tools=""):
         response = self.client.chat.completions.create(
@@ -49,15 +50,8 @@ class PathAnalyzerModel(ABC):
             tools=tools
         )
         return response.choices[0].message  
-    
-    def check_all_return_locations_done(self, return_locations):
-        for return_location in return_locations:
-            if return_location["done"] == 0:
-                return False
-        return True
-    
 
-    def set_conclusion_Tool(self, classification, return_location, reason, source_location=None, code_line=None, previous_analysis_path=[], return_locations=None, basic_info={}):
+    def set_conclusion_Tool(self, classification, return_location, reason, source_location=None, code_line=None, arg=None, previous_analysis_path=[], return_locations=None, basic_info={}):
         new_analysis_path = previous_analysis_path.copy()
         valid_return_location = False
         # 匹配一遍return_location是否存在
@@ -92,6 +86,8 @@ class PathAnalyzerModel(ABC):
                 return {"error": f"invalid source_location: {source_location}"}
             if code_line is None:
                 return {"error": f"code_line is required for Transferred classification"}
+            if arg is None:
+                return {"error": f"arg is required for Transferred classification to specify which variable the memory was transferred to."}
             # 为指定location的return_location设置done = True
             for t_return_location in return_locations:
                 if t_return_location["location"] == return_location:
@@ -104,7 +100,8 @@ class PathAnalyzerModel(ABC):
                 "return_location": return_location,
                 "classification": classification,
                 "source_location": source_location,
-                "reason": reason
+                "reason": reason,
+                "arg": arg
             })
             return new_analysis_path
         elif classification == "Returned":
@@ -114,6 +111,13 @@ class PathAnalyzerModel(ABC):
                 return {"error": f"invalid source_location: {source_location}"}
             if code_line is None:
                 return {"error": f"code_line is required for Returned classification"}
+            return_pointer_json = analysis_operators.check_return_pointer(return_location)
+            # DEBUG
+            print(f"function can return pointer: {return_pointer_json['function_can_return_pointer']}")
+            print(f"location has pointer operation: {return_pointer_json['location_has_pointer_operation']}")
+            # END DEBUG
+            if not return_pointer_json["function_can_return_pointer"] or not return_pointer_json["location_has_pointer_operation"]:
+                return {"error": f"the function {basic_info['function_name']} at {source_location} cannot return a pointer, or the return location {return_location} does not have pointer operation. Do you mean the memory is transferred?"}
             # 为指定location的return_location设置done = True
             for t_return_location in return_locations:
                 if t_return_location["location"] == return_location:
@@ -136,6 +140,10 @@ class PathAnalyzerModel(ABC):
                 return {"error": f"invalid source_location: {source_location}"}
             if code_line is None:
                 return {"error": f"code_line is required for Freed classification"}
+            if arg is None:
+                # arg可能直接就是free
+                # 检查arg必须是当前函数的被调用函数 其次从起始pag节点 应该有一条到达当前函数参数的actualparam节点的路径
+                return {"error": f"arg is required for Freed classification to specify which function was used to release the memory."}
             # 为指定location的return_location设置done = True
             for t_return_location in return_locations:
                 if t_return_location["location"] == return_location:
@@ -148,7 +156,8 @@ class PathAnalyzerModel(ABC):
                 "return_location": return_location,
                 "classification": classification,
                 "source_location": source_location,
-                "reason": reason
+                "reason": reason,
+                "arg": arg
             })
             return new_analysis_path
         elif classification == "Leak":
@@ -203,7 +212,12 @@ class PathAnalyzerModel(ABC):
     def find_callers_Tool(self, function_name):
         return analysis_operators.find_callers(function_name)
     
-    def analysis_function_paths(self, start_loc, previous_analysis_path=[], current_function=None, arg=False):
+    # start loc 分析其实位置
+    # previous_analysis_path 之前的分析路径
+    # current_function 当前函数
+    # mode 分析模式 {"local variable" "formal argument" "call argument"}
+    # var_name 变量名
+    def analysis_function_paths(self, start_loc, previous_analysis_path=[], current_function=None, mode={"mode" : "local variable", "arg": None}, var_name=None):
         allowed_tools = [
             set_conclusion_desc_path,
             dump_source_snippet_desc_free,
@@ -212,28 +226,43 @@ class PathAnalyzerModel(ABC):
             find_function_body_desc_free,
             find_callers_desc_free,
         ]
-        # 如果是追踪arg模式 则start_loc是第“n”个参数
         return_locations = []
         new_analysis_path = []
-        if arg:
-            wappered_return_locations = analysis_operators.get_value_sensitive_arg_icfg_return_path(current_function["function_name"], start_loc)
-            # "start_location": "*arg_index_th* argument of *function_name*" | "filename:line_number",
-            start_location = f"{start_loc}th argument of {current_function['function_name']}"
-            function_start_line = current_function["start_line"]
-            function_start_location = f"{current_function['filename']}:{function_start_line}"
-            function_start_code_line = find_code_line(function_start_location)
-            basic_info = {
-                "value_object": get_arg_names(function_start_code_line)[int(start_loc)],
-                "start_location": start_location,
-                "function_name": current_function["function_name"],
-            }
-        else:
-            wappered_return_locations = analysis_operators.get_value_sensitive_icfg_return_path(start_loc, get_eq_position(find_code_line(start_loc, strip_whitespace=False))+1)
-            basic_info = {
-                "value_object": extract_lhs_variable(find_code_line(start_loc)),
-                "start_location": start_loc,
-                "function_name": current_function["function_name"],
-            }
+        if var_name is None:
+            # 事实上所有调用位置都已经处理过了 
+            if mode["mode"] == "local variable":
+                var_name = extract_lhs_variable(find_code_line(start_loc))
+            elif mode["mode"] == "formal argument":
+                function_start_line = current_function["start_line"]
+                function_start_location = f"{current_function['filename']}:{function_start_line}"
+                function_start_code_line = find_code_line(function_start_location)
+                var_name = get_formal_arg_names(function_start_code_line)[int(start_loc)]
+            else:
+                # TODO call arg
+                var_name = extract_lhs_variable(find_code_line(start_loc))
+        basic_info = {
+            "value_object": var_name,
+            "start_location": start_loc,
+            "function_name": current_function["function_name"],
+            "mode" : mode
+        }        
+        function_prompt = ""
+        if mode["mode"] == "formal argument":
+            arg_index = mode["arg"]
+            wappered_return_locations = analysis_operators.get_value_sensitive_arg_icfg_return_path(current_function["function_name"], arg_index)
+            function_prompt += f"\nYou are now tracing the memory of the {arg_index}th formal argument of the function {current_function['function_name']} at {start_loc} : {find_code_line(start_loc)}.\n"
+        elif mode["mode"] == "local variable":
+            # 定位eqposition
+            eq_position = mode["arg"]
+            wappered_return_locations = analysis_operators.get_value_sensitive_icfg_return_path(start_loc, eq_position)
+            function_prompt += f"\nYou are now tracing the memory of the local variable {var_name} at {start_loc} : {find_code_line(start_loc)}.\n"
+        elif mode["mode"] == "call argument":
+            arg_index = mode["arg"]
+            wappered_return_locations = analysis_operators.get_value_sensitive_call_arg_icfg_return_path(start_loc, arg_index)
+            callee_function_name = previous_analysis_path[-1]["function_name"]
+            function_prompt += f"\nYou are now tracing the memory of the variable {var_name} used as the {arg_index}th call argument to call {callee_function_name} in the function {current_function['function_name']} at {start_loc} : {find_code_line(start_loc)}.\n"
+        function_prompt += f"current function:{json.dumps(current_function, indent=4)}"
+        print(f"wappered_return_locations: {wappered_return_locations}")
         for wappered_return_location in wappered_return_locations:
             return_location = {
                 "location": f"{wappered_return_location["location"]["fl"]}:{wappered_return_location["location"]["ln"]}",
@@ -249,20 +278,15 @@ class PathAnalyzerModel(ABC):
         project_prompt = f"You are now working for project {PROJECT_NAME}. "
         project_prompt += PROJECT_DESC + "\n"
         if previous_analysis_path:
-            previous_analysis_path_prompt = "The previous analysis path is as follows:\n"
+            previous_analysis_path_prompt = "The previous analysis shows that there exists a path leads to current function as follows:\n"
             for previous_analysis_path_item in previous_analysis_path:
                 previous_analysis_path_prompt += f"The memory of {previous_analysis_path_item['value_object']} at {previous_analysis_path_item['start_location']} : {find_code_line(previous_analysis_path_item['start_location'])}"
-                previous_analysis_path_prompt += f"is {previous_analysis_path_item['classification']} in the function {previous_analysis_path_item['function_name']} by {previous_analysis_path_item['source_location']} : {find_code_line(previous_analysis_path_item['source_location'])} and returned at {previous_analysis_path_item['return_location']} : {find_code_line(previous_analysis_path_item['return_location'])}.\n"
-                previous_analysis_path_prompt += f"explanation: {previous_analysis_path_item['reason']}\n"
+                previous_analysis_path_prompt += f"is {previous_analysis_path_item['classification']} in the function {previous_analysis_path_item['function_name']} at {previous_analysis_path_item['source_location']} : {find_code_line(previous_analysis_path_item['source_location'])} and returned at {previous_analysis_path_item['return_location']} : {find_code_line(previous_analysis_path_item['return_location'])}.\n"
+                previous_analysis_path_prompt += f"with explanation that {previous_analysis_path_item['reason']}\n"
         else:
             previous_analysis_path_prompt = ""
-        function_prompt = ""
-        if arg:
-            function_prompt += f"\nYou are now working with the {start_loc}th argument of the function {current_function['function_name']}.\n"
-        else:
-            function_prompt += f"\nYou are now working with the return location of the function {current_function['function_name']}.\n"
-        function_prompt += f"{json.dumps(current_function, indent=4)}"
-        return_prompt = f"For all possible return locations of the function {current_function['function_name']} : \n"
+        # return_prompt = f"For all possible return locations of the function {current_function['function_name']} : \n"
+        return_prompt = f"All possible paths to the return location of the function {current_function['function_name']} are as follows:\n"
         for return_location in return_locations:
             return_prompt += f"Return location: {return_location['location']} : {find_code_line(return_location['location'])}\n"
             return_prompt += f"There maybe {return_location['path_count']} possible path to the return location.\n"
@@ -279,20 +303,20 @@ class PathAnalyzerModel(ABC):
                         return_prompt += f"passed {vfg_node_item['vfg_node_kind']} at {vfg_node_item['location']} : {find_code_line(vfg_node_item['location'])}\n"                
                 else:
                     return_prompt += "basic path\n"
-        return_prompt += f"You should claim the state of the variable (or the resource it holds) before the return point as following six categories:\n"
+        return_prompt += f"You should claim the state of the variable {var_name} (or the resource it holds) along all paths to the return point as following six categories:\n"
         return_prompt += f"The variable is always a null pointer (NullPointer).\n"
-        return_prompt += f"Ownership of the memory has been transferred (Transferred).\n"
-        return_prompt += f"The memory is returned to the caller (Returned).\n"
+        return_prompt += f"Ownership of the memory has been transferred through an assignment to another variable (Transferred).\n"
+        return_prompt += f"The memory is returned as return value to the caller (Returned).\n"
         return_prompt += f"The memory has been freed (or 'released') before returning (Freed).\n"
         return_prompt += f"A memory leak has occurred (Leak).\n"
         return_prompt += f"This return point is unreachable (Unreachable).\n"
         messages = [
             {"role": "system", "content": VALUE_PATH_PROMPT + project_prompt},
-            {"role": "user", "content": previous_analysis_path_prompt +function_prompt + return_prompt}
+            {"role": "user", "content": self.alter_prompt + previous_analysis_path_prompt +function_prompt + return_prompt}
         ]   
         self.analysis_logger.info(f"SYS prompt: {VALUE_PATH_PROMPT + project_prompt}")
-        self.analysis_logger.info(f"USER prompt: {previous_analysis_path_prompt + function_prompt + return_prompt}")
-        self.result_logger.info(f"USER prompt: {previous_analysis_path_prompt + function_prompt + return_prompt}")
+        self.analysis_logger.info(f"USER prompt: {self.alter_prompt + previous_analysis_path_prompt + function_prompt + return_prompt}")
+        self.result_logger.info(f"USER prompt: {self.alter_prompt + previous_analysis_path_prompt + function_prompt + return_prompt}")
         
         response = self.send_message(messages, allowed_tools)
         if not response.content: 
@@ -300,10 +324,24 @@ class PathAnalyzerModel(ABC):
         self.analysis_logger.info(f"Model response: {response.content}")
         messages.append(response)
         
-        while not self.check_all_return_locations_done(return_locations):
+        while True:
             if not response.tool_calls:
-                self.analysis_logger.info(f"No tool calls found, breaking the loop with return checked done: {self.check_all_return_locations_done(return_locations)}")
-                break
+                # 检查有没有全部完成
+                all_done = True
+                unconcluded_return_locations = []
+                for return_location in return_locations:
+                    if return_location["done"] == 0:
+                        all_done = False
+                        unconcluded_return_locations.append(return_location["location"])
+                if all_done:
+                    break
+                messages.append({ "role": "user", "content": f"You should check the return locations that are not done yet: {unconcluded_return_locations}" })
+                response = self.send_message(messages, allowed_tools)
+                if not response.content: 
+                    response.content = ""
+                self.analysis_logger.info(f"Model response: {response.content}")
+                messages.append(response)
+                continue
             for tool_call in response.tool_calls:
                 tool_function_name = tool_call.function.name
                 try:
@@ -335,8 +373,6 @@ class PathAnalyzerModel(ABC):
                 self.analysis_logger.info(f"Tool response: {function_response}")
                 messages.append({ "tool_call_id": tool_call.id, "role": "tool", "content": function_response })
                 
-            if self.check_all_return_locations_done(return_locations):
-                break
             response = self.send_message(messages, allowed_tools)
             if not response.content: 
                 response.content = ""
@@ -346,18 +382,28 @@ class PathAnalyzerModel(ABC):
         return new_analysis_path
     
     def responseForAlter(self, alter: memory_defect.MemoryLeak):
+        self.result_logger.info(f"\n ================================ Analysis started for Alter ================================ \n")
+        self.result_logger.info(f"Alter: {alter.to_prompt()}")
+        self.result_logger.info(f"\n ================================ Analysis started for Alter ================================ \n")
+        self.analysis_logger.info(f"\n ================================ Analysis started for Alter ================================ \n")
+        self.analysis_logger.info(f"Alter: {alter.to_prompt()}")
+        self.analysis_logger.info(f"\n ================================ Analysis started for Alter ================================ \n")
+        
+        self.alter_prompt = alter.to_goal_prompt()
         start_loc = alter.get_source_location()
         current_function = analysis_operators.find_current_function(start_loc)
         if "error" in current_function:
             self.analysis_logger.error(f"Cannot find current function at {start_loc}")
             return None
-        arg_names = get_arg_names(find_code_line(f"{current_function["filename"]}:{current_function["start_line"]}"))
+        arg_names = get_formal_arg_names(find_code_line(f"{current_function["filename"]}:{current_function["start_line"]}"))
         # 找到当前要追踪的变量名
         variable_name = extract_lhs_variable(find_code_line(start_loc))
         if not variable_name:
-            self.analysis_logger.error(f"Cannot find variable name at {start_loc}")
+            # 这一行可以是return malloc / alloc
+            self.analysis_logger.error(f"Cannot find variable name at {start_loc} : {find_code_line(start_loc)}")
             return None
-        analysis_path_list = self.analysis_function_paths(start_loc=start_loc, previous_analysis_path=[], current_function=current_function, arg=False)
+        eq_position = analysis_operators.get_var_store_cl(start_loc, variable_name)
+        analysis_path_list = self.analysis_function_paths(start_loc=start_loc, previous_analysis_path=[], current_function=current_function, mode={"mode" : "local variable", "arg": eq_position}, var_name=variable_name)
         while True:
             all_done = True
             for analysis_path in analysis_path_list:
@@ -394,24 +440,29 @@ class PathAnalyzerModel(ABC):
                     self.result_logger.info(f"\n ================================ Analysis terminated with Leak ================================ \n")
                     return analysis_path
                 elif last_analysis_path_item["classification"] == "Freed":
-                    # 检查使用的free函数
-                    # 构造新的分析
-                    # TODO 这里找函数的逻辑还需要推敲一下
                     free_loc = last_analysis_path_item["source_location"]
-                    free_function_name, free_arg_index = get_arg_index(find_code_line(free_loc), variable_name)
-                    if free_function_name is None:
-                        # 没有找到free函数 可能是因为使用了错误的变量名 原先关心的变量是当前变量的子字段
-                        # 用默认的arg index = 0
-                        free_function = analysis_operators.find_callee(free_loc)
-                        if free_function["error"]:
-                            free_function_name = get_function_name(find_code_line(free_loc))
-                            if free_function_name is None:
-                                self.analysis_logger.error(f"Cannot find function name at {free_loc}")
-                                self.result_logger.error(f"Cannot find function name at {free_loc}")
-                                continue
-                            free_function_name = free_function_name[0]
-                        free_function_name = free_function["function_name"]
+                    free_code_line = find_code_line(free_loc)
+                    free_function = analysis_operators.find_function_body(free_function_name)
+                    fc_name, free_arg_index = get_arg_index(free_code_line, variable_name)
+                    print(f"fc_name: {fc_name}, free_arg_index: {free_arg_index}")
+                    print(f"free_function name: {free_function_name}")
+                    if free_arg_index is None:
                         free_arg_index = 0
+                    if free_function["error"]:
+                        print(f"1 Cannot find function body for {free_function_name}")
+                        free_function_name, free_arg_index = get_arg_index(free_code_line, variable_name)
+                        if free_function_name is None:
+                            print(f"2 Cannot find function name for {free_function_name}")
+                            # free_function = analysis_operators.find_callee(free_loc)
+                            if free_function["error"]:
+                                print(f"3 Cannot find callee for {free_function_name}")
+                                free_function_name_l = get_function_name(free_code_line)
+                                if free_function_name_l is None:
+                                    self.analysis_logger.error(f"Cannot find function name at {free_loc}")
+                                    self.result_logger.error(f"Cannot find function name at {free_loc}")
+                                    break
+                                else:
+                                    free_function_name = free_function_name_l[0]
                     if free_function_name == "free":
                         # 这条分析路径终止了
                         analysis_path.append({"classification": "done"})
@@ -419,8 +470,6 @@ class PathAnalyzerModel(ABC):
                         self.result_logger.info(f"Analysis path {analysis_path} terminated with Freed")
                         continue
                     else:
-                        # 需要深入使用的free函数深入分析
-                        # 返回的分析路径替换掉当前的旧的analysis_path
                         if {
                             "function_name": free_function_name,
                             "arg_index": free_arg_index
@@ -434,8 +483,10 @@ class PathAnalyzerModel(ABC):
                             "function_name": free_function_name,
                             "arg_index": free_arg_index
                         })
+                        print(f"free_function: {free_function}")
+                        var_name = get_formal_arg_names(find_code_line(f"{free_function["filename"]}:{free_function["start_line"]}"))[free_arg_index]
                         analysis_path_list.remove(analysis_path)
-                        new_analysis_path_list = self.analysis_function_paths(start_loc=free_arg_index, previous_analysis_path=analysis_path, current_function=free_function, arg=True)
+                        new_analysis_path_list = self.analysis_function_paths(start_loc=free_function["start_line"], previous_analysis_path=analysis_path, current_function=free_function, mode={"mode" : "formal argument", "arg": free_arg_index}, var_name=var_name)
                         analysis_path_list.extend(new_analysis_path_list)
                         continue
                 elif last_analysis_path_item["classification"] == "Returned":
@@ -454,14 +505,17 @@ class PathAnalyzerModel(ABC):
                                 continue
                             else:
                                 # 继续进行分析 调用者函数内 左值内存是什么状况
+                                eq_position = analysis_operators.get_var_store_cl(call_site_loc, left_value)
                                 analysis_path_list.remove(analysis_path)
-                                new_analysis_path_list = self.analysis_function_paths(start_loc=call_site_loc, previous_analysis_path=analysis_path, current_function=current_function, arg=False)
+                                new_analysis_path_list = self.analysis_function_paths(start_loc=call_site_loc, previous_analysis_path=analysis_path, current_function=current_function, mode={"mode" : "local variable", "arg": eq_position}, var_name=left_value)
                                 analysis_path_list.extend(new_analysis_path_list)
                                 continue
                         else:
                             # 很奇怪 成为返回值 但是这个返回值没有被其他变量接收
                             # 暂时判断为leak
                             # TODO: 
+                            # 发现一种可能性 模型认为是内存转移到了调用者函数当中都是分类为return 实际上应该在transfer类型中 把提示词写的更明显一点 or 加一些example
+                            # 有些时候函数本身有返回值 但是依然是通过当前函数的参数transfer给了caller 就会被引入完全错误 / 无关的分析路径？ return还不需要提供接管内存的变量
                             self.analysis_logger.info(f"Analysis path {analysis_path} terminated with Returned but no left value")
                             self.result_logger.info(f"\n ================================ Analysis terminated with Returned but no left value ================================ \n")
                             self.result_logger.info(f"Analysis path {analysis_path} terminated with Returned but no left value")
@@ -469,37 +523,70 @@ class PathAnalyzerModel(ABC):
                             return analysis_path
                     continue
                 elif last_analysis_path_item["classification"] == "Transferred":
+                    # 先通过复制语句找到是哪个左值 等号
                     transfer_loc = last_analysis_path_item["source_location"]
-                    left_value = extract_lhs_variable(find_code_line(transfer_loc))
-                    if left_value:
-                        if left_value in self.global_variables:
+                    claimed_arg = last_analysis_path_item["arg"]
+                    transfer_function = analysis_operators.find_current_function(transfer_loc)
+                    eq_position = analysis_operators.get_var_store_cl(transfer_loc, claimed_arg)
+                    if eq_position is None:
+                        self.analysis_logger.error(f"Cannot find eq position for {claimed_arg} at {transfer_loc}")
+                        self.result_logger.error(f"Cannot find eq position for {claimed_arg} at {transfer_loc}")
+                        return analysis_path
+                    # 先使用trace lvar base object来找到base对象
+                    base_lvar_def_json = analysis_operators.find_base_lvar_def(transfer_loc, eq_position)
+                    if base_lvar_def_json["error"]:
+                        self.analysis_logger.error(f"Cannot find base lvar def for {transfer_loc} at {eq_position}")
+                        self.result_logger.error(f"Cannot find base lvar def for {transfer_loc} at {eq_position}")
+                        return analysis_path
+                    direct_def_node_json = base_lvar_def_json["direct_def_node"]
+                    final_def_node_json = base_lvar_def_json["final_def_node"]
+                    # 先解析direct_def_node_json 的 location 如果和 如果这个位置和起始分析的位置一致 说明应当追踪这里的base变量
+                    last_start_loc = last_analysis_path_item["start_loc"]
+                    # 这个location是原始形式 要解析出来
+                    # { \"ln\": 2855, \"cl\": 2, \"fl\": \"tif_getimage.c\" }
+                    node_kind = ""
+                    node_location = ""
+                    direct_def_node_loc = get_location_from_desc(direct_def_node_json["location"])
+                    if direct_def_node_loc == last_start_loc:
+                        # 说明应当追踪这里的base变量
+                        # base 位置也可能是函数参数
+                        node_kind = final_def_node_json["kind"]
+                        node_location = get_location_from_desc(final_def_node_json["location"])
+                    else:
+                        # 直接使用direct_def_node_loc即可
+                        node_kind = direct_def_node_json["kind"]
+                        node_location = direct_def_node_loc
+                    if node_kind == "FormalParmVFGNode":
+                        # 表明这里的左值是函数参数 看是第几个参数？
+                        # 找到之前分析的函数的函数体的第一行/函数声明带参数的行
+                        transfer_function_start_line = transfer_function["start_line"]
+                        transfer_function_start_code_line = find_code_line(f"{transfer_function['filename']}:{transfer_function_start_line}")
+                        actual_arg_index = get_arg_index(transfer_function_start_code_line, claimed_arg)
+                        transfer_function_call_sites = analysis_operators.find_callers(transfer_function["function_name"])
+                        analysis_path_list.remove(analysis_path)
+                        # 如果一个call sites都没有？ 死代码应该不会被分析到
+                        for call_site in transfer_function_call_sites:
+                            call_site_loc = call_site["location"]
+                            call_site_code = call_site["code"]
+                            caller_function = analysis_operators.find_current_function(call_site_loc)
+                            # 追踪call arg模式下的第actual_arg_index个参数
+                            var_name = get_actual_arg_names(call_site_code)[actual_arg_index]
+                            new_analysis_path_list = self.analysis_function_paths(start_loc=call_site_loc, previous_analysis_path=analysis_path, current_function=caller_function, mode={"mode" : "call argument", "arg": actual_arg_index}, var_name=var_name)
+                            analysis_path_list.extend(new_analysis_path_list)
+                        continue
+                    else:
+                        # 表明这里的左值是变量
+                        if claimed_arg in self.global_variables:
                             # 表明分析已经完全结束 内存由全局变量管理 不需要再分析
                             analysis_path.append({"classification": "done"})
                             self.analysis_logger.info(f"Analysis path {analysis_path} terminated with Transferred and global variable")
                             self.result_logger.info(f"Analysis path {analysis_path} terminated with Transferred and global variable")
                             continue
-                        elif left_value in arg_names:
-                            # 找到当前函数的所有调用位置
-                            # 情况很复杂 先找到被调用的位置 找到在调用者那里的参数名是什么
-                            # TODO 如何基于这个参数名找到调用者那里的PAGNode呢？
-                            # 看一下函数调用行的各个 IR stmt 先判断为leak
-                            self.analysis_logger.info(f"Analysis path {analysis_path} terminated with Transferred and arg variable")
-                            self.result_logger.info(f"Analysis path {analysis_path} terminated with Transferred and arg variable")
-                            return analysis_path
                         else:
-                            # 当前的局部变量 就是一个新的左值 需要继续分析
                             analysis_path_list.remove(analysis_path)
-                            new_analysis_path_list = self.analysis_function_paths(start_loc=transfer_loc, previous_analysis_path=analysis_path, current_function=current_function, arg=False)
+                            new_analysis_path_list = self.analysis_function_paths(start_loc=transfer_loc, previous_analysis_path=analysis_path, current_function=transfer_function, mode={"mode" : "local variable", "arg": eq_position}, var_name=claimed_arg)
                             analysis_path_list.extend(new_analysis_path_list)
                             continue
-                    else:
-                        # 没有左值？？ 这是怎么被transfer的 先判断为leak
-                        # TODO: 
-                        self.analysis_logger.info(f"Analysis path {analysis_path} terminated with Transferred but no left value")
-                        self.result_logger.info(f"\n ================================ Analysis terminated with Transferred but no left value ================================ \n")
-                        self.result_logger.info(f"Analysis path: {analysis_path}")
-                        self.result_logger.info(f"\n ================================ Analysis terminated with Transferred but no left value ================================ \n")
-                        return analysis_path
         return analysis_path_list
     
     
@@ -520,16 +607,16 @@ class DeepSeekPathAnalyzer(PathAnalyzerModel):
         for i in range(-2, 3):
             if code_line_number + i > 0:
                 candidate_code_line = find_code_line(f"{source_location.split(':')[0]}:{code_line_number + i}")
-                if candidate_code_line == code:
+                if candidate_code_line == code or candidate_code_line == code.strip():
                     return f"{source_location.split(':')[0]}:{code_line_number + i}"
         return {"error": f"mismatched code line number for {source_location} : {find_code_line(source_location)} and {code}"}
     
-    def set_conclusion_Tool(self, classification, return_location, reason, source_location=None, code_line=None, previous_analysis_path=[], return_locations=None, basic_info={}):
+    def set_conclusion_Tool(self, classification, return_location, reason, source_location=None, code_line=None, arg=None, previous_analysis_path=[], return_locations=None, basic_info={}):
         if source_location is not None:
             source_location = self.DeepSeekAdapter(source_location, code_line)
             if "error" in source_location:
                 return {"error": source_location["error"]}
-        return super().set_conclusion_Tool(classification, return_location, reason, source_location, code_line, previous_analysis_path, return_locations, basic_info)
+        return super().set_conclusion_Tool(classification, return_location, reason, source_location, code_line, arg, previous_analysis_path, return_locations, basic_info)
       
     
       

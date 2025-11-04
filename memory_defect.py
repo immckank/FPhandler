@@ -13,11 +13,11 @@ class MemoryDefect:
         return self.source_location
 
     def to_prompt(self):
-        return f"{self.defect_type} at {self.source_location}"
-    
-    def to_base_prompt(self):
-        # Potential <Error Type> for <Variable Name> at <Location>.
         return f"Potential {self.defect_type} for {extract_lhs_variable(find_code_line(self.source_location))} at {self.source_location}"
+    
+    def to_goal_prompt(self):
+        # You are looking for potential <Problem Type> memory issues related to the memory allocated at <Code Line>. This issue is considered to occur if <Classification Criteria>.
+        return f"You are looking for potential {self.defect_type} memory issues related to the memory allocated at {self.source_location}. This issue is considered to occur if "
     
 class MemoryLeak(MemoryDefect):
     def __init__(self, leak_type=None, source_location=None):
@@ -33,6 +33,9 @@ class MemoryLeak(MemoryDefect):
 
     def to_prompt(self):
         return super().to_prompt()
+    
+    def to_goal_prompt(self):
+        return super().to_goal_prompt()
 
 class NeverFree(MemoryLeak):
     def __init__(self, source_location=None):
@@ -61,6 +64,9 @@ class NeverFree(MemoryLeak):
             Message_prompt = f"Message: The memory allocated at {self.source_location} may not be freed along all paths that reach the end of the function.  \n"
         Task_prompt = f"Task: Please classify this alert as TP, FP, or UNCERTAIN, and provide your reasoning."
         return Type_prompt + Guidance_prompt + Location_prompt + Code_prompt + Message_prompt + Code_prompt + Task_prompt
+
+    def to_goal_prompt(self):
+        return super().to_goal_prompt() + f"upon reaching the end of the function, the memory has become unreachable and can never be freed."
 
 class PartialLeak(MemoryLeak):
     class conditional_path:
@@ -108,6 +114,10 @@ class PartialLeak(MemoryLeak):
         Task_prompt = f"Task: Please classify this alert as TP, FP, or UNCERTAIN, and provide your reasoning."
         return Type_prompt + Guidance_prompt + Location_prompt + Code_prompt + Message_prompt + Task_prompt
 
+    def to_goal_prompt(self):
+        return super().to_goal_prompt() + f"upon reaching the end of the function, the memory has become unreachable and can never be freed."
+    
+    
 class DoubleFree(MemoryLeak):
     class double_path:
         def __init__(self, condition=None, double_location=None):
@@ -153,6 +163,8 @@ class DoubleFree(MemoryLeak):
         Task_prompt = f"Task: Please classify this alert as TP, FP, or UNCERTAIN, and provide your reasoning."
         return Type_prompt + Guidance_prompt + Location_prompt + Code_prompt + Message_prompt + Code_prompt + Task_prompt
 
+    def to_goal_prompt(self):
+        return super().to_goal_prompt() + f"there exists a path on control-flow that the same memory is freed more than once without a reallocation in between."
 
 class UseAfterFree(MemoryDefect):
     class UseNode:
@@ -246,3 +258,6 @@ class UseAfterFree(MemoryDefect):
                 message_prompt +
                 task_prompt
         )
+
+    def to_goal_prompt(self):
+        return super().to_goal_prompt() + f"there exists a path on control-flow that memory is freed and then used without reallocation in between."

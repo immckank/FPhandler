@@ -149,7 +149,6 @@ def find_callee(source_location: str) -> Optional[List[Dict[str, Any]]]:
     }
     res = command_caller.send_query(query)
     if res:
-        print(f"res: {res}")
         res_json = json.loads(res)
         error = res_json.get("error", None)
         if error:
@@ -264,6 +263,30 @@ def find_return_locations(function_name: str, source_location: str) -> List[Dict
             return res_json.get("return_locations", [])
     return []
 
+def check_return_pointer(return_location: str) -> Optional[Dict[str, Any]]:
+    """Checks if the return location is a pointer.
+    Args:
+        return_location: The location of the return, in the format 'filename.c:line_number'.
+    Returns:
+        A dictionary containing the details of the return, including its type and value.
+    """
+    command_caller = CommandCaller()
+    query = {
+        "command": "check-return-pointer",
+        "location": return_location
+    }
+    res = command_caller.send_query(query)
+    if res:
+        res_json = json.loads(res)
+        error = res_json.get("error", None)
+        if error:
+            return {"error": f"error in checking return pointer for {return_location}, check if the location is right. {error}"}
+        else:
+            del res_json["error"]
+            return res_json
+    return None
+
+
 '''
 structure ctags
 '''
@@ -328,6 +351,22 @@ def ctags_readtags(source_location: str, id_name: str) -> List[str]:
 '''
 structure variable
 '''
+
+# trace lvar base object
+def find_base_lvar_def(source_location: str, eq_position: int) -> Optional[Dict[str, Any]]:
+    command_caller = CommandCaller()
+    query = {
+        "command": "find-base-lvar-def",
+        "location": source_location,
+        "eq_position": eq_position
+    }
+    res = command_caller.send_query(query)
+    if res:
+        error = res.get("error", None)
+        if error:
+            return {"error": f"error in finding base lvar def for {source_location}, check if the location and eq_position are right. {error}"}
+        return json.loads(res)
+    return None
 
 # find_var_definitions
 # 找到指定变量所有被定义的位置
@@ -585,11 +624,8 @@ def get_value_sensitive_icfg_return_path(start_location: str, eq_position: int) 
         "location" : start_location,
         "eq_position" : str(eq_position)
     }
-    # Print the actual JSON string that will be sent (not the Python dict representation)
-    print(f"query: {json.dumps(query)}")
     res = command_caller.send_query(query)
     if res:
-        print(f"res: {res}")
         res_json = json.loads(res)
         error = res_json.get("error", None)
         if error:
@@ -614,6 +650,26 @@ def get_value_sensitive_arg_icfg_return_path(function_name: str, index: int) -> 
         error = res_json.get("error", None)
         if error:
             logging.error(f"Error finding value sensitive arg icfg return path for {function_name} with index {index}: {error}")
+            return None
+        else:
+            del res_json["error"]
+            return_locations = res_json.get("return_locations", [])
+            return return_locations
+    return None
+
+def get_value_sensitive_call_arg_icfg_return_path(location: str, arg_index: int) -> Optional[List[Dict[str, Any]]]:
+    command_caller = CommandCaller()
+    query = {
+        "command" : "find-call-arg-value-path-inside",
+        "location" : location,
+        "arg_index" : str(arg_index)
+    }
+    res = command_caller.send_query(query)
+    if res:
+        res_json = json.loads(res)
+        error = res_json.get("error", None)
+        if error:
+            logging.error(f"Error finding value sensitive call arg icfg return path for {function_name} with index {index}: {error}")
             return None
         else:
             del res_json["error"]
@@ -892,6 +948,38 @@ def dump_source_line(file_name: str, line_number: int) -> Optional[str]:
     file_path = os.path.join(PUT_ROOT_PATH, file_path)
     snippet = dump_source_snippet(file_name, line_number, line_number)
     return snippet.strip() if snippet else "The line number is invalid or out of range for the file."
+
+def get_eq_position_list(source_location: str) -> Optional[List[int]]:
+    # find-store-cl
+    command_caller = CommandCaller()
+    query = {
+        "command" : "find-store-cl",
+        "location" : source_location
+    }
+    res = command_caller.send_query(query)
+    if res:
+        res_json = json.loads(res)
+        error = res_json.get("error", None)
+        if error:
+            logging.error(f"Error finding eq position list for {source_location}: {error}")
+            return None
+        else:
+            return res_json.get("store_cl", [])
+    return None
+
+
+def get_var_store_cl(source_location: str, var_name: str) -> Optional[List[Dict[str, Any]]]:
+    eq_position_list = get_eq_position_list(source_location)
+    print(f"eq_position_list: {eq_position_list}")
+    original_code_line = find_code_line(source_location, strip_whitespace=False)
+    if not eq_position_list:
+        return None
+    for eq_position in eq_position_list:
+        print(f"code line: {original_code_line[:eq_position]}")
+        print(f"var_name: {var_name}")
+        if var_name in original_code_line[:eq_position]:
+            return eq_position
+    return None
 
 if __name__ == '__main__':
     # print(dump_source_snippet("slabs_automove.c", 1, 50))

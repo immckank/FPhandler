@@ -255,6 +255,10 @@ set_conclusion_desc_path = {
                     "type": "string",
                     "description": "The code line of the source location, required for 'Transferred', 'Returned', and 'Freed' classifications. Not required for 'NullPointer', 'Leak', or 'Unreachable'."
                 },
+                "arg": {
+                    "type": "string",
+                    "description": "Only required when classified as 'Freed' or 'Transferred'. This is used to specify which function was used to release the memory, or to which variable the memory was explicitly transferred."
+                },
                 "return_location": {
                     "type": "string",
                     "description": "The specific return location being analyzed. This should match one of the return locations in the current analysis context. After setting the conclusion, this return location will be marked as done."

@@ -542,17 +542,17 @@ def get_arg_index(code_line, variable_name):
     
     return (None, None)
 
-def get_arg_names(code_line):
-    # 给定一个函数的声明或定义行 包含函数名称 找到所有参数的参数名称
+def get_formal_arg_names(code_line):
+    # 给定一个函数的声明或定义行 包含函数名称 找到所有形参的参数名称
     """
-    从C/C++函数声明或定义中提取参数名称
+    从C/C++函数声明或定义中提取形参名称
     
     Args:
         code_line: 函数声明或定义的代码行
         例如: "int foo(int x, char *y, size_t z)"
         
     Returns:
-        参数名称列表，例如: ['x', 'y', 'z']
+        形参名称列表，例如: ['x', 'y', 'z']
         如果解析失败返回空列表
     """
     # 查找第一个左括号
@@ -643,9 +643,107 @@ def get_arg_names(code_line):
     
     return arg_names
 
+def get_actual_arg_names(code_line):
+    """
+    从C/C++函数调用中提取实参表达式列表
+    
+    Args:
+        code_line: 函数调用的代码行
+        例如: "foo(a, b->field, arr[i])", "memcpy(dest, src, sizeof(buf))"
+        
+    Returns:
+        实参表达式列表，例如: ['a', 'b->field', 'arr[i]']
+        如果解析失败返回空列表
+    """
+    # 查找第一个左括号
+    start_paren = code_line.find('(')
+    if start_paren == -1:
+        return []
+    
+    # 查找匹配的右括号（处理嵌套括号）
+    depth = 0
+    end_paren = -1
+    for i in range(start_paren, len(code_line)):
+        if code_line[i] == '(':
+            depth += 1
+        elif code_line[i] == ')':
+            depth -= 1
+            if depth == 0:
+                end_paren = i
+                break
+    
+    if end_paren == -1:
+        return []
+    
+    # 提取参数部分
+    args_str = code_line[start_paren + 1:end_paren].strip()
+    
+    if not args_str:
+        return []
+    
+    # 解析参数列表（考虑嵌套的括号、方括号和逗号）
+    actual_args = []
+    current_arg = []
+    depth = 0  # 括号和方括号的嵌套深度
+    in_string = False  # 是否在字符串字面量中
+    in_char = False    # 是否在字符字面量中
+    escape = False     # 是否是转义字符
+    
+    for i, char in enumerate(args_str):
+        # 处理转义字符
+        if escape:
+            current_arg.append(char)
+            escape = False
+            continue
+        
+        # 处理字符串和字符字面量
+        if char == '\\':
+            escape = True
+            current_arg.append(char)
+            continue
+        
+        if char == '"' and not in_char:
+            in_string = not in_string
+            current_arg.append(char)
+            continue
+        
+        if char == "'" and not in_string:
+            in_char = not in_char
+            current_arg.append(char)
+            continue
+        
+        # 如果在字符串或字符字面量中，直接添加
+        if in_string or in_char:
+            current_arg.append(char)
+            continue
+        
+        # 处理括号和方括号的嵌套
+        if char in '([{':
+            depth += 1
+            current_arg.append(char)
+        elif char in ')]}':
+            depth -= 1
+            current_arg.append(char)
+        elif char == ',' and depth == 0:
+            # 遇到顶层逗号，分割参数
+            arg_text = ''.join(current_arg).strip()
+            if arg_text:
+                actual_args.append(arg_text)
+            current_arg = []
+        else:
+            current_arg.append(char)
+    
+    # 添加最后一个参数
+    if current_arg:
+        arg_text = ''.join(current_arg).strip()
+        if arg_text:
+            actual_args.append(arg_text)
+    
+    return actual_args
+
 if __name__ == "__main__":
     
-    print("\n=== 测试 get_arg_names 函数 ===")
+    print("\n=== 测试 get_formal_arg_names 函数 ===")
     decl_test_cases = [
         "int foo(int x, char *y, size_t z)",
         "void memcpy(void *dest, const void *src, size_t n)",
@@ -662,7 +760,30 @@ if __name__ == "__main__":
     ]
     
     for decl in decl_test_cases:
-        names = get_arg_names(decl)
+        names = get_formal_arg_names(decl)
         print(f"声明: {decl}")
-        print(f"  参数名称: {names}")
+        print(f"  形参名称: {names}")
+        print()
+    
+    print("\n=== 测试 get_actual_arg_names 函数 ===")
+    call_test_cases = [
+        "foo(a, b, c)",
+        "memcpy(dest, src, n)",
+        "strcpy(buffer, \"hello world\")",
+        "printf(\"%d %s\", count, name)",
+        "process(arr[i], size * 2)",
+        "callback(ptr->field, obj.member)",
+        "func(sizeof(int), (char*)ptr)",
+        "nested(foo(a, b), bar(c))",
+        "complex(a + b, c > d ? e : f, g)",
+        "array_access(arr[i][j], matrix[x][y][z])",
+        "string_with_comma(\"a,b,c\", 'x')",
+        "empty()",
+        "single(x)",
+    ]
+    
+    for call in call_test_cases:
+        args = get_actual_arg_names(call)
+        print(f"调用: {call}")
+        print(f"  实参列表: {args}")
         print()
