@@ -88,6 +88,17 @@ class PathAnalyzerModel(ABC):
                 return {"error": f"code_line is required for Transferred classification"}
             if arg is None:
                 return {"error": f"arg is required for Transferred classification to specify which variable the memory was transferred to."}
+            eq_position_l = analysis_operators.get_eq_position_list(source_location)
+            if eq_position_l is None:
+                return {"error": f"The code line at {source_location} : {find_code_line(source_location)} has no related store statement. You may just give the code line where the transfer happens or check if the code line is correct."}
+            matched_arg = False
+            for eq_position in eq_position_l:
+                code_line = find_code_line(source_location)
+                if arg in code_line[:eq_position]:
+                    matched_arg = True
+                    break
+            if not matched_arg:
+                return {"error": f"Cannot find arg {arg} in the code line at {source_location} : {find_code_line(source_location)}. You may just give the code line where the transfer happens or check if the code line is correct or the arg is correct."}
             # 为指定location的return_location设置done = True
             for t_return_location in return_locations:
                 if t_return_location["location"] == return_location:
@@ -112,10 +123,6 @@ class PathAnalyzerModel(ABC):
             if code_line is None:
                 return {"error": f"code_line is required for Returned classification"}
             return_pointer_json = analysis_operators.check_return_pointer(return_location)
-            # DEBUG
-            print(f"function can return pointer: {return_pointer_json['function_can_return_pointer']}")
-            print(f"location has pointer operation: {return_pointer_json['location_has_pointer_operation']}")
-            # END DEBUG
             if not return_pointer_json["function_can_return_pointer"] or not return_pointer_json["location_has_pointer_operation"]:
                 return {"error": f"the function {basic_info['function_name']} at {source_location} cannot return a pointer, or the return location {return_location} does not have pointer operation. Do you mean the memory is transferred?"}
             # 为指定location的return_location设置done = True
@@ -309,7 +316,7 @@ class PathAnalyzerModel(ABC):
         return_prompt += f"The memory is returned as return value to the caller (Returned).\n"
         return_prompt += f"The memory has been freed (or 'released') before returning (Freed).\n"
         return_prompt += f"A memory leak has occurred (Leak).\n"
-        return_prompt += f"This return point is unreachable (Unreachable).\n"
+        return_prompt += f"This return point is unreachable (Unreachable), Or, this return point is unreachable because of conditional logic on the path.\n"
         messages = [
             {"role": "system", "content": VALUE_PATH_PROMPT + project_prompt},
             {"role": "user", "content": self.alter_prompt + previous_analysis_path_prompt +function_prompt + return_prompt}
@@ -351,6 +358,7 @@ class PathAnalyzerModel(ABC):
                     function_response = json.dumps({"error": f"failed to parse arguments: {str(e)}"})
                     messages.append({ "tool_call_id": tool_call.id, "role": "tool", "content": function_response })
                     continue
+                self.analysis_logger.info(f"Tool call: {tool_function_name} with args: {tool_arguments}")
                 if tool_function_name == "set_conclusion":
                     function_response = self.set_conclusion_Tool(**tool_arguments, previous_analysis_path=previous_analysis_path, return_locations=return_locations, basic_info=basic_info)
                     # set_conclusion_Tool 返回整个 analysis_path list，但已经在内部修改了 analysis_path
@@ -566,13 +574,21 @@ class PathAnalyzerModel(ABC):
                         # 找到之前分析的函数的函数体的第一行/函数声明带参数的行
                         transfer_function_start_line = transfer_function["start_line"]
                         transfer_function_start_code_line = find_code_line(f"{transfer_function['filename']}:{transfer_function_start_line}")
-                        actual_arg_index = get_arg_index(transfer_function_start_code_line, claimed_arg)
+                        _, actual_arg_index = get_arg_index(transfer_function_start_code_line, claimed_arg)
+                        if actual_arg_index is None:
+                            self.analysis_logger.error(f"Cannot find actual arg index for {claimed_arg} at {transfer_function_start_code_line}")
+                            self.result_logger.error(f"Cannot find actual arg index for {claimed_arg} at {transfer_function_start_code_line}")
+                            actual_arg_index = 0
                         transfer_function_call_sites = analysis_operators.find_callers(transfer_function["function_name"])
                         analysis_path_list.remove(analysis_path)
                         # 如果一个call sites都没有？ 死代码应该不会被分析到
                         for call_site in transfer_function_call_sites:
                             call_site_loc = call_site["location"]
                             call_site_code = call_site["code"]
+                            print(f"call_site_code: {call_site_code}")
+                            print(f"call_site_loc: {call_site_loc}")
+                            self.analysis_logger.info(f"call_site_code: {call_site_code}")
+                            self.analysis_logger.info(f"call_site_loc: {call_site_loc}")
                             caller_function = analysis_operators.find_current_function(call_site_loc)
                             # 追踪call arg模式下的第actual_arg_index个参数
                             var_name = get_actual_arg_names(call_site_code)[actual_arg_index]
