@@ -671,7 +671,7 @@ def get_value_sensitive_call_arg_icfg_return_path(location: str, arg_index: int)
         res_json = json.loads(res)
         error = res_json.get("error", None)
         if error:
-            logging.error(f"Error finding value sensitive call arg icfg return path for {function_name} with index {index}: {error}")
+            logging.error(f"Error finding value sensitive call arg icfg return path at {location} with index {arg_index}: {error}")
             return None
         else:
             del res_json["error"]
@@ -698,7 +698,6 @@ def get_shortest_path_cond(start_location: str, target_location: str):
         "start_location": start_location,
         "target_location": target_location
     }
-    res = command_caller_instance.send_query(query)
     if res:
         res_json = json.loads(res)
         error = res_json.get("error", None)
