@@ -358,14 +358,16 @@ def find_base_lvar_def(source_location: str, eq_position: int) -> Optional[Dict[
     query = {
         "command": "find-base-lvar-def",
         "location": source_location,
-        "eq_position": eq_position
+        "eq_position": str(eq_position)
     }
     res = command_caller.send_query(query)
     if res:
-        error = res.get("error", None)
+        res_json = json.loads(res)
+        print(f"res_json base lvar: {res_json}")
+        error = res_json.get("error", None)
         if error:
             return {"error": f"error in finding base lvar def for {source_location}, check if the location and eq_position are right. {error}"}
-        return json.loads(res)
+        return res_json
     return None
 
 # find_var_definitions

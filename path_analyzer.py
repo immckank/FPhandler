@@ -250,7 +250,7 @@ class PathAnalyzerModel(ABC):
         if mode["mode"] == "formal argument":
             arg_index = mode["arg"]
             wappered_return_locations = analysis_operators.get_value_sensitive_arg_icfg_return_path(current_function["function_name"], arg_index)
-            function_prompt += f"\nYou are now tracing the memory of the {arg_index}th formal argument of the function {current_function['function_name']} at {start_loc} : {find_code_line(start_loc)}.\n"
+            function_prompt += f"\nYou are now tracing the memory of the {arg_index}th formal argument of the function {current_function['function_name']} at {start_loc} : {find_code_line(f"{current_function['filename']}:{current_function['start_line']}")}.\n"
         elif mode["mode"] == "local variable":
             # 定位eqposition
             eq_position = mode["arg"]
@@ -442,11 +442,13 @@ class PathAnalyzerModel(ABC):
                 elif last_analysis_path_item["classification"] == "Freed":
                     free_loc = last_analysis_path_item["source_location"]
                     free_code_line = find_code_line(free_loc)
+                    free_function_name = last_analysis_path_item["arg"]
                     free_function = analysis_operators.find_function_body(free_function_name)
                     fc_name, free_arg_index = get_arg_index(free_code_line, variable_name)
                     print(f"fc_name: {fc_name}, free_arg_index: {free_arg_index}")
                     print(f"free_function name: {free_function_name}")
                     if free_arg_index is None:
+                        print(f"free_arg_index is None")
                         free_arg_index = 0
                     if free_function["error"]:
                         print(f"1 Cannot find function body for {free_function_name}")
@@ -534,14 +536,17 @@ class PathAnalyzerModel(ABC):
                         return analysis_path
                     # 先使用trace lvar base object来找到base对象
                     base_lvar_def_json = analysis_operators.find_base_lvar_def(transfer_loc, eq_position)
-                    if base_lvar_def_json["error"]:
+                    self.analysis_logger.info(f"base_lvar_def_json: {base_lvar_def_json}")
+                    err = base_lvar_def_json.get("error", None)
+                    if err:
+                        print(f"base_lvar_def_json: {base_lvar_def_json}")
                         self.analysis_logger.error(f"Cannot find base lvar def for {transfer_loc} at {eq_position}")
                         self.result_logger.error(f"Cannot find base lvar def for {transfer_loc} at {eq_position}")
                         return analysis_path
                     direct_def_node_json = base_lvar_def_json["direct_def_node"]
                     final_def_node_json = base_lvar_def_json["final_def_node"]
                     # 先解析direct_def_node_json 的 location 如果和 如果这个位置和起始分析的位置一致 说明应当追踪这里的base变量
-                    last_start_loc = last_analysis_path_item["start_loc"]
+                    last_start_loc = last_analysis_path_item["start_location"]
                     # 这个location是原始形式 要解析出来
                     # { \"ln\": 2855, \"cl\": 2, \"fl\": \"tif_getimage.c\" }
                     node_kind = ""
