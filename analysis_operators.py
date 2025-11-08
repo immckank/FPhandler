@@ -243,6 +243,7 @@ def find_all_callees(function_name: str) -> List[Dict[str, Any]]:
             return res_json.get("callees", [])
     return []
 
+# 这个函数暂时不用了
 def find_return_locations(function_name: str, source_location: str) -> List[Dict[str, Any]]:
     # { "command" : "find-return-locations", "name" : "TIFFFetchNormalTag",  "location" : "tif_dirread.c:4981"}
     command_caller = CommandCaller()
@@ -644,7 +645,7 @@ def get_value_sensitive_arg_icfg_return_path(function_name: str, index: int) -> 
     query = {
         "command" : "find-arg-value-path-inside",
         "function_name" : function_name,
-        "index" : str(index)
+        "arg_index" : str(index)
     }
     res = command_caller.send_query(query)
     if res:
@@ -659,12 +660,13 @@ def get_value_sensitive_arg_icfg_return_path(function_name: str, index: int) -> 
             return return_locations
     return None
 
-def get_value_sensitive_call_arg_icfg_return_path(location: str, arg_index: int) -> Optional[List[Dict[str, Any]]]:
+def get_value_sensitive_call_arg_icfg_return_path(location: str, arg_index: int, callee_function_name: str = "") -> Optional[List[Dict[str, Any]]]:
     command_caller = CommandCaller()
     query = {
         "command" : "find-call-arg-value-path-inside",
         "location" : location,
-        "arg_index" : str(arg_index)
+        "arg_index" : str(arg_index),
+        "callee_function_name" : callee_function_name
     }
     res = command_caller.send_query(query)
     if res:

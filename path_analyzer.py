@@ -219,11 +219,6 @@ class PathAnalyzerModel(ABC):
     def find_callers_Tool(self, function_name):
         return analysis_operators.find_callers(function_name)
     
-    # start loc 分析其实位置
-    # previous_analysis_path 之前的分析路径
-    # current_function 当前函数
-    # mode 分析模式 {"local variable" "formal argument" "call argument"}
-    # var_name 变量名
     def analysis_function_paths(self, start_loc, previous_analysis_path=[], current_function=None, mode={"mode" : "local variable", "arg": None}, var_name=None):
         allowed_tools = [
             set_conclusion_desc_path,
@@ -265,6 +260,8 @@ class PathAnalyzerModel(ABC):
             function_prompt += f"\nYou are now tracing the memory of the local variable {var_name} at {start_loc} : {find_code_line(start_loc)}.\n"
         elif mode["mode"] == "call argument":
             arg_index = mode["arg"]
+            # 这里需要再补充一个参数为callee function name
+            callee_function_name = previous_analysis_path[-1]["function_name"]
             wappered_return_locations = analysis_operators.get_value_sensitive_call_arg_icfg_return_path(start_loc, arg_index)
             callee_function_name = previous_analysis_path[-1]["function_name"]
             function_prompt += f"\nYou are now tracing the memory of the variable {var_name} used as the {arg_index}th call argument to call {callee_function_name} in the function {current_function['function_name']} at {start_loc} : {find_code_line(start_loc)}.\n"
