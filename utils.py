@@ -480,6 +480,14 @@ def get_arg_index(code_line, variable_name):
     
     matches = list(re.finditer(func_pattern, code_line))
     
+    normalized_variable = variable_name.lstrip('&*')
+    if not normalized_variable:
+        normalized_variable = variable_name
+    
+    loose_pattern = re.compile(
+        r'(?<![A-Za-z0-9_])(?:[&*])*' + re.escape(normalized_variable) + r'(?![A-Za-z0-9_])'
+    )
+    
     for match in matches:
         func_name = match.group(1)
         
@@ -538,6 +546,9 @@ def get_arg_index(code_line, variable_name):
             # 检查变量名是否在参数中（可能是 &var, *var, var, var[i] 等形式）
             # 使用单词边界匹配，确保是完整的变量名
             if re.search(r'\b' + re.escape(variable_name) + r'\b', arg):
+                return (func_name, idx)
+            
+            if loose_pattern.search(arg):
                 return (func_name, idx)
     
     return (None, None)

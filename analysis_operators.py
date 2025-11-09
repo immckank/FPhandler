@@ -973,6 +973,10 @@ def get_eq_position_list(source_location: str) -> Optional[List[int]]:
             return res_json.get("store_cl", [])
     return None
 
+def get_gep_position_list(source_location: str) -> Optional[List[int]]:
+    
+    return None
+
 
 def get_var_store_cl(source_location: str, var_name: str) -> Optional[List[Dict[str, Any]]]:
     eq_position_list = get_eq_position_list(source_location)
