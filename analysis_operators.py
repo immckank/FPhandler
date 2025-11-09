@@ -662,6 +662,7 @@ def get_value_sensitive_arg_icfg_return_path(function_name: str, index: int) -> 
 
 def get_value_sensitive_call_arg_icfg_return_path(location: str, arg_index: int, callee_function_name: str = "") -> Optional[List[Dict[str, Any]]]:
     command_caller = CommandCaller()
+    # {"command": "find-call-arg-value-path-inside", "location": "tif_dirread.c:5500", "arg_index": "2", "callee_function_name" : "TIFFReadDirEntrySlongArray"}
     query = {
         "command" : "find-call-arg-value-path-inside",
         "location" : location,
@@ -674,6 +675,8 @@ def get_value_sensitive_call_arg_icfg_return_path(location: str, arg_index: int,
         error = res_json.get("error", None)
         if error:
             logging.error(f"Error finding value sensitive call arg icfg return path at {location} with index {arg_index}: {error}")
+            logging.error(f"query: {query}")
+            logging.error(f"res: {res}")
             return None
         else:
             del res_json["error"]

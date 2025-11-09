@@ -13,7 +13,7 @@ PROJECT_DESC = "Libtiff is a widely-used software library that provides a set of
 SAR_ROOT_PATH = "SAR"
 # sar_name = "openssl-67dc995e.txt"
 # sar_name = "libtiff-57449991.txt"
-sar_name = "libtiff-b9b93f66-jpeg.txt"
+sar_name = "libtiff-b9b93f66-jpeg-debug.txt"
 # sar_name = "openssl-67dc995e.txt"
 alter_index = 0
 
