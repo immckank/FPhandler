@@ -277,7 +277,7 @@ create_path_desc_path = {
     "type": "function",
     "function": {
         "name": "create_path",
-        "description": "Create a new analysis path for a specific return location. Use this before adding events (such as GEP operations) or completing the path.",
+        "description": "Create a temporary analysis path for the given return location. Call this before recording any path events so that subsequent updates attach to the correct path.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -285,20 +285,12 @@ create_path_desc_path = {
                     "type": "string",
                     "description": "The return location this path targets, in the format 'filename.c:line_number'. Must match one of the return locations provided in the current analysis context."
                 },
-                "path_group_index": {
-                    "type": "integer",
-                    "description": "Optional index identifying the path group (when multiple path groups reach the same return location)."
-                },
                 "description": {
                     "type": "string",
-                    "description": "Optional short summary of the path as understood by the model."
+                    "description": "Short description of the path that is stored together with its events."
                 },
-                "metadata": {
-                    "type": "object",
-                    "description": "Optional arbitrary metadata about this path."
-                }
             },
-            "required": ["return_location"]
+            "required": ["return_location", "description"]
         }
     }
 }
@@ -307,7 +299,7 @@ add_path_gep_to_baseobj_desc_path = {
     "type": "function",
     "function": {
         "name": "add_path_gep_to_baseobj",
-        "description": "记录一次将内存管理权转交给结构体基对象的GEP操作。",
+        "description": "Record a GEP event that transfers ownership to a struct base object and append it to the specified path.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -317,15 +309,11 @@ add_path_gep_to_baseobj_desc_path = {
                 },
                 "gep_location": {
                     "type": "string",
-                    "description": "The source location of the GEP instruction, in the format 'filename.c:line_number'."
+                    "description": "Source location of the GEP instruction in the format 'filename.c:line_number'."
                 },
                 "baseobj_name": {
                     "type": "string",
-                    "description": "The variable name of the base object receiving the memory ownership."
-                },
-                "note": {
-                    "type": "string",
-                    "description": "Optional additional detail about this transfer."
+                    "description": "Variable name of the struct base object receiving ownership."
                 }
             },
             "required": ["path_id", "gep_location", "baseobj_name"]
@@ -337,7 +325,7 @@ add_path_gep_to_member_desc_path = {
     "type": "function",
     "function": {
         "name": "add_path_gep_to_member",
-        "description": "记录一次从结构体基对象向成员变量的GEP访问，确保路径跟踪到具体成员。",
+        "description": "Record a GEP event that accesses a struct member from a base object and append it to the specified path.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -347,19 +335,11 @@ add_path_gep_to_member_desc_path = {
                 },
                 "gep_location": {
                     "type": "string",
-                    "description": "The source location of the GEP instruction, in the format 'filename.c:line_number'."
+                    "description": "Source location of the GEP instruction in the format 'filename.c:line_number'."
                 },
                 "member_name": {
                     "type": "string",
-                    "description": "The struct member accessed via the GEP."
-                },
-                "baseobj_name": {
-                    "type": "string",
-                    "description": "Optional name of the base object that contains the member."
-                },
-                "note": {
-                    "type": "string",
-                    "description": "Optional additional detail about this member access."
+                    "description": "Name of the struct member reached through the GEP."
                 }
             },
             "required": ["path_id", "gep_location", "member_name"]
@@ -371,34 +351,34 @@ complete_path_desc_path = {
     "type": "function",
     "function": {
         "name": "complete_path",
-        "description": "Finalize an analysis path by providing its classification and reasoning. This marks the associated return location as analyzed.",
+        "description": "Finalize an analysis path by providing its classification and reasoning, marking the path as completed.",
         "parameters": {
             "type": "object",
             "properties": {
                 "path_id": {
                     "type": "string",
-                    "description": "The identifier of the path to complete."
+                    "description": "Identifier of the path being finalized."
                 },
                 "classification": {
                     "type": "string",
-                    "description": "The classification describing how the memory is handled on this path.",
+                    "description": "Indicates how memory is ultimately handled on this path.",
                     "enum": ["NullPointer", "Transferred with assignment", "Returned to caller", "Handled by callee", "Leak", "Unreachable"]
                 },
                 "reason": {
                     "type": "string",
-                    "description": "Detailed reasoning supporting the classification."
+                    "description": "Detailed justification for the chosen classification."
                 },
                 "source_location": {
                     "type": "string",
-                    "description": "Required for 'Transferred with assignment', 'Returned to caller', and 'Handled by callee'. The code location related to the classification (format 'filename.c:line_number')."
+                    "description": "Required when the classification is 'Transferred with assignment', 'Returned to caller', or 'Handled by callee'. Specifies the related source location in the format 'filename.c:line_number'."
                 },
                 "code_line": {
                     "type": "string",
-                    "description": "The code line snippet corresponding to the source_location when required."
+                    "description": "The code line corresponding to the source_location when required."
                 },
                 "arg": {
                     "type": "string",
-                    "description": "When applicable, identifies the variable/function involved in the transfer or free."
+                    "description": "When applicable, identifies the variable or function involved in the transfer or free."
                 }
             },
             "required": ["path_id", "classification", "reason"]
@@ -410,20 +390,16 @@ query_paths_desc_path = {
     "type": "function",
     "function": {
         "name": "query_paths",
-        "description": "Inspect the current analysis paths, optionally focusing on a specific path identifier.",
+        "description": "Query the temporary store of analysis paths by a specific path identifier. Deleted paths are not returned.",
         "parameters": {
             "type": "object",
             "properties": {
                 "path_id": {
                     "type": "string",
-                    "description": "If provided, returns the details of only this path."
-                },
-                "include_completed": {
-                    "type": "boolean",
-                    "description": "Whether to include completed paths in the response. Defaults to true."
+                    "description": "Identifier of the path to inspect. Returns an error if the path is missing or deleted."
                 }
             },
-            "required": []
+            "required": ["path_id"]
         }
     }
 }

@@ -44,7 +44,6 @@ class PathAnalyzerModel(ABC):
             "complete_path": self.complete_path_Tool,
             "query_paths": self.query_paths_Tool,
             "delete_path": self.delete_path_Tool,
-            "set_conclusion": self.set_conclusion_Tool,
             "dump_source_snippet": self.dump_source_snippet_Tool,
             "dump_source_line": self.dump_source_line_Tool,
             "find_current_function": self.find_current_function_Tool,
@@ -54,9 +53,8 @@ class PathAnalyzerModel(ABC):
         self.global_variables = []
         self.memcached = []
         self.alter_prompt = ""
-        # 模型做的全错
-        self.path_context_stack = []
-        self.path_id_seq = 0
+        self.tmp_path_list = []
+        self.l_return_locations = []
 
     def send_message(self, messages, tools=""):
         response = self.client.chat.completions.create(
@@ -65,255 +63,100 @@ class PathAnalyzerModel(ABC):
             tools=tools
         )
         return response.choices[0].message  
-
-
-    # 在函数内分析的过程中 模型的交互对象为一个
     
+    def check_return_location_completeness(self):
+        # 找出所有未完成的return location
+        # 实现有问题？
+        incomplete_return_locations = []
+        for l_return_location in self.l_return_locations:
+            visited = False
+            for path in self.tmp_path_list:
+                if path["return_location"] == l_return_location and path["status"] == "completed":
+                    visited = True
+                    break
+            if not visited:
+                incomplete_return_locations.append(l_return_location)
+        if len(incomplete_return_locations) > 0:
+            return {"error": f"The return locations {incomplete_return_locations} are not complete.", "success": False}
+        return {"success": True}
     
-    def _get_current_path_context(self):
-        if not self.path_context_stack:
-            return None
-        return self.path_context_stack[-1]
+    def check_path_completeness(self):
+        incomplete_paths = []
+        for path in self.tmp_path_list:
+            if path["status"] == "active":
+                incomplete_paths.append(path["path_id"])
+        if len(incomplete_paths) > 0:
+            return {"error": f"The paths {incomplete_paths} are not complete.", "success": False}
+        return {"success": True}
 
-    def _push_path_context(self, previous_analysis_path, basic_info, return_locations):
-        context = {
-            "paths": {},
-            "completed_paths": [],
-            "previous_analysis_path": copy.deepcopy(previous_analysis_path),
-            "basic_info": copy.deepcopy(basic_info),
-            "return_locations": return_locations,
-            "path_counter": 0
-        }
-        self.path_context_stack.append(context)
-        return context
-
-    def _pop_path_context(self):
-        if self.path_context_stack:
-            return self.path_context_stack.pop()
-        return None
-
-    def _generate_path_id(self):
-        self.path_id_seq += 1
-        return f"path_{self.path_id_seq}"
-
-    def create_path_Tool(self, return_location, path_group_index=None, description=None, metadata=None, previous_analysis_path=None, return_locations=None, basic_info=None):
-        context = self._get_current_path_context()
-        if context is None:
-            return {"error": "No active path context. create_path must be used within an analysis_function_paths session."}
-
-        return_locations = return_locations if return_locations is not None else context["return_locations"]
-        basic_info = basic_info if basic_info is not None else context["basic_info"]
-        base_path = previous_analysis_path if previous_analysis_path is not None else context["previous_analysis_path"]
-
-        target_return_location = None
-        for t_return_location in return_locations:
-            if t_return_location["location"] == return_location:
-                target_return_location = t_return_location
-                break
-        if target_return_location is None:
-            location_list = [t_return_location["location"] for t_return_location in return_locations]
-            return {"error": f"return location {return_location} not found in the return locations. Available locations: {location_list}"}
-
-        path_id = self._generate_path_id()
-        context["path_counter"] += 1
-        path_state = {
+    def create_path_Tool(self, return_location, description, path_id):
+        path_id = str(path_id)
+        new_path = {
             "path_id": path_id,
             "return_location": return_location,
             "status": "active",
-            "events": [],
-            "metadata": {
-                "path_group_index": path_group_index,
-                "description": description,
-                "metadata": metadata or {}
-            },
-            "previous_analysis_path": copy.deepcopy(base_path),
-            "basic_info": copy.deepcopy(basic_info),
-            "return_locations": return_locations,
-            "return_location_ref": target_return_location
-        }
-        context["paths"][path_id] = path_state
-
-        summary = {
-            "path_id": path_id,
-            "return_location": return_location,
-            "status": path_state["status"],
-            "path_group_index": path_group_index,
+            "path_items": [],
             "description": description
         }
-        return summary
+        self.tmp_path_list.append(new_path)
+        return new_path
 
-    def add_path_gep_to_baseobj_Tool(self, path_id, gep_location, baseobj_name, note=None):
-        context = self._get_current_path_context()
-        if context is None:
-            return {"error": "No active path context to attach GEP information."}
-
-        path_state = context["paths"].get(path_id)
-        if path_state is None:
-            return {"error": f"path_id {path_id} does not exist in the current context."}
-        if path_state["status"] != "active":
-            return {"error": f"path_id {path_id} is not active. Current status: {path_state['status']}"}
-
-        event = {
-            "type": "gep_base",
-            "location": gep_location,
-            "baseobj_name": baseobj_name,
-            "note": note
+    def add_path_gep_to_baseobj_Tool(self, path_id, gep_location, baseobj_name, basic_info):
+        gep_to_baseobj_path_item = {
+            "value_object": basic_info["value_object"],
+            "function_name": basic_info["function_name"],
+            "classification": "GEP to baseobj",
+            "source_location": gep_location,
+            "baseobj_name": baseobj_name
         }
-        path_state["events"].append(event)
+        # 在self.tmp_path_list中找到path_id对应的path 并添加gep_to_baseobj_path_item
+        # 用lamda表达式找到path_id对应的path
+        path_id = str(path_id)
+        path = next(filter(lambda x: x["path_id"] == path_id, self.tmp_path_list))
+        path["path_items"].append(gep_to_baseobj_path_item)
+        return gep_to_baseobj_path_item
 
-        return {
-            "path_id": path_id,
-            "event": event,
-            "event_count": len(path_state["events"])
+    def add_path_gep_to_member_Tool(self, path_id, gep_location, member_name, basic_info):
+        gep_to_member_path_item = {
+            "value_object": basic_info["value_object"],
+            "function_name": basic_info["function_name"],
+            "classification": "GEP to member",
+            "source_location": gep_location,
+            "member_name": member_name
         }
+        # 在self.tmp_path_list中找到path_id对应的path 并添加gep_to_member_path_item
+        # 用lamda表达式找到path_id对应的path
+        path_id = str(path_id)
+        path = next(filter(lambda x: x["path_id"] == path_id, self.tmp_path_list))
+        path["path_items"].append(gep_to_member_path_item)
+        return gep_to_member_path_item
 
-    def add_path_gep_to_member_Tool(self, path_id, gep_location, member_name, baseobj_name=None, note=None):
-        context = self._get_current_path_context()
-        if context is None:
-            return {"error": "No active path context to attach GEP information."}
-
-        path_state = context["paths"].get(path_id)
-        if path_state is None:
-            return {"error": f"path_id {path_id} does not exist in the current context."}
-        if path_state["status"] != "active":
-            return {"error": f"path_id {path_id} is not active. Current status: {path_state['status']}"}
-
-        event = {
-            "type": "gep_member",
-            "location": gep_location,
-            "member_name": member_name,
-            "baseobj_name": baseobj_name,
-            "note": note
-        }
-        path_state["events"].append(event)
-
-        return {
-            "path_id": path_id,
-            "event": event,
-            "event_count": len(path_state["events"])
-        }
-
-    def query_paths_Tool(self, path_id=None, include_completed=True):
-        context = self._get_current_path_context()
-        if context is None:
-            return {"error": "No active path context."}
-
-        def summarize(path_state):
-            summary = {
-                "path_id": path_state["path_id"],
-                "return_location": path_state["return_location"],
-                "status": path_state["status"],
-                "events_recorded": len(path_state["events"]),
-                "path_group_index": path_state["metadata"].get("path_group_index"),
-                "description": path_state["metadata"].get("description")
-            }
-            if "conclusion" in path_state:
-                summary["conclusion"] = path_state["conclusion"]
-            if include_completed and "final_path" in path_state:
-                summary["final_path_length"] = len(path_state["final_path"])
-            return summary
-
-        if path_id:
-            path_state = context["paths"].get(path_id)
-            if path_state is None:
-                return {"error": f"path_id {path_id} not found."}
-            if not include_completed and path_state["status"] == "completed":
-                return {"error": f"path_id {path_id} is completed and include_completed is false."}
-            return {"path": summarize(path_state)}
-
-        summaries = []
-        for pid, path_state in context["paths"].items():
-            if not include_completed and path_state["status"] == "completed":
-                continue
-            summaries.append(summarize(path_state))
-        return {"paths": summaries}
+    def query_paths_Tool(self, path_id):
+        # 暂时过滤掉deleted的path
+        path_id = str(path_id)
+        path = next(filter(lambda x: x["path_id"] == path_id and x["status"] != "deleted", self.tmp_path_list), None)
+        if path is None:
+            return {"error": f"path_id {path_id} not found or deleted."}
+        return path
 
     def delete_path_Tool(self, path_id):
-        context = self._get_current_path_context()
-        if context is None:
-            return {"error": "No active path context."}
-
-        path_state = context["paths"].get(path_id)
-        if path_state is None:
-            return {"error": f"path_id {path_id} not found."}
-        if path_state["status"] == "completed":
-            return {"error": f"path_id {path_id} has already been completed and cannot be deleted."}
-
-        del context["paths"][path_id]
+        path_id = str(path_id)
+        self.tmp_path_list = list(filter(lambda x: x["path_id"] != path_id, self.tmp_path_list))
         return {"path_id": path_id, "status": "deleted"}
 
-    def complete_path_Tool(self, path_id, classification, reason, source_location=None, code_line=None, arg=None):
-        context = self._get_current_path_context()
-        if context is None:
-            return {"error": "No active path context."}
-
-        path_state = context["paths"].get(path_id)
-        if path_state is None:
+    def complete_path_Tool(self, path_id, classification, reason, source_location=None, code_line=None, arg=None, basic_info={}):
+        path_id = str(path_id)
+        path = next(filter(lambda x: x["path_id"] == path_id, self.tmp_path_list), None)
+        if path is None:
             return {"error": f"path_id {path_id} not found."}
-        if path_state["status"] == "completed":
-            return {"error": f"path_id {path_id} is already completed."}
-
-        final_path = self._finalize_path_state(
-            path_state=path_state,
-            classification=classification,
-            reason=reason,
-            source_location=source_location,
-            code_line=code_line,
-            arg=arg
-        )
-        if isinstance(final_path, dict) and "error" in final_path:
-            return final_path
-
-        context["completed_paths"].append(final_path)
-        path_state["status"] = "completed"
-        path_state["final_path"] = final_path
-        path_state["conclusion"] = {
-            "classification": classification,
-            "reason": reason,
-            "source_location": source_location,
-            "code_line": code_line,
-            "arg": arg
-        }
-
-        return {
-            "path_id": path_id,
-            "status": "completed",
-            "return_location": path_state["return_location"],
-            "events_recorded": len(path_state["events"]),
-            "path_length": len(final_path),
-            "classification": classification
-        }
-
-    def _finalize_path_state(self, path_state, classification, reason, source_location=None, code_line=None, arg=None):
-        return_locations = path_state["return_locations"]
-        return_location = path_state["return_location"]
-        basic_info = path_state["basic_info"]
-        base_path = copy.deepcopy(path_state["previous_analysis_path"])
-
-        target_return_location = None
-        for t_return_location in return_locations:
-            if t_return_location["location"] == return_location:
-                target_return_location = t_return_location
-                break
-        if target_return_location is None:
-            location_list = [t_return_location["location"] for t_return_location in return_locations]
-            return {"error": f"return location {return_location} not found in the return locations, you should use location in {location_list} to set conclusion."}
-
-        def build_final_path(record: dict):
-            record_payload = record.copy()
-            events = path_state.get("events", [])
-            if events:
-                record_payload["events"] = copy.deepcopy(events)
-            metadata_bundle = path_state.get("metadata", {})
-            if metadata_bundle:
-                record_payload["path_metadata"] = copy.deepcopy(metadata_bundle)
-            final_path = copy.deepcopy(base_path)
-            final_path.append(record_payload)
-            return final_path
+        if path["status"] == "deleted":
+            return {"error": f"path_id {path_id} is deleted."}
+        if path["status"] == "completed":
+            return {"error": f"path_id {path_id} is completed."}
+        return_location = path["return_location"]
 
         if classification == "NullPointer":
-            target_return_location["done"] += 1
-            path_record = {
+            path["path_items"].append({
                 "value_object": basic_info["value_object"],
                 "start_location": basic_info["start_location"],
                 "function_name": basic_info["function_name"],
@@ -321,8 +164,9 @@ class PathAnalyzerModel(ABC):
                 "classification": classification,
                 "source_location": None,
                 "reason": reason
-            }
-            return build_final_path(path_record)
+            })
+            path["status"] = "completed"
+            return path
         elif classification == "Transferred with assignment":
             if source_location is None or not re.match(r'^[\w/]+\.(c|h):\d+$', source_location):
                 return {"error": f"invalid source_location: {source_location}"}
@@ -332,7 +176,7 @@ class PathAnalyzerModel(ABC):
                 return {"error": f"arg is required for Transferred with assignment classification to specify which variable the memory was transferred to."}
             eq_position_l = analysis_operators.get_eq_position_list(source_location)
             if eq_position_l is None:
-                return {"error": f"The code line at {source_location} : {find_code_line(source_location)} has no related store statement. You may just give the code line where the transfer happens or check if the code line is correct."}
+                return {"error": f"The code line at {source_location} : {find_code_line(source_location)} has no related store statement. Please check if the code line is correct."}
             matched_arg = False
             # TODO 可以再增加函数右边必须包含当前追踪的变量名
             for eq_position in eq_position_l:
@@ -341,9 +185,8 @@ class PathAnalyzerModel(ABC):
                     matched_arg = True
                     break
             if not matched_arg:
-                return {"error": f"Cannot find arg {arg} in the code line at {source_location} : {find_code_line(source_location)}. You may just give the code line where the transfer happens or check if the code line is correct or the arg is correct. If a GEP operation occurs on the path, please add a path event and specify the exact BaseObjName and MemberName of the GEP operation."}
-            target_return_location["done"] += 1
-            path_record = {
+                return {"error": f"Cannot find varname: {arg} in the code line at {source_location} : {find_code_line(source_location)}. Please check if the code line is correct or the arg is correct. If a GEP operation occurs on the path, please add a path event and specify the exact BaseObjName and MemberName of the GEP operation."}
+            path["path_items"].append({
                 "value_object": basic_info["value_object"],
                 "start_location": basic_info["start_location"],
                 "function_name": basic_info["function_name"],
@@ -352,8 +195,9 @@ class PathAnalyzerModel(ABC):
                 "source_location": source_location,
                 "reason": reason,
                 "arg": arg
-            }
-            return build_final_path(path_record)
+            })
+            path["status"] = "completed"
+            return path
         elif classification == "Returned to caller":
             if source_location is None or not re.match(r'^[\w/]+\.(c|h):\d+$', source_location):
                 return {"error": f"invalid source_location: {source_location}"}
@@ -362,19 +206,18 @@ class PathAnalyzerModel(ABC):
             return_pointer_json = analysis_operators.check_return_pointer(return_location)
             if not return_pointer_json["function_can_return_pointer"] or not return_pointer_json["location_has_pointer_operation"]:
                 return {"error": f"the function {basic_info['function_name']} at {source_location} cannot return a pointer, or the return location {return_location} does not have pointer operation. Do you mean the memory is transferred?"}
-            # 可以再检查一下当前return location的代码行是否包含当前追踪的变量名
-            # TODO
-            target_return_location["done"] += 1
-            path_record = {
+            path["path_items"].append({
                 "value_object": basic_info["value_object"],
                 "start_location": basic_info["start_location"],
                 "function_name": basic_info["function_name"],
                 "return_location": return_location,
                 "classification": classification,
                 "source_location": source_location,
-                "reason": reason
-            }
-            return build_final_path(path_record)
+                "reason": reason,
+                "arg": arg
+            })
+            path["status"] = "completed"
+            return path
         elif classification == "Handled by callee":
             if source_location is None or not re.match(r'^[\w/]+\.(c|h):\d+$', source_location):
                 return {"error": f"invalid source_location: {source_location}"}
@@ -382,9 +225,8 @@ class PathAnalyzerModel(ABC):
                 return {"error": f"code_line is required for Handled by callee classification"}
             if arg is None:
                 return {"error": f"arg is required for Handled by callee classification to specify which function was used to release the memory."}
-            # 寻找当前path上的最后一个event
-            # 这里要先判断有没有event吧
-            if len(path_state["events"]) == 0:
+            path_items = path["path_items"]
+            if len(path_items) == 0:
                 # 需要设计几个backup valuename 可以允许没有& 增添& 没有* 增添*
                 extracted_function_name, arg_index = get_arg_index(code_line, basic_info["value_object"])
                 if extracted_function_name is None or arg_index is None:
@@ -394,8 +236,8 @@ class PathAnalyzerModel(ABC):
                 else:
                     pass
             else:
-                last_event = path_state["events"][-1]
-                if last_event["type"] == "gep_base":
+                last_event = path_items[-1]
+                if last_event["classification"] == "GEP to baseobj":
                     # 那实际上追踪的变量名就是base变量名
                     base_variable_name = last_event["baseobj_name"]
                     extracted_function_name, arg_index = get_arg_index(code_line, base_variable_name)
@@ -414,8 +256,7 @@ class PathAnalyzerModel(ABC):
                         return {"error": f"The function name {extracted_function_name} is not the same as the arg {arg}.Please check if the function name is correct. If a GEP operation occurs on the path, please add a path event and specify the exact BaseObjName and MemberName of the GEP operation."}
                     else:
                         pass
-            target_return_location["done"] += 1
-            path_record = {
+            path["path_items"].append({
                 "value_object": basic_info["value_object"],
                 "start_location": basic_info["start_location"],
                 "function_name": basic_info["function_name"],
@@ -424,11 +265,11 @@ class PathAnalyzerModel(ABC):
                 "source_location": source_location,
                 "reason": reason,
                 "arg": arg
-            }
-            return build_final_path(path_record)
+            })
+            path["status"] = "completed"
+            return path
         elif classification == "Leak":
-            target_return_location["done"] += 1
-            path_record = {
+            path["path_items"].append({
                 "value_object": basic_info["value_object"],
                 "start_location": basic_info["start_location"],
                 "function_name": basic_info["function_name"],
@@ -436,11 +277,11 @@ class PathAnalyzerModel(ABC):
                 "classification": classification,
                 "source_location": None,
                 "reason": reason
-            }
-            return build_final_path(path_record)
+            })
+            path["status"] = "completed"
+            return path
         elif classification == "Unreachable":
-            target_return_location["done"] += 1
-            path_record = {
+            path["path_items"].append({
                 "value_object": basic_info["value_object"],
                 "start_location": basic_info["start_location"],
                 "function_name": basic_info["function_name"],
@@ -448,8 +289,9 @@ class PathAnalyzerModel(ABC):
                 "classification": classification,
                 "source_location": None,
                 "reason": reason
-            }
-            return build_final_path(path_record)
+            })
+            path["status"] = "completed"
+            return path
         else:
             return {"error": f"unknown classification: {classification}"}
 
@@ -483,6 +325,9 @@ class PathAnalyzerModel(ABC):
             find_callers_desc_free,
         ]
         return_locations = []
+        path_idx = 0
+        self.tmp_path_list = []
+        self.l_return_locations = []
         if var_name is None:
             # 事实上所有调用位置都已经处理过了 
             if mode["mode"] == "local variable":
@@ -530,8 +375,8 @@ class PathAnalyzerModel(ABC):
                 for path_group in wappered_return_location["path_groups"]:
                     group_items = read_group(path_group)
                     return_location["group_items"].append(group_items)
-            return_locations.append(return_location)
-        path_context = self._push_path_context(previous_analysis_path, basic_info, return_locations)
+            if return_location["path_count"] > 0:
+                self.l_return_locations.append(f"{wappered_return_location["location"]["fl"]}:{wappered_return_location["location"]["ln"]}")
         project_prompt = f"You are now working for project {PROJECT_NAME}. "
         project_prompt += PROJECT_DESC + "\n"
         if previous_analysis_path:
@@ -585,15 +430,16 @@ class PathAnalyzerModel(ABC):
 
             while True:
                 if not response.tool_calls:
-                    all_done = True
-                    unconcluded_return_locations = []
-                    for return_location in return_locations:
-                        if return_location["done"] == 0:
-                            all_done = False
-                            unconcluded_return_locations.append(return_location["location"])
-                    if all_done:
+                    if self.check_path_completeness()["success"]:
                         break
-                    messages.append({ "role": "user", "content": f"You should check the return locations that are not done yet: {unconcluded_return_locations}" })
+                    error_messgae = ""
+                    # if not self.check_return_location_completeness()["success"]:
+                    #     error_messgae += self.check_return_location_completeness()["error"]
+                    if not self.check_path_completeness()["success"]:
+                        error_messgae += self.check_path_completeness()["error"]
+                    messages.append({ "role": "user", "content": error_messgae })
+                    self.analysis_logger.info(f"USER prompt in error case: {error_messgae}")
+                    self.result_logger.info(f"USER prompt in error case: {error_messgae}")
                     response = self.send_message(messages, allowed_tools)
                     if not response.content:
                         response.content = ""
@@ -615,12 +461,24 @@ class PathAnalyzerModel(ABC):
                     if tool_function_name == "create_path":
                         function_response = self.create_path_Tool(
                             **tool_arguments,
-                            previous_analysis_path=previous_analysis_path,
-                            return_locations=return_locations,
+                            path_id=path_idx
+                        )
+                        path_idx += 1
+                    elif tool_function_name == "add_path_gep_to_baseobj":
+                        function_response = self.add_path_gep_to_baseobj_Tool(
+                            **tool_arguments,
                             basic_info=basic_info
                         )
-                    elif tool_function_name == "set_conclusion":
-                        function_response = self.set_conclusion_Tool(**tool_arguments)
+                    elif tool_function_name == "add_path_gep_to_member":
+                        function_response = self.add_path_gep_to_member_Tool(
+                            **tool_arguments,
+                            basic_info=basic_info
+                        )
+                    elif tool_function_name == "complete_path":
+                        function_response = self.complete_path_Tool(
+                            **tool_arguments,
+                            basic_info=basic_info
+                        )
                     elif tool_function_name in self.tool_method_map:
                         tool_method = self.tool_method_map[tool_function_name]
                         function_response = tool_method(**tool_arguments) if tool_arguments else tool_method()
@@ -628,18 +486,7 @@ class PathAnalyzerModel(ABC):
                         self.analysis_logger.error(f"Unknown tool call: {tool_function_name}")
                         function_response = {"error": f"Tool '{tool_function_name}' not found."}
 
-                    if isinstance(function_response, list):
-                        path_context["completed_paths"].append(function_response)
-                        payload = function_response[-1] if function_response else {}
-                        function_response = json.dumps(
-                            {
-                                "path_length": len(function_response),
-                                "final_node": payload
-                            },
-                            ensure_ascii=False,
-                            indent=2
-                        )
-                    elif not isinstance(function_response, str):
+                    if not isinstance(function_response, str):
                         function_response = json.dumps(function_response, ensure_ascii=False, indent=2)
 
                     self.analysis_logger.info(f"Tool response: {function_response}")
@@ -649,16 +496,20 @@ class PathAnalyzerModel(ABC):
                 if not response.content:
                     response.content = ""
                 self.analysis_logger.info(f"Model response: {response.content}")
-                messages.append(response)
-        finally:
-            self._pop_path_context()
+                messages.append(response) 
+        except Exception as e:
+            self.analysis_logger.exception("Failed during analysis_function_paths interaction")
+            raise
 
-        active_paths = [pid for pid, state in path_context["paths"].items() if state.get("status") != "completed"]
-        if active_paths:
-            self.analysis_logger.warning(f"Paths left incomplete after loop: {active_paths}")
+        new_analysis_paths = []
+        for path in self.tmp_path_list:
+            if path["status"] == "deleted":
+                continue
+            new_analysis_path = copy.deepcopy(previous_analysis_path)
+            new_analysis_path.extend(path["path_items"])
+            new_analysis_paths.append(new_analysis_path)
+        return new_analysis_paths
 
-        return path_context["completed_paths"]
-    
     def responseForAlter(self, alter: memory_defect.MemoryLeak):
         self.result_logger.info(f"\n ================================ Analysis started for Alter ================================ \n")
         self.result_logger.info(f"Alter: {alter.to_prompt()}")
@@ -921,13 +772,12 @@ class DeepSeekPathAnalyzer(PathAnalyzerModel):
                     return f"{source_location.split(':')[0]}:{code_line_number + i}"
         return {"error": f"mismatched code line number for {source_location} : {find_code_line(source_location)} and {code}"}
     
-    def set_conclusion_Tool(self, classification, return_location, reason, source_location=None, code_line=None, arg=None, previous_analysis_path=[], return_locations=None, basic_info={}):
+    def complete_path_Tool(self, path_id, classification, reason, source_location=None, code_line=None, arg=None, basic_info={}):
         if source_location is not None:
             source_location = self.DeepSeekAdapter(source_location, code_line)
             if "error" in source_location:
                 return {"error": source_location["error"]}
-        return super().set_conclusion_Tool(classification, return_location, reason, source_location, code_line, arg, previous_analysis_path, return_locations, basic_info)
-      
+        return super().complete_path_Tool(path_id, classification, reason, source_location, code_line, arg, basic_info)
     
       
 class QwenPathAnalyzer(PathAnalyzerModel):
