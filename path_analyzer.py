@@ -219,11 +219,6 @@ class PathAnalyzerModel(ABC):
     def find_callers_Tool(self, function_name):
         return analysis_operators.find_callers(function_name)
     
-    # start loc 分析其实位置
-    # previous_analysis_path 之前的分析路径
-    # current_function 当前函数
-    # mode 分析模式 {"local variable" "formal argument" "call argument"}
-    # var_name 变量名
     def analysis_function_paths(self, start_loc, previous_analysis_path=[], current_function=None, mode={"mode" : "local variable", "arg": None}, var_name=None):
         allowed_tools = [
             set_conclusion_desc_path,
@@ -265,8 +260,9 @@ class PathAnalyzerModel(ABC):
             function_prompt += f"\nYou are now tracing the memory of the local variable {var_name} at {start_loc} : {find_code_line(start_loc)}.\n"
         elif mode["mode"] == "call argument":
             arg_index = mode["arg"]
-            wappered_return_locations = analysis_operators.get_value_sensitive_call_arg_icfg_return_path(start_loc, arg_index)
+            # 这里需要再补充一个参数为callee function name
             callee_function_name = previous_analysis_path[-1]["function_name"]
+            wappered_return_locations = analysis_operators.get_value_sensitive_call_arg_icfg_return_path(start_loc, arg_index, callee_function_name)
             function_prompt += f"\nYou are now tracing the memory of the variable {var_name} used as the {arg_index}th call argument to call {callee_function_name} in the function {current_function['function_name']} at {start_loc} : {find_code_line(start_loc)}.\n"
         function_prompt += f"current function:{json.dumps(current_function, indent=4)}"
         print(f"wappered_return_locations: {wappered_return_locations}")
@@ -403,15 +399,48 @@ class PathAnalyzerModel(ABC):
         if "error" in current_function:
             self.analysis_logger.error(f"Cannot find current function at {start_loc}")
             return None
-        arg_names = get_formal_arg_names(find_code_line(f"{current_function["filename"]}:{current_function["start_line"]}"))
         # 找到当前要追踪的变量名
         variable_name = extract_lhs_variable(find_code_line(start_loc))
         if not variable_name:
             # 这一行可以是return malloc / alloc
-            self.analysis_logger.error(f"Cannot find variable name at {start_loc} : {find_code_line(start_loc)}")
-            return None
-        eq_position = analysis_operators.get_var_store_cl(start_loc, variable_name)
-        analysis_path_list = self.analysis_function_paths(start_loc=start_loc, previous_analysis_path=[], current_function=current_function, mode={"mode" : "local variable", "arg": eq_position}, var_name=variable_name)
+            # 但是其实就是多加一步寻找所有调用位置
+            # 先组装analysis_path_item
+            analysis_path_item = {
+                "value_object": variable_name,
+                "start_location": start_loc,
+                "function_name": current_function["function_name"],
+                "return_location": start_loc,
+                "classification": "Returned",
+                "source_location": start_loc,
+                "reason": f"The function {current_function['function_name']} returns the memory at {start_loc} : {find_code_line(start_loc)} directly to the caller."
+            }
+            # 加入一条analysis path
+            analysis_path = [analysis_path_item]
+            call_sites = analysis_operators.find_callers(current_function["function_name"])
+            for call_site in call_sites:
+                call_site_loc = call_site["location"]
+                call_site_code = call_site["code"]
+                caller_function = analysis_operators.find_current_function(call_site_loc)
+                left_value = extract_lhs_variable(call_site_code)
+                if left_value:
+                    if left_value in self.global_variables:
+                        # TODO
+                        # 这里需要重新组装一个返回给全局变量的analysis_path_item
+                        continue
+                    else:
+                        # 这里相当于继续分析
+                        eq_position = analysis_operators.get_var_store_cl(call_site_loc, left_value)
+                        analysis_path_list = self.analysis_function_paths(start_loc=call_site_loc, previous_analysis_path=analysis_path, current_function=caller_function, mode={"mode" : "local variable", "arg": eq_position}, var_name=left_value)
+                        continue
+                else:
+                    self.analysis_logger.info(f"Analysis path {analysis_path} terminated with Returned but no left value")
+                    self.result_logger.info(f"\n ================================ Analysis terminated with Returned but no left value ================================ \n")
+                    self.result_logger.info(f"Analysis path {analysis_path} terminated with Returned but no left value")
+                    self.result_logger.info(f"\n ================================ Analysis terminated with Returned but no left value ================================ \n")
+                    return analysis_path              
+        else:
+            eq_position = analysis_operators.get_var_store_cl(start_loc, variable_name)
+            analysis_path_list = self.analysis_function_paths(start_loc=start_loc, previous_analysis_path=[], current_function=current_function, mode={"mode" : "local variable", "arg": eq_position}, var_name=variable_name)
         while True:
             all_done = True
             for analysis_path in analysis_path_list:
@@ -523,9 +552,7 @@ class PathAnalyzerModel(ABC):
                         else:
                             # 很奇怪 成为返回值 但是这个返回值没有被其他变量接收
                             # 暂时判断为leak
-                            # TODO: 
-                            # 发现一种可能性 模型认为是内存转移到了调用者函数当中都是分类为return 实际上应该在transfer类型中 把提示词写的更明显一点 or 加一些example
-                            # 有些时候函数本身有返回值 但是依然是通过当前函数的参数transfer给了caller 就会被引入完全错误 / 无关的分析路径？ return还不需要提供接管内存的变量
+                            # TODO:
                             self.analysis_logger.info(f"Analysis path {analysis_path} terminated with Returned but no left value")
                             self.result_logger.info(f"\n ================================ Analysis terminated with Returned but no left value ================================ \n")
                             self.result_logger.info(f"Analysis path {analysis_path} terminated with Returned but no left value")
