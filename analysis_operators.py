@@ -617,7 +617,7 @@ def find_var_decl(source_location: str, var_name: str) -> List[Dict[str, str]]:
 path condition
 '''
 
-def get_value_sensitive_icfg_return_path(start_location: str, eq_position: int) -> Optional[List[Dict[str, Any]]]:
+def get_value_sensitive_lvar_icfg_return_path(start_location: str, eq_position: int) -> Optional[List[Dict[str, Any]]]:
     if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', start_location):
         logging.error(f"Invalid source location format: {start_location}")
         return None
@@ -977,6 +977,15 @@ def get_gep_position_list(source_location: str) -> Optional[List[int]]:
     
     return None
 
+def check_lvar_gep(source_location: str, eq_position: int):
+    # 找到所有左值的gep信息
+    # 给出 
+    # 1. 左值是否是结构体变量
+    # 2. 如果是 给出baseobj的类型名 从llvm指令中提取
+    # 3. 如果是 给出偏移量 从llvm指令中提取
+    
+    return None
+    
 
 def get_var_store_cl(source_location: str, var_name: str) -> Optional[List[Dict[str, Any]]]:
     eq_position_list = get_eq_position_list(source_location)

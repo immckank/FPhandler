@@ -21,7 +21,7 @@ alter_index = 0
 RES_ROOT_PATH = "RES"
 
 # LLM_TYPE = "DeepSeek"
-LLM_TYPE = "DeepSeek"
+LLM_TYPE = "Qwen"
 
 # free / function / path
 ANALYZER_TYPE = "path"

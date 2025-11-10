@@ -378,7 +378,7 @@ complete_path_desc_path = {
                 },
                 "arg": {
                     "type": "string",
-                    "description": "When applicable, identifies the variable or function involved in the transfer or free."
+                    "description": "When the classification is 'Transferred with assignment', use the variable name as the arg. When the classification is 'Handled by callee', use the callee function name as the arg. Only required when the classification is 'Transferred with assignment' or 'Handled by callee'."
                 }
             },
             "required": ["path_id", "classification", "reason"]
