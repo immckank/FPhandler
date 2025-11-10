@@ -16,13 +16,13 @@ from tools import (
     find_function_body_desc_free,
     find_callers_desc_free,
     create_path_desc_path,
-    add_path_gep_to_baseobj_desc_path,
-    add_path_gep_to_member_desc_path,
     complete_path_desc_path,
     query_paths_desc_path,
     delete_path_desc_path
 )
 import re
+
+logger = logging.getLogger(__name__)
 
 from abc import ABC, abstractmethod
 from openai import OpenAI
@@ -181,7 +181,10 @@ class QwenPathAnalyzer(PathAnalyzerModel):
 
 
 class FunctionPathAgent():
-    def __init__(self, current_function_info, var_info, start_location, previous_analysis_path_list, alter_prompt, client=None):
+    def __init__(self, current_function_info, var_info, start_location, previous_analysis_path_list, alter_prompt, client=None, model_name=None):
+        self.path_idx = 0
+        self.client = client
+        self.model_name = model_name
         self.alter_prompt = alter_prompt
         self.current_function_info = current_function_info
         self.var_info = var_info
@@ -247,7 +250,16 @@ class FunctionPathAgent():
             "find_function_body": self.find_function_body_Tool,
             "find_callers": self.find_callers_Tool,
         }
-        pass
+        print(
+            "[FunctionPathAgent] init function=%s var=%s start=%s previous_paths=%d client=%s"
+            % (
+                (self.current_function_info or {}).get("function_name"),
+                (self.var_info or {}).get("var_name"),
+                self.start_location,
+                len(self.previous_analysis_path_list) if isinstance(self.previous_analysis_path_list, list) else 0,
+                "provided" if client else "none",
+            )
+        )
     
     # 管理函数
     def build_analysis_path(self, previous_analysis_path_list):
@@ -262,10 +274,26 @@ class FunctionPathAgent():
         return new_analysis_path_list
 
     def send_message(self, messages, tools=""):
+        tool_count = len(tools) if isinstance(tools, (list, tuple)) else (len(tools) if tools else 0)
+        print(
+            "[FunctionPathAgent] send_message model=%s messages=%d tools=%d"
+            % (getattr(self, "model_name", "unknown"), len(messages), tool_count)
+        )
         response = self.client.chat.completions.create(
             model=self.model_name,
             messages=messages,
             tools=tools
+        )
+        print(
+            "[FunctionPathAgent] response content=%s"
+            % (response.choices[0].message.content if response.choices[0].message else None)
+        )
+        print(
+            "[FunctionPathAgent] received response has_content=%s tool_calls=%d"
+            % (
+                bool(response.choices[0].message.content),
+                len(response.choices[0].message.tool_calls or []),
+            )
         )
         return response.choices[0].message  
     
@@ -293,13 +321,14 @@ class FunctionPathAgent():
                 raise ValueError("missing function name in tool call")
             raw_arguments = getattr(function_obj, "arguments", "{}") or "{}"
             tool_arguments = safe_load_json(raw_arguments)
+            print("[FunctionPathAgent] tool_call name=%s arguments=%s" % (function_name, raw_arguments))
+            if function_name == "create_path" and isinstance(tool_arguments, dict):
+                tool_arguments.pop("path_id", None)
         except Exception as e:
-            self.analysis_logger.error(f"Failed to prepare tool call: {e}")
             return {"error": f"failed to prepare tool call: {str(e)}"}
 
         handler = self.tool_method_map.get(function_name)
         if handler is None:
-            self.analysis_logger.error(f"Unknown tool function requested: {function_name}")
             return {"error": f"unknown tool function: {function_name}"}
 
         try:
@@ -309,10 +338,8 @@ class FunctionPathAgent():
                 return handler(*tool_arguments)
             return handler(tool_arguments)
         except TypeError as e:
-            self.analysis_logger.error(f"Failed to execute tool {function_name}: {e}")
             return {"error": f"failed to execute tool {function_name}: {str(e)}"}
         except Exception as e:
-            self.analysis_logger.error(f"Unexpected error executing tool {function_name}: {e}")
             return {"error": f"failed to execute tool {function_name}: {str(e)}"}
     
     # 源代码查询相关
@@ -332,13 +359,15 @@ class FunctionPathAgent():
         return analysis_operators.find_callers(function_name)
         
     # path相关
-    def create_path_Tool(self, return_location, description, path_id):
+    def create_path_Tool(self, return_location, description, path_id=None):
         if return_location is None or not re.match(r'^[\w/]+\.(c|h):\d+$', return_location):
             return {"error": f"invalid return_location: {return_location}"}
-        # 校验return_location是否在l_return_locations中
-        if return_location not in self.l_return_locations:
-            return {"error": f"return_location {return_location} is not in the list of reachable return locations {self.l_return_locations}."}
-        path_id = str(path_id)
+        # 校验return_location是否在return_locations中
+        return_location_info = next(filter(lambda x: x["return_location"] == return_location, self.return_location_list), None)
+        if return_location_info is None:
+            return {"error": f"return_location {return_location} not found in return_locations."}
+        path_id = str(self.path_idx)
+        self.path_idx += 1
         new_path = {
             "path_id": path_id,
             "return_location": return_location,
@@ -347,6 +376,7 @@ class FunctionPathAgent():
             "description": description
         }
         self.function_analysis_path_list.append(new_path)
+        print("[FunctionPathAgent] create_path path_id=%s return_location=%s" % (path_id, return_location))
         return new_path
 
     def query_paths_Tool(self, path_id):
@@ -369,12 +399,17 @@ class FunctionPathAgent():
             return_location_info = next(filter(lambda x: x["return_location"] == return_location, self.return_location_list), None)
             return_location_info["completed_path_number"] -= 1
         target_path["status"] = "deleted"
+        print("[FunctionPathAgent] delete_path path_id=%s" % path_id)
         return {"path_id": path_id, "status": "deleted"}
 
     # path核心分析功能
     def complete_path_Tool(self, path_id, classification, reason, source_location=None, code_line=None, arg=None):
         path_id = str(path_id)
-        path = next(filter(lambda x: x["path_id"] == path_id, self.tmp_path_list), None)
+        print(
+            "[FunctionPathAgent] complete_path path_id=%s classification=%s source_location=%s arg=%s"
+            % (path_id, classification, source_location, arg)
+        )
+        path = next(filter(lambda x: x["path_id"] == path_id, self.function_analysis_path_list), None)
         if path is None:
             return {"error": f"path_id {path_id} not found."}
         if path["status"] == "deleted":
@@ -382,7 +417,9 @@ class FunctionPathAgent():
         if path["status"] == "completed":
             return {"error": f"path_id {path_id} is completed."}
         return_location = path["return_location"]
-
+        return_location_info = next(filter(lambda x: x["return_location"] == return_location, self.return_location_list), None)
+        if return_location_info is None:
+            return {"error": f"return_location {return_location} not found in return_locations."}
         if classification == "NullPointer":
             path["path_items"].append({
                 "var_info": self.var_info,
@@ -394,6 +431,7 @@ class FunctionPathAgent():
                 "reason": reason
             })
             path["status"] = "completed"
+            return_location_info["completed_path_number"] += 1
             return path
         elif classification == "Transferred with assignment":
             if source_location is None or not re.match(r'^[\w/]+\.(c|h):\d+$', source_location):
@@ -427,12 +465,14 @@ class FunctionPathAgent():
                 "arg": arg
             })
             path["status"] = "completed"
+            return_location_info["completed_path_number"] += 1
             return path
         elif classification == "Returned to caller":
             if source_location is None or not re.match(r'^[\w/]+\.(c|h):\d+$', source_location):
                 return {"error": f"invalid source_location: {source_location}"}
             if code_line is None:
                 return {"error": f"code_line is required for Returned classification"}
+            # TODO 这里还需要匹配gep 如果参数自己 / 参数的baseobj在函数参数列表中被转移也可以
             return_pointer_json = analysis_operators.check_return_pointer(return_location)
             if not return_pointer_json["function_can_return_pointer"] or not return_pointer_json["location_has_pointer_operation"]:
                 return {"error": f"the function {self.current_function_info['function_name']} at {source_location} cannot return a pointer, or the return location {return_location} does not have pointer operation. Do you mean the memory is transferred?"}
@@ -447,6 +487,7 @@ class FunctionPathAgent():
                 "arg": arg
             })
             path["status"] = "completed"
+            return_location_info["completed_path_number"] += 1
             return path
         elif classification == "Handled by callee":
             if source_location is None or not re.match(r'^[\w/]+\.(c|h):\d+$', source_location):
@@ -472,6 +513,7 @@ class FunctionPathAgent():
                 "arg": arg
             })
             path["status"] = "completed"
+            return_location_info["completed_path_number"] += 1
             return path
         elif classification == "Leak":
             path["path_items"].append({
@@ -484,6 +526,7 @@ class FunctionPathAgent():
                 "reason": reason
             })
             path["status"] = "completed"
+            return_location_info["completed_path_number"] += 1
             return path
         elif classification == "Unreachable":
             path["path_items"].append({
@@ -496,6 +539,7 @@ class FunctionPathAgent():
                 "reason": reason
             })
             path["status"] = "completed"
+            return_location_info["completed_path_number"] += 1
             return path
         else:
             return {"error": f"unknown classification: {classification}"}
@@ -546,7 +590,7 @@ class FunctionPathAgent():
         return_prompt += f"You should claim the state of the variable {self.var_info['var_name']} (or the resource it holds) along all paths to the return point as following six categories:\n"
         return_prompt += f"The variable is always a null pointer (NullPointer).\n"
         return_prompt += f"Ownership of the memory has been transferred through an assignment to another variable (Transferred with assignment).\n"
-        return_prompt += f"The memory is returned as return value to the caller (Returned to caller).\n"
+        return_prompt += f"The memory is returned as return value to the caller or as (part of) an actual argument used to call a function (Returned to caller).\n"
         return_prompt += f"The memory will be handled by the callee (Handled by callee).\n"
         return_prompt += f"A memory leak has occurred (Leak).\n"
         return_prompt += f"This return point is unreachable (Unreachable), Or, this return point is unreachable because of conditional logic on the path.\n"
@@ -567,7 +611,6 @@ class FunctionPathAgent():
         response = self.send_message(messages, allowed_tools)
         if not response.content:
             response.content = ""
-        self.analysis_logger.info(f"Model response: {response.content}")
         messages.append(response)
         # 处理模型返回的循环
         while True:
@@ -580,7 +623,6 @@ class FunctionPathAgent():
                     response = self.send_message(messages, allowed_tools)
                     if not response.content:
                         response.content = ""
-                    self.analysis_logger.info(f"Model response: {response.content}")
                     messages.append(response)
                     continue
                 if len(incomplete_paths) > 0:
@@ -588,7 +630,6 @@ class FunctionPathAgent():
                     response = self.send_message(messages, allowed_tools)
                     if not response.content:
                         response.content = ""
-                    self.analysis_logger.info(f"Model response: {response.content}")
                     messages.append(response)
                     continue
                 break
@@ -597,11 +638,11 @@ class FunctionPathAgent():
                 function_response = self.handle_agent_tool_call(tool_call)
                 if not isinstance(function_response, str):
                     function_response = json.dumps(function_response)
+                print("[FunctionPathAgent] function_response=%s" % (function_response))
                 messages.append({ "tool_call_id": tool_call.id, "role": "tool", "content": function_response })
             response = self.send_message(messages, allowed_tools)
             if not response.content:
                 response.content = ""
-            self.analysis_logger.info(f"Model response: {response.content}")
             messages.append(response)
         return
         
@@ -616,5 +657,10 @@ if __name__ == "__main__":
         "arg_index": 20
     }
     alter_prompt = "You are looking for potential MemoryLeak memory issues related to the memory allocated at tif_read.c:1421. This issue is considered to occur if upon reaching the end of the function, the memory has become unreachable and can never be freed."
-    function_path_agent = FunctionPathAgent(current_function_info, var_info, start_location="tif_read.c:1421", previous_analysis_path_list=[], alter_prompt=alter_prompt)
+    model_name = "deepseek-chat"
+    client = OpenAI(
+            api_key=os.environ.get("DEEPSEEK_API_KEY"),
+            base_url="https://api.deepseek.com",
+        )
+    function_path_agent = FunctionPathAgent(current_function_info, var_info, start_location="tif_read.c:1421", previous_analysis_path_list=[], alter_prompt=alter_prompt, client=client, model_name=model_name)
     return_location_list = function_path_agent.analysis_function_paths()
