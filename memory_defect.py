@@ -50,20 +50,16 @@ class NeverFree(MemoryLeak):
     def to_prompt(self):
         Type_prompt = f"Type of bug: {self.leak_type}. \n"
         Guidance_prompt = ("Guidance on triaging this type of bug based on memory reachability: " 
-            "The warning at a specific source line is a false positive if " 
-                "the memory has been freed, or it remains accessible to the program after the function exits and can be freed later. "
-                "(This usually happens if the pointer is the function's return value, stored in a global variable, or passed to an output parameter.) "
-            "The warning at a specific source line is a true positive if "
-                "there exist a path on control-flow that reaches the end of the function without freeing the memory. Upon the function's exit, the memory has become unreachable and can never be freed.\n")
+            "The warning at a specific source line is a false positive if the memory will be properly freed along all execution paths. \n")
         Location_prompt = f"Source location: {self.source_location}  \n"
         Code_prompt = f"Source code at {self.source_location} here is : {find_code_line(self.source_location)}\n"
         variable_name = extract_lhs_variable(find_code_line(self.source_location))
         if variable_name:
-            Message_prompt = f"Message: The variable '{variable_name}' allocated at {self.source_location} may not be freed along all the paths that reach the end of the function.  \n"
+            Message_prompt = f"Message: The variable '{variable_name}' allocated at {self.source_location} may not be freed along certain execution paths.  \n"
         else:
-            Message_prompt = f"Message: The memory allocated at {self.source_location} may not be freed along all paths that reach the end of the function.  \n"
+            Message_prompt = f"Message: The memory allocated at {self.source_location} may not be freed along certain execution paths.  \n"
         Task_prompt = f"Task: Please classify this alert as TP, FP, or UNCERTAIN, and provide your reasoning."
-        return Type_prompt + Guidance_prompt + Location_prompt + Code_prompt + Message_prompt + Code_prompt + Task_prompt
+        return Type_prompt + Guidance_prompt + Location_prompt + Code_prompt + Message_prompt + Task_prompt
 
     def to_goal_prompt(self):
         return super().to_goal_prompt() + f"upon reaching the end of the function, the memory has become unreachable and can never be freed."
@@ -93,24 +89,20 @@ class PartialLeak(MemoryLeak):
     def to_prompt(self):
         Type_prompt = f"Type of bug: {self.leak_type}. \n"
         Guidance_prompt = ("Guidance on triaging this type of bug based on memory reachability: " 
-            "The warning at a specific source line is a false positive if " 
-                "the memory has been freed, or it remains accessible to the program after the function exits and can be freed later. "
-                "(This usually happens if the pointer is the function's return value, stored in a global variable, or passed to an output parameter.) "
-            "The warning at a specific source line is a true positive if "
-                "there exist a path on control-flow that reaches the end of the function without freeing the memory. Upon the function's exit, the memory has become unreachable and can never be freed.\n")
+            "The warning at a specific source line is a false positive if the memory will be properly freed along all execution paths. \n")
         Location_prompt = f"Source location: {self.source_location}  \n"
         Code_prompt = f"Source code at {self.source_location} here is : {find_code_line(self.source_location)}\n"
         variable_name = extract_lhs_variable(find_code_line(self.source_location))
         if variable_name:
-            Message_prompt = f"Message: The variable '{variable_name}' allocated at {self.source_location} may not be freed along some paths that reach the end of the function.  \n"
+            Message_prompt = f"Message: The variable '{variable_name}' allocated at {self.source_location} may not be freed along certain execution paths .  \n"
         else:
-            Message_prompt = f"Message: The memory allocated at {self.source_location} may not be freed along some paths that reach the end of the function.  \n"
-        if self.conditional_free_paths:
-            Message_prompt += "There exists at least one path that can free the memory, and this path requires"
-            for idx, cond_path in enumerate(self.conditional_free_paths):
-                Message_prompt += f" the condition at {cond_path.get_condition_location()} to be '{cond_path.get_condition()}'"
-                Message_prompt += f" and"
-            Message_prompt = Message_prompt[:-4] + ".\n"
+            Message_prompt = f"Message: The memory allocated at {self.source_location} may not be freed along certain execution paths .  \n"
+        # if self.conditional_free_paths:
+        #     Message_prompt += "There exists at least one path that can free the memory, and this path requires"
+        #     for idx, cond_path in enumerate(self.conditional_free_paths):
+        #         Message_prompt += f" the condition at {cond_path.get_condition_location()} to be '{cond_path.get_condition()}'"
+        #         Message_prompt += f" and"
+        #     Message_prompt = Message_prompt[:-4] + ".\n"
         Task_prompt = f"Task: Please classify this alert as TP, FP, or UNCERTAIN, and provide your reasoning."
         return Type_prompt + Guidance_prompt + Location_prompt + Code_prompt + Message_prompt + Task_prompt
 

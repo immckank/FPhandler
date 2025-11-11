@@ -613,11 +613,51 @@ def find_var_decl(source_location: str, var_name: str) -> List[Dict[str, str]]:
         return []
 
 
+# analysis lvar
+def analysis_lvar(source_location: str, eq_position: int) -> Optional[List[Dict[str, Any]]]:
+    '''
+    {
+        "command":"analysis-lvar",
+        "eq_position":6,
+        "gep_info":{
+            "baseobj_type":"ptr",
+            "gep_cl":null,
+            "gep_type":"not_struct",
+            "offset":0
+            },
+        "icfg_node_id":46283,
+        "is_lvar_baseobj_param":false,
+        "is_lvar_param":false,
+        "is_member_access":false,
+        "is_struct_lvalue":false,
+        "lhs_pag_id":54312,
+        "location":"tif_dirwrite.c:1707",
+        "store_ir":"  store i32 %85, ptr %18, align 4, !dbg !12247",
+        "success":true
+    }
+    '''
+    command_caller = CommandCaller()
+    query = {
+        "command" : "analysis-lvar",
+        "source_location" : source_location,
+        "eq_position" : str(eq_position)
+    }
+    res = command_caller.send_query(query)
+    if res:
+        res_json = json.loads(res)
+        error = res_json.get("error", None)
+        if error:
+            logging.error(f"Error analyzing lvar at {source_location} with eq_position {eq_position}: {error}")
+            return None
+        else:
+            return res_json
+    return None
+
 '''
 path condition
 '''
 
-def get_value_sensitive_icfg_return_path(start_location: str, eq_position: int) -> Optional[List[Dict[str, Any]]]:
+def get_value_sensitive_lvar_icfg_return_path(start_location: str, eq_position: int) -> Optional[List[Dict[str, Any]]]:
     if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', start_location):
         logging.error(f"Invalid source location format: {start_location}")
         return None
@@ -973,6 +1013,19 @@ def get_eq_position_list(source_location: str) -> Optional[List[int]]:
             return res_json.get("store_cl", [])
     return None
 
+def get_gep_position_list(source_location: str) -> Optional[List[int]]:
+    
+    return None
+
+def check_lvar_gep(source_location: str, eq_position: int):
+    # 找到所有左值的gep信息
+    # 给出 
+    # 1. 左值是否是结构体变量
+    # 2. 如果是 给出baseobj的类型名 从llvm指令中提取
+    # 3. 如果是 给出偏移量 从llvm指令中提取
+    
+    return None
+    
 
 def get_var_store_cl(source_location: str, var_name: str) -> Optional[List[Dict[str, Any]]]:
     eq_position_list = get_eq_position_list(source_location)

@@ -244,12 +244,12 @@ set_conclusion_desc_path = {
             "properties": {
                 "classification": {
                     "type": "string",
-                    "description": "The classification type for the memory handling: 'NullPointer' (pointer remains null, no arg needed), 'Transferred' (ownership transferred, requires arg with transfer location), 'Returned' (memory returned to caller, requires arg with return statement location), 'Freed' (memory explicitly freed, requires arg with free call location), 'Leak' (memory leaked, no arg needed), or 'Unreachable' (code path is unreachable, no arg needed).",
-                    "enum": ["NullPointer", "Transferred", "Returned", "Freed", "Leak", "Unreachable"]
+                    "description": "The classification type for the memory handling: 'NullPointer' (pointer remains null, no arg needed), 'Transferred with assignment' (ownership transferred, requires arg with transfer location), 'Returned to caller' (memory returned to caller, requires arg with return statement location), 'Handled by callee' (memory explicitly freed, requires arg with free call location), 'Leak' (memory leaked, no arg needed), or 'Unreachable' (code path is unreachable, no arg needed).",
+                    "enum": ["NullPointer", "Transferred with assignment", "Returned to caller", "Handled by callee", "Leak", "Unreachable"]
                 },
                 "source_location": {
                     "type": "string",
-                    "description": "The code location related to the classification, required for 'Transferred', 'Returned', and 'Freed' classifications. Must be in the format 'filename.c:line_number' or 'filename.h:line_number' (e.g., 'crypto/rsa.c:245'). Not required for 'NullPointer', 'Leak', or 'Unreachable'."
+                    "description": "The code location related to the classification, required for 'Transferred with assignment', 'Returned to caller', and 'Handled by callee' classifications. Must be in the format 'filename.c:line_number' or 'filename.h:line_number' (e.g., 'crypto/rsa.c:245'). Not required for 'NullPointer', 'Leak', or 'Unreachable'."
                 },
                 "code_line": {
                     "type": "string",
@@ -269,6 +269,155 @@ set_conclusion_desc_path = {
                 }
             },
             "required": ["classification", "return_location", "reason"]
+        }
+    }
+}
+
+create_path_desc_path = {
+    "type": "function",
+    "function": {
+        "name": "create_path",
+        "description": "Create a temporary analysis path for the given return location. Call this before recording any path events so that subsequent updates attach to the correct path.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "return_location": {
+                    "type": "string",
+                    "description": "The return location this path targets, in the format 'filename.c:line_number'. Must match one of the return locations provided in the current analysis context."
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Short description of the path that is stored together with its events."
+                },
+            },
+            "required": ["return_location", "description"]
+        }
+    }
+}
+
+add_path_gep_to_baseobj_desc_path = {
+    "type": "function",
+    "function": {
+        "name": "add_path_gep_to_baseobj",
+        "description": "Record a GEP event that transfers ownership to a struct base object and append it to the specified path.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path_id": {
+                    "type": "string",
+                    "description": "The identifier returned by create_path for the path being augmented."
+                },
+                "gep_location": {
+                    "type": "string",
+                    "description": "Source location of the GEP instruction in the format 'filename.c:line_number'."
+                },
+                "baseobj_name": {
+                    "type": "string",
+                    "description": "Variable name of the struct base object receiving ownership."
+                }
+            },
+            "required": ["path_id", "gep_location", "baseobj_name"]
+        }
+    }
+}
+
+add_path_gep_to_member_desc_path = {
+    "type": "function",
+    "function": {
+        "name": "add_path_gep_to_member",
+        "description": "Record a GEP event that accesses a struct member from a base object and append it to the specified path.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path_id": {
+                    "type": "string",
+                    "description": "The identifier returned by create_path for the path being augmented."
+                },
+                "gep_location": {
+                    "type": "string",
+                    "description": "Source location of the GEP instruction in the format 'filename.c:line_number'."
+                },
+                "member_name": {
+                    "type": "string",
+                    "description": "Name of the struct member reached through the GEP."
+                }
+            },
+            "required": ["path_id", "gep_location", "member_name"]
+        }
+    }
+}
+
+complete_path_desc_path = {
+    "type": "function",
+    "function": {
+        "name": "complete_path",
+        "description": "Finalize an analysis path by providing its classification and reasoning, marking the path as completed.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path_id": {
+                    "type": "string",
+                    "description": "Identifier of the path being finalized."
+                },
+                "classification": {
+                    "type": "string",
+                    "description": "Indicates how memory is ultimately handled on this path.",
+                    "enum": ["NullPointer", "Transferred with assignment", "Returned to caller", "Handled by callee", "Leak", "Unreachable"]
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Detailed justification for the chosen classification."
+                },
+                "source_location": {
+                    "type": "string",
+                    "description": "Required when the classification is 'Transferred with assignment', 'Returned to caller', or 'Handled by callee'. Specifies the related source location in the format 'filename.c:line_number'."
+                },
+                "code_line": {
+                    "type": "string",
+                    "description": "The code line corresponding to the source_location when required."
+                },
+                "arg": {
+                    "type": "string",
+                    "description": "When the classification is 'Transferred with assignment', use the variable name as the arg. When the classification is 'Handled by callee', use the callee function name as the arg. Only required when the classification is 'Transferred with assignment' or 'Handled by callee'."
+                }
+            },
+            "required": ["path_id", "classification", "reason"]
+        }
+    }
+}
+
+query_paths_desc_path = {
+    "type": "function",
+    "function": {
+        "name": "query_paths",
+        "description": "Query the temporary store of analysis paths by a specific path identifier. Deleted paths are not returned.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path_id": {
+                    "type": "string",
+                    "description": "Identifier of the path to inspect. Returns an error if the path is missing or deleted."
+                }
+            },
+            "required": ["path_id"]
+        }
+    }
+}
+
+delete_path_desc_path = {
+    "type": "function",
+    "function": {
+        "name": "delete_path",
+        "description": "Remove an in-progress analysis path when it was created by mistake. Completed paths cannot be deleted.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path_id": {
+                    "type": "string",
+                    "description": "The identifier of the path to delete."
+                }
+            },
+            "required": ["path_id"]
         }
     }
 }
