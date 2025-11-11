@@ -7,7 +7,7 @@ from config import *
 from utils import *
 
 from alter_handler import AlterAnalyzer
-from llm import create_analyzer
+from analyzers import create_analyzer
 from command_caller import CommandCaller
     
 if __name__ == "__main__":
@@ -20,7 +20,7 @@ if __name__ == "__main__":
     alter_list = reader.read_alter_file(SAR_ROOT_PATH, sar_name)
     alter_num = len(alter_list)
     main_logger.info(f"total alter number: {alter_num}")
-    analyzer = create_analyzer(ANALYZER_TYPE)
+    analyzer = create_analyzer()
     for i in range(alter_num):
         main_logger.info(f"analysing alter index : {i+1} / {alter_num}")
         analyzer.responseForAlter(alter_list[i])
