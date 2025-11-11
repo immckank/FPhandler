@@ -613,6 +613,46 @@ def find_var_decl(source_location: str, var_name: str) -> List[Dict[str, str]]:
         return []
 
 
+# analysis lvar
+def analysis_lvar(source_location: str, eq_position: int) -> Optional[List[Dict[str, Any]]]:
+    '''
+    {
+        "command":"analysis-lvar",
+        "eq_position":6,
+        "gep_info":{
+            "baseobj_type":"ptr",
+            "gep_cl":null,
+            "gep_type":"not_struct",
+            "offset":0
+            },
+        "icfg_node_id":46283,
+        "is_lvar_baseobj_param":false,
+        "is_lvar_param":false,
+        "is_member_access":false,
+        "is_struct_lvalue":false,
+        "lhs_pag_id":54312,
+        "location":"tif_dirwrite.c:1707",
+        "store_ir":"  store i32 %85, ptr %18, align 4, !dbg !12247",
+        "success":true
+    }
+    '''
+    command_caller = CommandCaller()
+    query = {
+        "command" : "analysis-lvar",
+        "source_location" : source_location,
+        "eq_position" : str(eq_position)
+    }
+    res = command_caller.send_query(query)
+    if res:
+        res_json = json.loads(res)
+        error = res_json.get("error", None)
+        if error:
+            logging.error(f"Error analyzing lvar at {source_location} with eq_position {eq_position}: {error}")
+            return None
+        else:
+            return res_json
+    return None
+
 '''
 path condition
 '''
