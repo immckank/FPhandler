@@ -139,6 +139,34 @@ class PathAnalyzerModel(ABC):
                     # 返回给调用者
                     # 这里有两种情况 要么是作为参数被转移 要么是真的作为返回值被转移了
                     # 以前只处理了后者
+                    # 寻找所有的调用位置
+                    call_sites = analysis_operators.find_callers(last_function_name)
+                    for call_site in call_sites:
+                        call_site_loc = call_site["location"]
+                        call_site_code = call_site["code"]
+                        left_value = extract_lhs_variable(call_site_code)
+                        if left_value:
+                            if left_value in self.global_variables:
+                                # 表明分析已经完全结束 内存由全局变量管理 不需要再分析
+                                analysis_path.append({"classification": "done"})
+                                self.analysis_logger.info(f"Analysis path {analysis_path} terminated with Returned")
+                                self.result_logger.info(f"Analysis path {analysis_path} terminated with Returned")
+                                continue
+                            else:
+                                # 继续进行分析 调用者函数内 左值内存是什么状况
+                                eq_position = analysis_operators.get_var_store_cl(call_site_loc, left_value)
+                                function_path_agent = FunctionPathAgent(caller_function_info, var_info, call_site_location, previous_analysis_path, self.alter_prompt)
+                                self.analysis_path_list.extend(function_path_agent.analysis_function_paths())
+                                continue
+                        else:
+                            # 很奇怪 成为返回值 但是这个返回值没有被其他变量接收
+                            # 暂时判断为leak
+                            # TODO:
+                            self.analysis_logger.info(f"Analysis path {analysis_path} terminated with Returned but no left value")
+                            self.result_logger.info(f"\n ================================ Analysis terminated with Returned but no left value ================================ \n")
+                            self.result_logger.info(f"Analysis path {analysis_path} terminated with Returned but no left value")
+                            self.result_logger.info(f"\n ================================ Analysis terminated with Returned but no left value ================================ \n")
+                            return analysis_path
                     
                     continue
                 elif last_function_analysis_path["classification"] == "Handled by callee":
