@@ -30,6 +30,10 @@ import memory_defect
 
 import analysis_operators
 
+# BUG :
+# ERROR:analysis_libtiff-b9b93f66-jpeg-debug_DeepSeek:Non-struct variable data at tif_dirread.c:2284 is not found in formal arg name list ['tif', 'direntry', 'value']
+# ERROR:result_libtiff-b9b93f66-jpeg-debug_DeepSeek:Non-struct variable data at tif_dirread.c:2284 is not found in formal arg name list ['tif', 'direntry', 'value']
+# 这边应该是变量名在传播的过程中出现了问题 错误样本debug编号2
 
 class PathAnalyzerModel(ABC):
     def __init__(self):
@@ -44,10 +48,10 @@ class PathAnalyzerModel(ABC):
         return FunctionPathAgent(current_function_info, var_info, start_location, previous_analysis_path_list, alter_prompt)
     
     def check_analysis_path_completeness(self):
+        # 取出每个分析路径的最后一个元素
         for analysis_path in self.analysis_path_list:
-            if "classification" not in analysis_path:
-                return False
-            elif analysis_path["classification"] == "done":
+            last_function_analysis_path = analysis_path[-1]
+            if last_function_analysis_path["classification"] == "done":
                 continue
             else:
                 return False
@@ -57,7 +61,8 @@ class PathAnalyzerModel(ABC):
         variable_name = extract_lhs_variable(find_code_line(start_loc))
         lvar_store_cl = analysis_operators.get_var_store_cl(start_loc, variable_name)
         lvar_analysis_info = analysis_operators.analysis_lvar(start_loc, lvar_store_cl)
-        if "gep_info" in lvar_analysis_info:
+        gep_info = lvar_analysis_info["gep_info"]
+        if gep_info["gep_cl"]:
             gep_info = lvar_analysis_info["gep_info"]
             code_line = find_code_line(start_loc, strip_whitespace=False)
             member_name = code_line[(gep_info["gep_cl"]-1):lvar_store_cl].rstrip("=").strip()
@@ -68,8 +73,8 @@ class PathAnalyzerModel(ABC):
                 "gep_type": "not_struct",
                 "member_name": None,
                 "baseobj_name": None,
-                "offset": None,
-                "baseobj_type": None,
+                "offset": 0,
+                "baseobj_type": gep_info["baseobj_type"],
             }
         return gep_info
     
@@ -80,6 +85,7 @@ class PathAnalyzerModel(ABC):
         return lvar_analysis_info["is_lvar_param"]
     
     def responseForAlter(self, alter : memory_defect.MemoryLeak):
+        self.analysis_path_list = []
         self.alter_prompt = alter.to_goal_prompt()
         start_loc = alter.get_source_location()
         current_function_info = analysis_operators.find_current_function(start_loc)
@@ -156,6 +162,7 @@ class PathAnalyzerModel(ABC):
                 print(f"analysis_path: {analysis_path}")
                 last_function_analysis_path = analysis_path[-1]
                 if last_function_analysis_path["classification"] == "done":
+                    print(f"analysis_path: {analysis_path} terminated with done")
                     continue
                 last_function_name = last_function_analysis_path["function_name"]
                 last_var_info = last_function_analysis_path["var_info"]
@@ -336,17 +343,18 @@ class PathAnalyzerModel(ABC):
                         if {
                             "function_name": callee_function_name,
                             "arg_index": call_arg_index
-                        } in self.memcached:
+                        } in self.memcached_callee_functions:
                             self.analysis_logger.info(f"Analysis path {analysis_path} terminated with Handled by callee and cached")
                             self.result_logger.info(f"Analysis path {analysis_path} terminated with Handled by callee and cached")
                             analysis_path.append({"classification": "done"})
                             continue
                         # 判定需要多少了参数 只有当只需要一个参数才加入cached
                         # TODO
-                        self.memcached.append({
-                            "function_name": callee_function_name,
-                            "arg_index": call_arg_index
-                        })
+                        if len(get_formal_arg_names(find_code_line(f"{callee_function_info["filename"]}:{callee_function_info["start_line"]}"))) == 1:
+                            self.memcached_callee_functions.append({
+                                "function_name": callee_function_name,
+                                "arg_index": call_arg_index
+                            })
                         # 组装var_info
                         var_info = {
                             "var_name": get_formal_arg_names(f"{callee_function_info["filename"]}:{callee_function_info["start_line"]}")[call_arg_index],
@@ -423,7 +431,9 @@ class PathAnalyzerModel(ABC):
                     self.analysis_path_list.remove(analysis_path)
                     previous_analysis_path.append({"classification": "done"})
                     self.analysis_path_list.append(previous_analysis_path)
+                    print(f"analysis_path_list: {self.analysis_path_list}")
                     continue
+                continue
             
     
 class DeepSeekPathAnalyzer(PathAnalyzerModel):
@@ -899,6 +909,7 @@ class FunctionPathAgent():
         if self.previous_analysis_path_list:
             previous_analysis_path_prompt = "The previous analysis shows that there exists a path leads to current function as follows:\n"
             for previous_analysis_path_item in self.previous_analysis_path_list:
+                print(f"previous_analysis_path_item: {previous_analysis_path_item}")
                 previous_analysis_path_prompt += f"The memory of {previous_analysis_path_item['var_info']['var_name']} at {previous_analysis_path_item['start_location']} : {find_code_line(previous_analysis_path_item['start_location'])}"
                 previous_analysis_path_prompt += f"is {previous_analysis_path_item['classification']} in the function {previous_analysis_path_item['function_name']}, and control flow will return at {previous_analysis_path_item['return_location']} : {find_code_line(previous_analysis_path_item['return_location'])}.\n"
                 previous_analysis_path_prompt += f"with explanation that {previous_analysis_path_item['reason']}\n"
