@@ -639,7 +639,7 @@ def analysis_lvar(source_location: str, eq_position: int) -> Optional[List[Dict[
     command_caller = CommandCaller()
     query = {
         "command" : "analysis-lvar",
-        "source_location" : source_location,
+        "location" : source_location,
         "eq_position" : str(eq_position)
     }
     res = command_caller.send_query(query)
@@ -1029,13 +1029,10 @@ def check_lvar_gep(source_location: str, eq_position: int):
 
 def get_var_store_cl(source_location: str, var_name: str) -> Optional[List[Dict[str, Any]]]:
     eq_position_list = get_eq_position_list(source_location)
-    print(f"eq_position_list: {eq_position_list}")
     original_code_line = find_code_line(source_location, strip_whitespace=False)
     if not eq_position_list:
         return None
     for eq_position in eq_position_list:
-        print(f"code line: {original_code_line[:eq_position]}")
-        print(f"var_name: {var_name}")
         if var_name in original_code_line[:eq_position]:
             return eq_position
     return None
