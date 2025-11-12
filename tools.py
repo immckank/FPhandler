@@ -370,7 +370,7 @@ complete_path_desc_path = {
                 },
                 "source_location": {
                     "type": "string",
-                    "description": "Required when the classification is 'Transferred with assignment', 'Returned to caller', or 'Handled by callee'. Specifies the related source location in the format 'filename.c:line_number'."
+                    "description": "Required when the classification is 'Transferred with assignment' or 'Handled by callee'. Specifies the related source location in the format 'filename.c:line_number'."
                 },
                 "code_line": {
                     "type": "string",
