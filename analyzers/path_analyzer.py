@@ -36,7 +36,8 @@ class PathAnalyzerModel(ABC):
         self.analysis_logger = setup_logger(log_type="analysis")
         self.result_logger = setup_logger(log_type="result")
         self.global_variables = []
-        self.memcached = []
+        self.memcached_callee_functions = []
+        self.memcached_call_sites = []
         self.analysis_path_list = []
     
     def create_function_path_agent(self, current_function_info, var_info, start_location, previous_analysis_path_list, alter_prompt):
@@ -99,6 +100,10 @@ class PathAnalyzerModel(ABC):
             for call_site in call_sites:
                 call_site_location = call_site["location"]
                 call_site_code = call_site["code"]
+                if call_site_location in self.memcached_call_sites:
+                    continue
+                else:
+                    self.memcached_call_sites.append(call_site_location)
                 caller_function = analysis_operators.find_current_function(call_site_location)
                 left_var = extract_lhs_variable(call_site_code)
                 gep_info = self.build_lvar_gep_info(call_site_location)
@@ -150,11 +155,11 @@ class PathAnalyzerModel(ABC):
             for analysis_path in self.analysis_path_list.copy():
                 print(f"analysis_path: {analysis_path}")
                 last_function_analysis_path = analysis_path[-1]
-                last_function_name = last_function_analysis_path["function_name"]
-                last_var_info = last_function_analysis_path["var_info"]
                 if last_function_analysis_path["classification"] == "done":
                     continue
-                elif last_function_analysis_path["classification"] == "Returned to caller":
+                last_function_name = last_function_analysis_path["function_name"]
+                last_var_info = last_function_analysis_path["var_info"]
+                if last_function_analysis_path["classification"] == "Returned to caller":
                     # 返回给调用者
                     # 这里有两种情况 要么是作为参数被转移 要么是真的作为返回值被转移了
                     # 以前只处理了后者
@@ -166,6 +171,10 @@ class PathAnalyzerModel(ABC):
                         for call_site in call_sites:
                             call_site_loc = call_site["location"]
                             call_site_code = call_site["code"]
+                            if call_site_loc in self.memcached_call_sites:
+                                continue
+                            else:
+                                self.memcached_call_sites.append(call_site_loc)
                             left_value = extract_lhs_variable(call_site_code)
                             if left_value:
                                 if left_value in self.global_variables:
@@ -207,11 +216,15 @@ class PathAnalyzerModel(ABC):
                             arg_index = formal_arg_name_list.index(var_name)
                             # 表明在调用者那边作为了第arg_index个参数
                             for call_site in call_sites:
+                                if call_site_loc in self.memcached_call_sites:
+                                    continue
+                                else:
+                                    self.memcached_call_sites.append(call_site_loc)
                                 call_site_loc = call_site["location"]
                                 call_site_code = call_site["code"]
                                 # 对应第arg_index个参数
                                 var_info = {
-                                    "var_name": get_actual_arg_names(call_site_code)[arg_index],
+                                    "var_name": get_actual_arg_names(call_site_code, last_function_name)[arg_index],
                                     "var_type": "actual_arg",
                                     "arg_index": arg_index,
                                     "gep_info": last_var_info["gep_info"]
@@ -256,9 +269,13 @@ class PathAnalyzerModel(ABC):
                                     for call_site in call_sites:
                                         call_site_loc = call_site["location"]
                                         call_site_code = call_site["code"]
+                                        if call_site_loc in self.memcached_call_sites:
+                                            continue
+                                        else:
+                                            self.memcached_call_sites.append(call_site_loc)
                                         # 对应第arg_index个参数
                                         var_info = {
-                                            "var_name": get_actual_arg_names(call_site_code)[arg_index],
+                                            "var_name": get_actual_arg_names(call_site_code, last_function_name)[arg_index],
                                             "var_type": "actual_arg",
                                             "arg_index": arg_index,
                                         }
@@ -324,6 +341,8 @@ class PathAnalyzerModel(ABC):
                             self.result_logger.info(f"Analysis path {analysis_path} terminated with Handled by callee and cached")
                             analysis_path.append({"classification": "done"})
                             continue
+                        # 判定需要多少了参数 只有当只需要一个参数才加入cached
+                        # TODO
                         self.memcached.append({
                             "function_name": callee_function_name,
                             "arg_index": call_arg_index
@@ -365,8 +384,13 @@ class PathAnalyzerModel(ABC):
                         for call_site in transfer_function_call_sites:
                             # 追踪call arg模式下的第actual_arg_index个参数
                             # 组装var_info
+                            call_site_loc = call_site["location"]
+                            if call_site_loc in self.memcached_call_sites:
+                                continue
+                            else:
+                                self.memcached_call_sites.append(call_site_loc)
                             var_info = {
-                                "var_name": get_actual_arg_names(find_code_line(call_site["location"]))[actual_arg_index],
+                                "var_name": get_actual_arg_names(find_code_line(call_site["location"], transfer_function_info["function_name"]))[actual_arg_index],
                                 "var_type": "actual_arg",
                                 "arg_index": actual_arg_index,
                             }

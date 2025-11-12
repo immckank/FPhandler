@@ -654,23 +654,53 @@ def get_formal_arg_names(code_line):
     
     return arg_names
 
-def get_actual_arg_names(code_line):
+def get_actual_arg_names(code_line, func_name=None, return_call_index=False):
     """
     从C/C++函数调用中提取实参表达式列表
     
     Args:
-        code_line: 函数调用的代码行
-        例如: "foo(a, b->field, arr[i])", "memcpy(dest, src, sizeof(buf))"
+        code_line: 包含函数调用的代码行
+        func_name: 目标函数名（可选）。提供时将优先匹配该函数的调用。
+        return_call_index: 是否返回函数名在当前行中的起始下标
         
     Returns:
-        实参表达式列表，例如: ['a', 'b->field', 'arr[i]']
-        如果解析失败返回空列表
+        - return_call_index=False（默认）: 实参表达式列表，例如 ['a', 'b->field', 'arr[i]']
+        - return_call_index=True: (实参表达式列表, 函数名起始下标)。如果未找到，起始下标为 -1
+        如果解析失败返回空列表；结合 return_call_index=True 时返回 ([], -1)
     """
-    # 查找第一个左括号
-    start_paren = code_line.find('(')
+    if not code_line:
+        return ([], -1) if return_call_index else []
+
+    func_start_index = -1
+    start_paren = -1
+
+    if func_name:
+        pattern = re.compile(r'(?<![A-Za-z0-9_])(' + re.escape(func_name) + r')\s*\(')
+        match = pattern.search(code_line)
+        if match:
+            func_start_index = match.start(1)
+            start_paren = code_line.find('(', match.end(1) - 1)
+    else:
+        call_pattern = re.compile(r'([A-Za-z_][A-Za-z0-9_]*)\s*\(')
+        keywords = {
+            'if', 'while', 'for', 'switch', 'return', 'sizeof', 'catch', 'new', 'delete',
+            'else', 'case'
+        }
+        for match in call_pattern.finditer(code_line):
+            candidate = match.group(1)
+            if candidate in keywords:
+                continue
+            func_start_index = match.start(1)
+            start_paren = code_line.find('(', match.end(1) - 1)
+            break
+
     if start_paren == -1:
-        return []
-    
+        # 回退到原始逻辑查找第一个左括号
+        start_paren = code_line.find('(')
+
+    if start_paren == -1:
+        return ([], func_start_index) if return_call_index else []
+
     # 查找匹配的右括号（处理嵌套括号）
     depth = 0
     end_paren = -1
@@ -682,16 +712,16 @@ def get_actual_arg_names(code_line):
             if depth == 0:
                 end_paren = i
                 break
-    
+
     if end_paren == -1:
-        return []
-    
+        return ([], func_start_index) if return_call_index else []
+
     # 提取参数部分
     args_str = code_line[start_paren + 1:end_paren].strip()
-    
+
     if not args_str:
-        return []
-    
+        return ([], func_start_index) if return_call_index else []
+
     # 解析参数列表（考虑嵌套的括号、方括号和逗号）
     actual_args = []
     current_arg = []
@@ -699,35 +729,34 @@ def get_actual_arg_names(code_line):
     in_string = False  # 是否在字符串字面量中
     in_char = False    # 是否在字符字面量中
     escape = False     # 是否是转义字符
-    
-    for i, char in enumerate(args_str):
+
+    for char in args_str:
         # 处理转义字符
         if escape:
             current_arg.append(char)
             escape = False
             continue
-        
-        # 处理字符串和字符字面量
+
         if char == '\\':
             escape = True
             current_arg.append(char)
             continue
-        
+
         if char == '"' and not in_char:
             in_string = not in_string
             current_arg.append(char)
             continue
-        
+
         if char == "'" and not in_string:
             in_char = not in_char
             current_arg.append(char)
             continue
-        
+
         # 如果在字符串或字符字面量中，直接添加
         if in_string or in_char:
             current_arg.append(char)
             continue
-        
+
         # 处理括号和方括号的嵌套
         if char in '([{':
             depth += 1
@@ -743,13 +772,15 @@ def get_actual_arg_names(code_line):
             current_arg = []
         else:
             current_arg.append(char)
-    
+
     # 添加最后一个参数
     if current_arg:
         arg_text = ''.join(current_arg).strip()
         if arg_text:
             actual_args.append(arg_text)
-    
+
+    if return_call_index:
+        return actual_args, func_start_index
     return actual_args
 
 if __name__ == "__main__":
@@ -798,3 +829,9 @@ if __name__ == "__main__":
         print(f"调用: {call}")
         print(f"  实参列表: {args}")
         print()
+
+    complex_call = "if (bytecountm > tif->tif_rawdatasize && !TIFFReadBufferSetup(tif, 0, bytecountm))"
+    args_with_index = get_actual_arg_names(complex_call, func_name="TIFFReadBufferSetup", return_call_index=True)
+    print("复杂场景调用:", complex_call)
+    print(f"  实参列表: {args_with_index[0]}")
+    print(f"  函数起始下标: {args_with_index[1]}")

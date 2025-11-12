@@ -967,7 +967,6 @@ def dump_source_snippet(file_name: str, start_line: int, end_line: int) -> Optio
         or line numbers are out of range.
     """
     file_path = find_file_path(file_name) 
-    print(f"file_path: {file_path}")
     if not file_path: return "No such file, please check filename."
     try:
         file_path = os.path.join(PUT_ROOT_PATH, file_path)
