@@ -555,6 +555,7 @@ def get_arg_index(code_line, variable_name):
 
 def get_formal_arg_names(code_line):
     # 给定一个函数的声明或定义行 包含函数名称 找到所有形参的参数名称
+    # TIFFSetField(TIFF* tif, uint32 tag, ...)
     """
     从C/C++函数声明或定义中提取形参名称
     
@@ -563,13 +564,16 @@ def get_formal_arg_names(code_line):
         例如: "int foo(int x, char *y, size_t z)"
         
     Returns:
-        形参名称列表，例如: ['x', 'y', 'z']
-        如果解析失败返回空列表
+        dict:
+            'args': 形参名称列表，例如 ['x', 'y', 'z']
+            'has_varargs': 是否存在可变参数（...）
+        如果解析失败返回 {'args': [], 'has_varargs': False}
     """
     # 查找第一个左括号
+    has_varargs = False
     start_paren = code_line.find('(')
     if start_paren == -1:
-        return []
+        return {'args': [], 'has_varargs': False}
     
     # 查找匹配的右括号
     depth = 0
@@ -584,13 +588,13 @@ def get_formal_arg_names(code_line):
                 break
     
     if end_paren == -1:
-        return []
+        return {'args': [], 'has_varargs': False}
     
     # 提取参数部分
     args_str = code_line[start_paren + 1:end_paren].strip()
     
     if not args_str or args_str == 'void':
-        return []
+        return {'args': [], 'has_varargs': False}
     
     # 解析参数列表（考虑嵌套的括号和逗号）
     params = []
@@ -619,6 +623,7 @@ def get_formal_arg_names(code_line):
     for param in params:
         # 跳过可变参数
         if param.strip() == '...':
+            has_varargs = True
             continue
             
         # 移除默认值 (例如: int x = 5 -> int x)
@@ -652,7 +657,7 @@ def get_formal_arg_names(code_line):
             # 最后一个token就是变量名
             arg_names.append(tokens[-1])
     
-    return arg_names
+    return {'args': arg_names, 'has_varargs': has_varargs}
 
 def get_actual_arg_names(code_line, func_name=None, return_call_index=False):
     """
@@ -784,54 +789,8 @@ def get_actual_arg_names(code_line, func_name=None, return_call_index=False):
     return actual_args
 
 if __name__ == "__main__":
+    json_str = '''[[{'var_info': {'var_name': 'data', 'var_type': 'local_var', 'arg_index': 6, 'gep_info': {'gep_type': 'not_struct', 'baseobj_name': None, 'member_name': None, 'offset': 0, 'baseobj_type': 'ptr'}}, 'start_location': 'tif_dirread.c:2323', 'function_name': 'TIFFReadDirEntryFloatArray', 'return_location': 'tif_dirread.c:2525', 'classification': 'Transferred with assignment', 'source_location': 'tif_dirread.c:2524', 'reason': "Memory allocated to 'data' is assigned to '*value' output parameter at line 2524, transferring ownership to the caller.", 'arg': 'value'}], [{'var_info': {'var_name': 'data', 'var_type': 'local_var', 'arg_index': 6, 'gep_info': {'gep_type': 'not_struct', 'baseobj_name': None, 'member_name': None, 'offset': 0, 'baseobj_type': 'ptr'}}, 'start_location': 'tif_dirread.c:2323', 'function_name': 'TIFFReadDirEntryFloatArray', 'return_location': 'tif_dirread.c:2525', 'classification': 'Transferred with assignment', 'source_location': 'tif_dirread.c:2524', 'reason': "Memory allocated to 'data' is assigned to '*value' output parameter at line 2524, transferring ownership to the caller.", 'arg': 'value'}], [{'var_info': {'var_name': 'data', 'var_type': 'local_var', 'arg_index': 6, 'gep_info': {'gep_type': 'not_struct', 'baseobj_name': None, 'member_name': None, 'offset': 0, 'baseobj_type': 'ptr'}}, 'start_location': 'tif_dirread.c:2323', 'function_name': 'TIFFReadDirEntryFloatArray', 'return_location': 'tif_dirread.c:2525', 'classification': 'Transferred with assignment', 'source_location': 'tif_dirread.c:2524', 'reason': "Memory allocated to 'data' is assigned to '*value' output parameter at line 2524, transferring ownership to the caller.", 'arg': 'value'}], [{'var_info': {'var_name': 'data', 'var_type': 'local_var', 'arg_index': 6, 'gep_info': {'gep_type': 'not_struct', 'baseobj_name': None, 'member_name': None, 'offset': 0, 'baseobj_type': 'ptr'}}, 'start_location': 'tif_dirread.c:2323', 'function_name': 'TIFFReadDirEntryFloatArray', 'return_location': 'tif_dirread.c:2525', 'classification': 'Transferred with assignment', 'source_location': 'tif_dirread.c:2524', 'reason': "Memory allocated to 'data' is assigned to '*value' output parameter at line 2524, transferring ownership to the caller.", 'arg': 'value'}], [{'var_info': {'var_name': 'data', 'var_type': 'local_var', 'arg_index': 6, 'gep_info': {'gep_type': 'not_struct', 'baseobj_name': None, 'member_name': None, 'offset': 0, 'baseobj_type': 'ptr'}}, 'start_location': 'tif_dirread.c:2323', 'function_name': 'TIFFReadDirEntryFloatArray', 'return_location': 'tif_dirread.c:2525', 'classification': 'Transferred with assignment', 'source_location': 'tif_dirread.c:2524', 'reason': "Memory allocated to 'data' is assigned to '*value' output parameter at line 2524, transferring ownership to the caller.", 'arg': 'value'}], [{'var_info': {'var_name': 'data', 'var_type': 'local_var', 'arg_index': 6, 'gep_info': {'gep_type': 'not_struct', 'baseobj_name': None, 'member_name': None, 'offset': 0, 'baseobj_type': 'ptr'}}, 'start_location': 'tif_dirread.c:2323', 'function_name': 'TIFFReadDirEntryFloatArray', 'return_location': 'tif_dirread.c:2525', 'classification': 'Transferred with assignment', 'source_location': 'tif_dirread.c:2524', 'reason': "Memory allocated to 'data' is assigned to '*value' output parameter at line 2524, transferring ownership to the caller.", 'arg': 'value'}], [{'var_info': {'var_name': 'data', 'var_type': 'local_var', 'arg_index': 6, 'gep_info': {'gep_type': 'not_struct', 'baseobj_name': None, 'member_name': None, 'offset': 0, 'baseobj_type': 'ptr'}}, 'start_location': 'tif_dirread.c:2323', 'function_name': 'TIFFReadDirEntryFloatArray', 'return_location': 'tif_dirread.c:2525', 'classification': 'Transferred with assignment', 'source_location': 'tif_dirread.c:2524', 'reason': "Memory allocated to 'data' is assigned to '*value' output parameter at line 2524, transferring ownership to the caller.", 'arg': 'value'}], [{'var_info': {'var_name': 'data', 'var_type': 'local_var', 'arg_index': 6, 'gep_info': {'gep_type': 'not_struct', 'baseobj_name': None, 'member_name': None, 'offset': 0, 'baseobj_type': 'ptr'}}, 'start_location': 'tif_dirread.c:2323', 'function_name': 'TIFFReadDirEntryFloatArray', 'return_location': 'tif_dirread.c:2525', 'classification': 'Transferred with assignment', 'source_location': 'tif_dirread.c:2524', 'reason': "Memory allocated to 'data' is assigned to '*value' output parameter at line 2524, transferring ownership to the caller.", 'arg': 'value'}], [{'var_info': {'var_name': 'data', 'var_type': 'local_var', 'arg_index': 6, 'gep_info': {'gep_type': 'not_struct', 'baseobj_name': None, 'member_name': None, 'offset': 0, 'baseobj_type': 'ptr'}}, 'start_location': 'tif_dirread.c:2323', 'function_name': 'TIFFReadDirEntryFloatArray', 'return_location': 'tif_dirread.c:2525', 'classification': 'Transferred with assignment', 'source_location': 'tif_dirread.c:2524', 'reason': "Memory allocated to 'data' is assigned to '*value' output parameter at line 2524, transferring ownership to the caller.", 'arg': 'value'}], [{'var_info': {'var_name': 'data', 'var_type': 'local_var', 'arg_index': 6, 'gep_info': {'gep_type': 'not_struct', 'baseobj_name': None, 'member_name': None, 'offset': 0, 'baseobj_type': 'ptr'}}, 'start_location': 'tif_dirread.c:2323', 'function_name': 'TIFFReadDirEntryFloatArray', 'return_location': 'tif_dirread.c:2525', 'classification': 'Transferred with assignment', 'source_location': 'tif_dirread.c:2524', 'reason': "Memory allocated to 'data' is assigned to '*value' output parameter at line 2524, transferring ownership to the caller.", 'arg': 'value'}], [{'var_info': {'var_name': 'data', 'var_type': 'local_var', 'arg_index': 6, 'gep_info': {'gep_type': 'not_struct', 'baseobj_name': None, 'member_name': None, 'offset': 0, 'baseobj_type': 'ptr'}}, 'start_location': 'tif_dirread.c:2323', 'function_name': 'TIFFReadDirEntryFloatArray', 'return_location': 'tif_dirread.c:2327', 'classification': 'NullPointer', 'source_location': None, 'reason': "_TIFFmalloc fails and returns NULL, so 'data' is a null pointer at the return point."}]]'''
     
-    print("\n=== 测试 get_formal_arg_names 函数 ===")
-    decl_test_cases = [
-        "int foo(int x, char *y, size_t z)",
-        "void memcpy(void *dest, const void *src, size_t n)",
-        "char* strdup(const char *s)",
-        "int printf(const char *format, ...)",
-        "void func(int x = 5, char y = 'a')",
-        "int (*signal(int sig, int (*func)(int)))(int)",
-        "void process(int arr[], int size)",
-        "void callback(int (*handler)(void))",
-        "int add(int a, int b) {",
-        "static inline void helper(const int &ref, int **ptr)",
-        "void empty(void)",
-        "void noargs()",
-    ]
+    json_data = json.loads(json_str)
+    print(json_data, indent=4)
     
-    for decl in decl_test_cases:
-        names = get_formal_arg_names(decl)
-        print(f"声明: {decl}")
-        print(f"  形参名称: {names}")
-        print()
-    
-    print("\n=== 测试 get_actual_arg_names 函数 ===")
-    call_test_cases = [
-        "foo(a, b, c)",
-        "memcpy(dest, src, n)",
-        "strcpy(buffer, \"hello world\")",
-        "printf(\"%d %s\", count, name)",
-        "process(arr[i], size * 2)",
-        "callback(ptr->field, obj.member)",
-        "func(sizeof(int), (char*)ptr)",
-        "nested(foo(a, b), bar(c))",
-        "complex(a + b, c > d ? e : f, g)",
-        "array_access(arr[i][j], matrix[x][y][z])",
-        "string_with_comma(\"a,b,c\", 'x')",
-        "empty()",
-        "single(x)",
-    ]
-    
-    for call in call_test_cases:
-        args = get_actual_arg_names(call)
-        print(f"调用: {call}")
-        print(f"  实参列表: {args}")
-        print()
-
-    complex_call = "if (bytecountm > tif->tif_rawdatasize && !TIFFReadBufferSetup(tif, 0, bytecountm))"
-    args_with_index = get_actual_arg_names(complex_call, func_name="TIFFReadBufferSetup", return_call_index=True)
-    print("复杂场景调用:", complex_call)
-    print(f"  实参列表: {args_with_index[0]}")
-    print(f"  函数起始下标: {args_with_index[1]}")
