@@ -31,9 +31,7 @@ import memory_defect
 import analysis_operators
 
 # BUG :
-# ERROR:analysis_libtiff-b9b93f66-jpeg-debug_DeepSeek:Non-struct variable data at tif_dirread.c:2284 is not found in formal arg name list ['tif', 'direntry', 'value']
-# ERROR:result_libtiff-b9b93f66-jpeg-debug_DeepSeek:Non-struct variable data at tif_dirread.c:2284 is not found in formal arg name list ['tif', 'direntry', 'value']
-# 这边应该是变量名在传播的过程中出现了问题 错误样本debug编号2
+# previous_analysis_path_item['var_info']['var_name']
 
 class PathAnalyzerModel(ABC):
     def __init__(self):
@@ -299,8 +297,6 @@ class PathAnalyzerModel(ABC):
                                     self.result_logger.error(f"Cannot find baseobj name {baseobj_name} in formal arg name list {formal_arg_name_list} for {var_name} at {last_function_info['filename']}:{last_function_info['start_line']}")
                                     return analysis_path
                             else:
-                                # 这就以为着非结构体的变量却没有在形式参数列表中找到
-                                # 这个地方有问题 log信息
                                 self.analysis_logger.error(f"Non-struct variable {var_name} at {last_function_info['filename']}:{last_function_info['start_line']} is not found in formal arg name list {formal_arg_name_list}")
                                 self.result_logger.error(f"Non-struct variable {var_name} at {last_function_info['filename']}:{last_function_info['start_line']} is not found in formal arg name list {formal_arg_name_list}")
                                 return analysis_path
@@ -308,7 +304,8 @@ class PathAnalyzerModel(ABC):
                 elif last_function_analysis_path["classification"] == "Handled by callee":
                     # 被调用者处理
                     callee_function_name = last_function_analysis_path["arg"]
-                    callee_function_info = analysis_operators.find_current_function(callee_function_name)
+                    callee_function_info = analysis_operators.find_function_body(callee_function_name)
+                    print(f"callee_function_info: {callee_function_info}")
                     call_location = last_function_analysis_path["source_location"]
                     call_code = find_code_line(call_location)
                     last_var_info = last_function_analysis_path["var_info"]
@@ -334,6 +331,8 @@ class PathAnalyzerModel(ABC):
                             fc_name, call_arg_index = get_arg_index(call_code, last_var_info["var_name"])
                             # gep member
                             formal_arg_gep_info = last_var_info["gep_info"]
+                    
+                    print(f"call_arg_index: {call_arg_index}")
                     # 实际上就是追踪formal arg / index为call_arg_index / function info为callee_function_info / 
                     if callee_function_name == "free":
                         analysis_path.append({"classification": "done"})
@@ -348,8 +347,6 @@ class PathAnalyzerModel(ABC):
                             self.result_logger.info(f"Analysis path {analysis_path} terminated with Handled by callee and cached")
                             analysis_path.append({"classification": "done"})
                             continue
-                        # 判定需要多少了参数 只有当只需要一个参数才加入cached
-                        # TODO
                         if len(get_formal_arg_names(find_code_line(f"{callee_function_info["filename"]}:{callee_function_info["start_line"]}"))) == 1:
                             self.memcached_callee_functions.append({
                                 "function_name": callee_function_name,
@@ -418,7 +415,7 @@ class PathAnalyzerModel(ABC):
                             var_info = {
                                 "var_name": var_name,
                                 "var_type": "local_var",
-                                "arg_index": analysis_operators.get_eq_position_list(transfer_location, var_name),
+                                "arg_index": analysis_operators.get_var_store_cl(transfer_location, var_name),
                                 "gep_info": self.build_lvar_gep_info(transfer_location),
                             }
                             function_path_agent = self.create_function_path_agent(transfer_function_info, var_info, transfer_location, self.analysis_path_list, self.alter_prompt)
@@ -756,7 +753,9 @@ class FunctionPathAgent():
             # TODO 这里还需要匹配gep 如果base变量被转移也可以
             for eq_position in eq_position_l:
                 code_line = find_code_line(source_location)
-                if arg in code_line[:eq_position] and (self.var_info["var_name"] in code_line[:eq_position]):
+                print(f"Left code line {code_line[:(eq_position-1)]}")
+                print(f"Right code line {code_line[(eq_position-1):]}")
+                if arg in code_line[:(eq_position-1)] and (self.var_info["var_name"] in code_line[(eq_position-1):]):
                     matched_arg = True
                     break
             if not matched_arg:
@@ -777,10 +776,19 @@ class FunctionPathAgent():
         elif classification == "Returned to caller":
             # TODO 这里还需要匹配gep 如果参数自己 / 参数的baseobj在函数参数列表中被转移也可以
             return_pointer_json = analysis_operators.check_return_pointer(return_location)
+            formal_arg_name_list = get_formal_arg_names(find_code_line(f"{self.current_function_info['filename']}:{self.current_function_info["start_line"]}"))
+            print(
+                f"[FunctionPathAgent] formal_arg_name_list: {formal_arg_name_list}"
+            )
             if return_pointer_json["function_can_return_pointer"] and return_pointer_json["location_has_pointer_operation"]:
                 arg = "return_value"
-            else:
+            # 判定变量名是不是直接就在函数的参数列表中
+            elif self.var_info["var_name"] in formal_arg_name_list:
                 arg = "formal_arg"
+            elif self.var_info["gep_info"]["gep_type"] == "member" and self.var_info["gep_info"]["baseobj_name"] in formal_arg_name_list:
+                arg = "formal_arg"
+            else:
+                return {"error": f"Cannot find the var name {self.var_info['var_name']} in formal arg list: {formal_arg_name_list}. Please check if the code line is correct or the arg is correct. You may specify all the possible memory event along the path"}
             path["path_items"] = {
                 "var_info": self.var_info,
                 "start_location": self.start_location,
