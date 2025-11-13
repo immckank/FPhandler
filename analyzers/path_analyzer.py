@@ -373,7 +373,7 @@ class PathAnalyzerModel(ABC):
                                 "arg_index": call_arg_index,
                                 "gep_info": formal_arg_gep_info
                             }
-                        function_path_agent = self.create_function_path_agent(callee_function_info, var_info, callee_function_info["start_location"], previous_analysis_path, self.alter_prompt)
+                        function_path_agent = self.create_function_path_agent(callee_function_info, var_info, callee_function_info["start_line"], previous_analysis_path, self.alter_prompt)
                         self.analysis_path_list.remove(analysis_path)
                         self.analysis_path_list.extend(function_path_agent.analysis_function_paths())
                     continue
