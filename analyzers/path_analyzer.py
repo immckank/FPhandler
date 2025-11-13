@@ -212,9 +212,11 @@ class PathAnalyzerModel(ABC):
                                 self.result_logger.info(f"\n ================================ Analysis terminated with Returned but no left value ================================ \n")
                                 return analysis_path
                     else:
+                        # 这里表明是formal arg
                         # 查询上一个函数的参数列表 找var info中的名字是第几个参数
                         last_function_info = analysis_operators.find_function_body(last_function_name)
-                        formal_arg_name_list = get_formal_arg_names(find_code_line(f"{last_function_info['filename']}:{last_function_info['start_line']}"))
+                        formal_arg_name_list = get_formal_arg_names(find_code_line(f"{last_function_info['filename']}:{last_function_info['start_line']}"))["args"]
+                        last_function_varargs = get_formal_arg_names(find_code_line(f"{last_function_info['filename']}:{last_function_info['start_line']}"))["has_varargs"]
                         var_name = last_var_info["var_name"]
                         if var_name in formal_arg_name_list:
                             arg_index = formal_arg_name_list.index(var_name)
@@ -308,7 +310,6 @@ class PathAnalyzerModel(ABC):
                     print(f"callee_function_info: {callee_function_info}")
                     call_location = last_function_analysis_path["source_location"]
                     call_code = find_code_line(call_location)
-                    last_var_info = last_function_analysis_path["var_info"]
                     formal_arg_gep_info = {}
                     if last_var_info["gep_info"]["gep_type"] == "not_struct":
                         fc_name, call_arg_index = get_arg_index(call_code, last_var_info["var_name"])
@@ -339,6 +340,7 @@ class PathAnalyzerModel(ABC):
                         self.analysis_logger.info(f"Analysis path {analysis_path} terminated with Handled by callee")
                         self.result_logger.info(f"Analysis path {analysis_path} terminated with Handled by callee")
                     else:
+                        formal_arg_info = get_formal_arg_names(find_code_line(f"{callee_function_info["filename"]}:{callee_function_info["start_line"]}"))
                         if {
                             "function_name": callee_function_name,
                             "arg_index": call_arg_index
@@ -347,18 +349,30 @@ class PathAnalyzerModel(ABC):
                             self.result_logger.info(f"Analysis path {analysis_path} terminated with Handled by callee and cached")
                             analysis_path.append({"classification": "done"})
                             continue
-                        if len(get_formal_arg_names(find_code_line(f"{callee_function_info["filename"]}:{callee_function_info["start_line"]}"))) == 1:
+                        if len(formal_arg_info["args"]) == 1:
                             self.memcached_callee_functions.append({
                                 "function_name": callee_function_name,
                                 "arg_index": call_arg_index
                             })
                         # 组装var_info
-                        var_info = {
-                            "var_name": get_formal_arg_names(f"{callee_function_info["filename"]}:{callee_function_info["start_line"]}")[call_arg_index],
-                            "var_type": "formal_arg",
-                            "arg_index": call_arg_index,
-                            "gep_info": formal_arg_gep_info
-                        }
+                        # 调用位置为m=TIFFSetField(tif,dp->tdir_tag,(uint32)(dp->tdir_count),data);
+                        # 实际声明位置为TIFFSetField(TIFF* tif, uint32 tag, ...)
+                        # 变长参数应该怎么处理？
+                        if formal_arg_info["has_varargs"]:
+                            # TODO
+                            var_info = {
+                                "var_name": last_var_info["var_name"],
+                                "var_type": "formal_arg",
+                                "arg_index": call_arg_index,
+                                "gep_info": formal_arg_gep_info
+                            }
+                        else:
+                            var_info = {
+                                "var_name": formal_arg_info["args"][call_arg_index],
+                                "var_type": "formal_arg",
+                                "arg_index": call_arg_index,
+                                "gep_info": formal_arg_gep_info
+                            }
                         function_path_agent = self.create_function_path_agent(callee_function_info, var_info, callee_function_info["start_location"], previous_analysis_path, self.alter_prompt)
                         self.analysis_path_list.remove(analysis_path)
                         self.analysis_path_list.extend(function_path_agent.analysis_function_paths())
@@ -773,11 +787,13 @@ class FunctionPathAgent():
         elif classification == "Returned to caller":
             # TODO 这里还需要匹配gep 如果参数自己 / 参数的baseobj在函数参数列表中被转移也可以
             return_pointer_json = analysis_operators.check_return_pointer(return_location)
-            formal_arg_name_list = get_formal_arg_names(find_code_line(f"{self.current_function_info['filename']}:{self.current_function_info["start_line"]}"))
+            formal_arg_info = get_formal_arg_names(find_code_line(f"{self.current_function_info['filename']}:{self.current_function_info["start_line"]}"))
+            formal_arg_name_list = formal_arg_info["args"]
+            formal_arg_varargs = formal_arg_info["has_varargs"]
             if return_pointer_json["function_can_return_pointer"] and return_pointer_json["location_has_pointer_operation"]:
                 arg = "return_value"
             # 判定变量名是不是直接就在函数的参数列表中
-            elif self.var_info["var_name"] in formal_arg_name_list:
+            elif self.var_info["var_name"] in formal_arg_name_list or formal_arg_varargs:
                 arg = "formal_arg"
             elif self.var_info["gep_info"]["gep_type"] == "member" and self.var_info["gep_info"]["baseobj_name"] in formal_arg_name_list:
                 arg = "formal_arg"

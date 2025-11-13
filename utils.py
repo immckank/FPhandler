@@ -555,6 +555,7 @@ def get_arg_index(code_line, variable_name):
 
 def get_formal_arg_names(code_line):
     # 给定一个函数的声明或定义行 包含函数名称 找到所有形参的参数名称
+    # TIFFSetField(TIFF* tif, uint32 tag, ...)
     """
     从C/C++函数声明或定义中提取形参名称
     
@@ -563,13 +564,16 @@ def get_formal_arg_names(code_line):
         例如: "int foo(int x, char *y, size_t z)"
         
     Returns:
-        形参名称列表，例如: ['x', 'y', 'z']
-        如果解析失败返回空列表
+        dict:
+            'args': 形参名称列表，例如 ['x', 'y', 'z']
+            'has_varargs': 是否存在可变参数（...）
+        如果解析失败返回 {'args': [], 'has_varargs': False}
     """
     # 查找第一个左括号
+    has_varargs = False
     start_paren = code_line.find('(')
     if start_paren == -1:
-        return []
+        return {'args': [], 'has_varargs': False}
     
     # 查找匹配的右括号
     depth = 0
@@ -584,13 +588,13 @@ def get_formal_arg_names(code_line):
                 break
     
     if end_paren == -1:
-        return []
+        return {'args': [], 'has_varargs': False}
     
     # 提取参数部分
     args_str = code_line[start_paren + 1:end_paren].strip()
     
     if not args_str or args_str == 'void':
-        return []
+        return {'args': [], 'has_varargs': False}
     
     # 解析参数列表（考虑嵌套的括号和逗号）
     params = []
@@ -619,6 +623,7 @@ def get_formal_arg_names(code_line):
     for param in params:
         # 跳过可变参数
         if param.strip() == '...':
+            has_varargs = True
             continue
             
         # 移除默认值 (例如: int x = 5 -> int x)
@@ -652,7 +657,7 @@ def get_formal_arg_names(code_line):
             # 最后一个token就是变量名
             arg_names.append(tokens[-1])
     
-    return arg_names
+    return {'args': arg_names, 'has_varargs': has_varargs}
 
 def get_actual_arg_names(code_line, func_name=None, return_call_index=False):
     """
