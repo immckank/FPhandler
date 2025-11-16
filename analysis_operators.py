@@ -665,7 +665,7 @@ def get_value_sensitive_lvar_icfg_return_path(start_location: str, eq_position: 
     query = {
         "command" : "find-lvalue-path-inside",
         "location" : start_location,
-        "eq_position" : str(eq_position)
+        "eq_position" : str(eq_position) if eq_position is not None else "-1"
     }
     res = command_caller.send_query(query)
     if res:
@@ -688,6 +688,7 @@ def get_value_sensitive_arg_icfg_return_path(function_name: str, index: int) -> 
         "arg_index" : str(index)
     }
     res = command_caller.send_query(query)
+    print(f"res: {res}")
     if res:
         res_json = json.loads(res)
         error = res_json.get("error", None)

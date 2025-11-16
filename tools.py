@@ -244,12 +244,12 @@ set_conclusion_desc_path = {
             "properties": {
                 "classification": {
                     "type": "string",
-                    "description": "The classification type for the memory handling: 'NullPointer' (pointer remains null, no arg needed), 'Transferred with assignment' (ownership transferred, requires arg with transfer location), 'Returned to caller' (memory returned to caller, requires arg with return statement location), 'Handled by callee' (memory explicitly freed, requires arg with free call location), 'Leak' (memory leaked, no arg needed), or 'Unreachable' (code path is unreachable, no arg needed).",
-                    "enum": ["NullPointer", "Transferred with assignment", "Returned to caller", "Handled by callee", "Leak", "Unreachable"]
+                    "description": "The classification type for the memory handling: 'NullPointer' (pointer remains null, no arg needed), 'Transferred' (ownership transferred, requires arg with transfer location), 'Returned to caller' (memory returned to caller, requires arg with return statement location), 'Handled by callee' (memory explicitly freed, requires arg with free call location), 'Leak' (memory leaked, no arg needed), or 'Unreachable' (code path is unreachable, no arg needed).",
+                    "enum": ["NullPointer", "Transferred", "Returned to caller", "Handled by callee", "Leak", "Unreachable"]
                 },
                 "source_location": {
                     "type": "string",
-                    "description": "The code location related to the classification, required for 'Transferred with assignment', 'Returned to caller', and 'Handled by callee' classifications. Must be in the format 'filename.c:line_number' or 'filename.h:line_number' (e.g., 'crypto/rsa.c:245'). Not required for 'NullPointer', 'Leak', or 'Unreachable'."
+                    "description": "The code location related to the classification, required for 'Transferred', 'Returned to caller', and 'Handled by callee' classifications. Must be in the format 'filename.c:line_number' or 'filename.h:line_number' (e.g., 'crypto/rsa.c:245'). Not required for 'NullPointer', 'Leak', or 'Unreachable'."
                 },
                 "code_line": {
                     "type": "string",
@@ -289,8 +289,26 @@ create_path_desc_path = {
                     "type": "string",
                     "description": "Short description of the path that is stored together with its events."
                 },
+                "depends_on": {
+                    "type": ["string", "array"],
+                    "items": {"type": "string"},
+                    "description": "Optional dependency path id or list of ids. Defaults to the parent analysis path id when omitted."
+                },
             },
             "required": ["return_location", "description"]
+        }
+    }
+}
+
+describe_return_locations_desc_path = {
+    "type": "function",
+    "function": {
+        "name": "describe_return_locations",
+        "description": "Summarize each return location with multiple potential paths, including code context and current completion status, to guide further analysis within the function.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
         }
     }
 }
@@ -362,15 +380,19 @@ complete_path_desc_path = {
                 "classification": {
                     "type": "string",
                     "description": "Indicates how memory is ultimately handled on this path.",
-                    "enum": ["NullPointer", "Transferred with assignment", "Returned to caller", "Handled by callee", "Leak", "Unreachable"]
+                    "enum": ["NullPointer", "Transferred", "Returned to caller", "Handled by callee", "Leak", "Unreachable"]
                 },
                 "reason": {
                     "type": "string",
                     "description": "Detailed justification for the chosen classification."
                 },
+                "conditions": {
+                    "type": "string",
+                    "description": "Summary of the conditions that must be met for the path to be valid."
+                },
                 "source_location": {
                     "type": "string",
-                    "description": "Required when the classification is 'Transferred with assignment' or 'Handled by callee'. Specifies the related source location in the format 'filename.c:line_number'."
+                    "description": "Required when the classification is 'Transferred' or 'Handled by callee'. Specifies the related source location in the format 'filename.c:line_number'."
                 },
                 "code_line": {
                     "type": "string",
@@ -378,10 +400,10 @@ complete_path_desc_path = {
                 },
                 "arg": {
                     "type": "string",
-                    "description": "When the classification is 'Transferred with assignment', use the variable name as the arg. When the classification is 'Handled by callee', use the callee function name as the arg. Only required when the classification is 'Transferred with assignment' or 'Handled by callee'."
+                    "description": "When the classification is 'Transferred', use the variable name as the arg. When the classification is 'Handled by callee', use the callee function name as the arg. Only required when the classification is 'Transferred' or 'Handled by callee'."
                 }
             },
-            "required": ["path_id", "classification", "reason"]
+            "required": ["path_id", "classification", "reason", "conditions"]
         }
     }
 }
