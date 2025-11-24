@@ -6,6 +6,7 @@ import json
 import re
 from utils import *
 from typing import List, Dict, Any, Optional, Set
+from enum import Enum
 
 def _configure_libclang():
     """Finds and configures the path to libclang."""
@@ -83,6 +84,188 @@ def set_conclusion(classification: str, reason: str) -> Dict[str, str]:
 '''
 structure function
 '''
+
+class Category(str, Enum):
+    NullPointer = "NullPointer"
+    Unreachable = "Unreachable"
+    HandledByCallee = "HandledByCallee"
+    ReturnedAsReturnValue = "ReturnedAsReturnValue"
+    ReturnedAsPointerParameter = "ReturnedAsPointerParameter"
+    Leaked = "Leaked"
+
+
+def _normalize_source_location(selector: Dict[str, Any]) -> Optional[str]:
+    """
+    Accepts one of:
+      - selector['source_location'] == 'file.c:123'
+      - selector['file_path'] + selector['line']
+    """
+    if not isinstance(selector, dict):
+        return None
+    sl = selector.get("source_location")
+    if isinstance(sl, str) and re.match(r'^[\w/]+\.(c|h|cpp):\d+$', sl):
+        return sl
+    file_path = selector.get("file_path")
+    line = selector.get("line")
+    if isinstance(file_path, str) and isinstance(line, int):
+        return f"{file_path}:{line}"
+    return None
+
+
+def validate_source_location(source_location: str, code_line: Optional[str] = None, tolerance: int = 2) -> Dict[str, Any]:
+    """
+    校验与纠错 source_location。
+    - 校验格式 'filename.(c|h|cpp):line'
+    - 校验文件与行是否存在
+    - 若提供 code_line，允许在 ±tolerance 行内自动纠错，返回修正后的 source_location 与实际代码行
+    返回：
+      {"ok": True, "source_location": "a.c:120", "code_line": "actual code ..."}
+      或 {"error": "reason"}
+    """
+    if not isinstance(source_location, str) or not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', source_location):
+        return {"error": f"Invalid source_location format: {source_location}"}
+    file_name, line_str = source_location.split(":")
+    try:
+        line_num = int(line_str)
+    except Exception:
+        return {"error": f"Invalid line number in source_location: {source_location}"}
+
+    # 读取原始行；如果失败，返回错误
+    try:
+        actual = dump_source_line(file_name, line_num)
+    except Exception:
+        actual = None
+    if not isinstance(actual, str) or actual.startswith("No such file") or actual.startswith("The line number is invalid"):
+        return {"error": f"File or line not found for source_location: {source_location}"}
+
+    # 如未提供 code_line，则视为通过
+    if not isinstance(code_line, str) or code_line.strip() == "":
+        return {"ok": True, "source_location": source_location, "code_line": actual}
+
+    # 允许在 ±tolerance 行内纠错
+    if actual.strip() == code_line.strip():
+        return {"ok": True, "source_location": source_location, "code_line": actual}
+
+    base = line_num
+    for delta in range(-tolerance, tolerance + 1):
+        if delta == 0:
+            continue
+        candidate_line = base + delta
+        if candidate_line <= 0:
+            continue
+        candidate_loc = f"{file_name}:{candidate_line}"
+        try:
+            cand = dump_source_line(file_name, candidate_line)
+        except Exception:
+            cand = None
+        if isinstance(cand, str) and cand.strip() == code_line.strip():
+            return {"ok": True, "source_location": candidate_loc, "code_line": cand}
+
+    return {"error": f"mismatched code line at {source_location}: expected '{code_line.strip()}' but got '{actual.strip()}'"}
+
+def normalize_identifier(expr: str) -> str:
+    r"""
+    将表达式归一化到基础标识符以便匹配：
+    - 去掉外围括号与前导强转 (type)
+    - 去掉前导一元运算符 * & + - !
+    - 遇到 -> . [ 截断为左侧基变量
+    - 提取首个标识符 [A-Za-z_]\w*
+    """
+    if not isinstance(expr, str):
+        return ""
+    s = expr.strip()
+    # 去外围括号
+    changed = True
+    while changed and s.startswith("(") and s.endswith(")"):
+        changed = False
+        inner = s[1:-1].strip()
+        if inner and (inner.count("(") == inner.count(")")):
+            s = inner
+            changed = True
+    # 去前导强转
+    import re
+    cast_pat = re.compile(r'^\(\s*[^)]+\s*\)\s*')
+    while True:
+        m = cast_pat.match(s)
+        if not m:
+            break
+        s = s[m.end():].lstrip()
+    # 去前导一元运算符
+    while s and s[0] in "*&+-!":
+        s = s[1:].lstrip()
+    # 按分隔符截断
+    for sep in ["->", ".", "["]:
+        idx = s.find(sep)
+        if idx != -1:
+            s = s[:idx]
+            break
+    # 提取第一个标识符
+    m = re.search(r'[A-Za-z_]\w*', s)
+    return m.group(0) if m else s.strip()
+
+def validate_decision(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    统一 JSON 校验与归一化。
+    输入示例：
+      {"category":"HandledByCallee","params":{"call":{"source_location":"a.c:100","callee_function_name":"free"},"arg_index":0}}
+      {"category":"ReturnedAsPointerParameter","params":{"param_index":1}}
+      {"category":"NullPointer"}
+    返回：若合法，返回形如 {"ok": True, "category": Category, "params": {...}}；否则 {"error": "..."}。
+    """
+    if not isinstance(payload, dict):
+        return {"error": "decision must be an object"}
+    category = payload.get("category")
+    try:
+        category_enum = Category(category)
+    except Exception:
+        return {"error": f"unsupported category: {category}"}
+
+    params = payload.get("params")
+    normalized: Dict[str, Any] = {"ok": True, "category": category_enum, "params": {}}
+
+    if category_enum == Category.HandledByCallee:
+        if not isinstance(params, dict):
+            return {"error": "params is required for HandledByCallee"}
+        call = params.get("call", {})
+        arg_index = params.get("arg_index", None)
+        param_name = params.get("param_name", None)
+        if not isinstance(call, dict):
+            return {"error": "params.call must be an object"}
+        source_location = _normalize_source_location(call)
+        callee_function_name = call.get("callee_function_name") or call.get("callee_name")
+        call_param_name = call.get("param_name", None)
+        if not source_location:
+            return {"error": "params.call must provide source_location or file_path+line"}
+        if arg_index is not None and not isinstance(arg_index, int):
+            return {"error": "params.arg_index must be an integer"}
+        if not isinstance(callee_function_name, str) or not callee_function_name:
+            return {"error": "params.call.callee_function_name is required"}
+        normalized["params"] = {
+            "source_location": source_location,
+            "callee_function_name": callee_function_name,
+            "arg_index": arg_index,
+            # 可选：参数名冗余校验（0-based 优先，名称用于核验或反推）
+            "param_name": param_name or call_param_name,
+        }
+        return normalized
+
+    if category_enum == Category.ReturnedAsPointerParameter:
+        if not isinstance(params, dict):
+            return {"error": "params is required for ReturnedAsPointerParameter"}
+        param_index = params.get("param_index", None)
+        param_name = params.get("param_name", None)
+        if param_index is None and param_name is None:
+            return {"error": "params.param_index or params.param_name is required"}
+        if param_index is not None and not isinstance(param_index, int):
+            return {"error": "params.param_index must be an integer"}
+        normalized["params"] = {"param_index": param_index, "param_name": param_name}
+        return normalized
+
+    # 其它类别不需要 params；如传入，必须为空或为 {}
+    if params not in (None, {}, []):
+        return {"error": f"category {category} should not provide params"}
+    normalized["params"] = {}
+    return normalized
 
 def find_callers(function_name: str) -> List[Dict[str, Any]]:
     """Finds all functions that call a given target function.
@@ -656,6 +839,27 @@ def analysis_lvar(source_location: str, eq_position: int) -> Optional[List[Dict[
 '''
 path condition
 '''
+def get_detailed_value_sensitive_lvar_icfg_return_path(start_location: str, eq_position: int) -> Optional[List[Dict[str, Any]]]:
+    # find-lvalue-detail-path-inside
+    if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', start_location):
+        logging.error(f"Invalid source location format: {start_location}")
+        return None
+    command_caller = CommandCaller()
+    query = {
+        "command" : "find-lvalue-detail-path-inside",
+        "location" : start_location,
+        "eq_position" : str(eq_position) if eq_position is not None else "-1"
+    }
+    res = command_caller.send_query(query)
+    if res:
+        res_json = json.loads(res)
+        error = res_json.get("error", None)
+        if error:
+            logging.error(f"Error finding detailed value sensitive icfg return path for {start_location} with eq_position {eq_position}: {error}")
+            return None
+        else:
+            return res_json
+    return None
 
 def get_value_sensitive_lvar_icfg_return_path(start_location: str, eq_position: int) -> Optional[List[Dict[str, Any]]]:
     if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', start_location):
