@@ -6,10 +6,13 @@ import json
 import re
 
 # 设置日志
-def setup_logger(log_type):
+def setup_logger(log_type, analyzer_type_override=None):
     main_formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     llm_formatter = logging.Formatter("%(message)s")
     time_str = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    
+    current_analyzer_type = analyzer_type_override if analyzer_type_override else ANALYZER_TYPE
+
     if log_type == "main":
         sar = SAR_ROOT_PATH if sar_name is None else sar_name.split('.')[0]
         log_file_name = f"{sar}-{time_str}.log"
@@ -24,7 +27,7 @@ def setup_logger(log_type):
         logger.addHandler(file_handler)
         return logger
     elif log_type == "result":
-        log_file_name = f"result_{sar_name.split('.')[0]}_{LLM_TYPE}-{ANALYZER_TYPE}-{time_str}.log"
+        log_file_name = f"result_{sar_name.split('.')[0]}_{LLM_TYPE}-{current_analyzer_type}-{time_str}.log"
         if not os.path.exists(os.path.join(RES_ROOT_PATH, "RESULT")):
             os.makedirs(os.path.join(RES_ROOT_PATH, "RESULT"))
         log_file_path = os.path.join(RES_ROOT_PATH, "RESULT", log_file_name)
@@ -35,7 +38,7 @@ def setup_logger(log_type):
         logger.addHandler(file_handler)
         return logger
     elif log_type == "analysis":
-        log_file_name = f"analysis_{sar_name.split('.')[0]}_{LLM_TYPE}-{ANALYZER_TYPE}-{time_str}.log"
+        log_file_name = f"analysis_{sar_name.split('.')[0]}_{LLM_TYPE}-{current_analyzer_type}-{time_str}.log"
         if not os.path.exists(os.path.join(RES_ROOT_PATH, "TRACE")):
             os.makedirs(os.path.join(RES_ROOT_PATH, "TRACE"))
         log_file_path = os.path.join(RES_ROOT_PATH, "TRACE", log_file_name)
