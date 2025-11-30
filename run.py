@@ -11,6 +11,8 @@ from alter_handler import AlterAnalyzer
 from analyzers import create_analyzer
 from command_caller import CommandCaller
 from analyzers.path_builder_agent import FunctionPathBuilderAgent, FunctionNodeBuilderAgent, FunctionPathCheckerAgent
+from analyzers.path_z3_checker import PathZ3CheckerAgent
+from analyzers.path_branch_extractor import PathBranchExtractorAgent
 import analysis_operators
 from openai import OpenAI
 
@@ -34,6 +36,24 @@ source_location_eq_position_list = [
     ("tif_read.c:1421", 20),
     ("tif_write.c:658", 6),
 ]
+
+checker_test_data = [
+    # 839 8
+    ("tif_dirwrite.c:839", 8),
+]
+
+
+def ensure_ctags_ready(force=False):
+    """
+    Ensure the project-wide ctags index exists before running analyzers.
+    """
+    result = generate_ctags_index(force=force)
+    if isinstance(result, dict):
+        if result.get("error"):
+            logging.warning("ctags index unavailable: %s", result["error"])
+        elif result.get("status") == "generated":
+            logging.info("ctags index generated at %s", result.get("path"))
+    return result
 
 def test_old_function_path_builder_agent():
     # """测试FunctionPathBuilderAgent类"""
@@ -89,7 +109,7 @@ def test_old_function_path_builder_agent():
         pass
 
 
-def test_new_function_path_builder_agent():
+def test_new_function_path_builder_agent(test_data):
     """测试新版 FunctionPathBuilderAgent（analyze_paths 流程）"""
     
     run_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "RES", "RUN")
@@ -106,7 +126,7 @@ def test_new_function_path_builder_agent():
     logger.addHandler(handler)
     
     try:
-        for source_location, eq_position in source_location_eq_position_list:
+        for source_location, eq_position in test_data:
             # if not (source_location == "tif_getimage.c:370" and eq_position == 18):
             #     continue
 
@@ -204,7 +224,7 @@ def test_function_node_builder_agent():
         pass
 
 
-def test_function_path_checker_agent():
+def test_function_path_checker_agent(test_data):
     """测试FunctionPathCheckerAgent类 - 直接验证路径可行性"""
     
     run_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "RES", "RUN")
@@ -233,7 +253,7 @@ def test_function_path_checker_agent():
         total_not_feasible = 0
         
         # 循环测试所有位置对
-        for idx, (source_location, eq_position) in enumerate(source_location_eq_position_list, start=1):
+        for idx, (source_location, eq_position) in enumerate(test_data, start=1):
             logger.info(
                 "Start analyze source_location=%s eq_position=%s",
                 source_location,
@@ -241,7 +261,7 @@ def test_function_path_checker_agent():
             )
             
             print(f"\n{'='*80}")
-            print(f"[{idx}/{len(source_location_eq_position_list)}] Testing: {source_location} eq_position={eq_position}")
+            print(f"[{idx}/{len(test_data)}] Testing: {source_location} eq_position={eq_position}")
             print(f"{'='*80}")
             
             try:
@@ -300,14 +320,14 @@ def test_function_path_checker_agent():
         print(f"\n{'='*80}")
         print(f"=== OVERALL SUMMARY ===")
         print(f"{'='*80}")
-        print(f"Total locations tested: {len(source_location_eq_position_list)}")
+        print(f"Total locations tested: {len(test_data)}")
         print(f"Total paths analyzed: {total_tested}")
         print(f"Total feasible paths: {total_feasible}")
         print(f"Total not feasible paths: {total_not_feasible}")
         
         logger.info(
             "Overall summary: total_locations=%d total_paths=%d feasible=%d not_feasible=%d",
-            len(source_location_eq_position_list),
+            len(test_data),
             total_tested,
             total_feasible,
             total_not_feasible
@@ -326,16 +346,228 @@ def test_function_path_checker_agent():
             pass
 
 
+z3_checker_test_data = [
+    # (source_location, eq_position)
+    ("tif_dirwrite.c:839", 8),
+]
+
+def test_path_z3_checker_agent(test_data):
+    """测试PathZ3CheckerAgent类 - 针对每条路径生成Z3验证脚本"""
+    
+    run_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "RES", "RUN")
+    os.makedirs(run_dir, exist_ok=True)
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    log_path = os.path.join(run_dir, f"z3-checker-{timestamp}.log")
+
+    logger = logging.getLogger(f"z3_checker_{timestamp}")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    handler = logging.FileHandler(log_path, encoding="utf-8")
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    
+    try:
+        # 创建OpenAI客户端（使用DeepSeek）
+        model_name = "deepseek-chat"
+        client = OpenAI(
+            api_key=os.environ.get("DEEPSEEK_API_KEY"),
+            base_url="https://api.deepseek.com",
+        )
+        
+        for idx, (source_location, eq_position) in enumerate(test_data, start=1):
+            logger.info(
+                "Start generate Z3 scripts for source_location=%s eq_position=%s",
+                source_location,
+                eq_position,
+            )
+            
+            print(f"\n{'='*80}")
+            print(f"[{idx}/{len(test_data)}] Testing Z3 Script Generation: {source_location} eq_position={eq_position}")
+            print(f"{'='*80}")
+            
+            try:
+                # 1. 获取基础路径数据
+                print("\n=== Getting raw path data ===")
+                path_builder_agent = FunctionPathBuilderAgent(
+                    source_location=source_location,
+                    eq_position=eq_position,
+                    client=client,
+                    model_name=model_name,
+                )
+                
+                path_data = path_builder_agent.path_data
+                print(f"Got {len(path_data)} paths")
+                
+                if not path_data:
+                    msg = "No paths found, skip"
+                    print(msg)
+                    logger.warning(msg)
+                    continue
+                
+                # 2. 初始化PathZ3CheckerAgent
+                print("\n=== Initializing PathZ3CheckerAgent ===")
+                z3_checker = PathZ3CheckerAgent(
+                    path_data=path_data,
+                    client=client,
+                    model_name=model_name,
+                )
+                
+                # 3. 针对每条路径生成脚本
+                for path in path_data:
+                    target_path_id = path.get("path_id")
+                    if target_path_id is None:
+                        continue
+                    
+                    print(f"\n=== Generating Z3 script for path {target_path_id} ===")
+                    try:
+                        result = z3_checker.generate_z3_script(target_path_id)
+                        print("\n=== Generation Result ===")
+                        print(result)
+                        logger.info("Generation result for path %s: %s", target_path_id, result)
+                    except Exception as path_err:
+                        err_msg = f"Failed to generate Z3 script for path {target_path_id}: {path_err}"
+                        print(err_msg)
+                        logger.error(err_msg, exc_info=True)
+                    
+            except Exception as e:
+                error_msg = f"Error processing {source_location} path {target_path_id}: {str(e)}"
+                print(f"\n!!! {error_msg}")
+                logger.error(error_msg, exc_info=True)
+                import traceback
+                traceback.print_exc()
+                continue
+            
+    finally:
+        handler.close()
+        logger.removeHandler(handler)
+        
+        try:
+            caller = CommandCaller()
+            caller.send_query({"command": "exit"})
+        except Exception:
+            pass
+
+
+def test_path_branch_extractor_agent(test_data):
+    """测试PathBranchExtractorAgent类 - 针对每条路径提取约束"""
+    
+    run_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "RES", "RUN")
+    os.makedirs(run_dir, exist_ok=True)
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    log_path = os.path.join(run_dir, f"branch-extractor-{timestamp}.log")
+
+    logger = logging.getLogger(f"branch_extractor_{timestamp}")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    handler = logging.FileHandler(log_path, encoding="utf-8")
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    
+    try:
+        # 创建OpenAI客户端（使用DeepSeek）
+        model_name = "deepseek-chat"
+        client = OpenAI(
+            api_key=os.environ.get("DEEPSEEK_API_KEY"),
+            base_url="https://api.deepseek.com",
+        )
+        
+        for idx, (source_location, eq_position) in enumerate(test_data, start=1):
+            logger.info(
+                "Start extract constraints for source_location=%s eq_position=%s",
+                source_location,
+                eq_position,
+            )
+            
+            print(f"\n{'='*80}")
+            print(f"[{idx}/{len(test_data)}] Testing Branch Extractor: {source_location} eq_position={eq_position}")
+            print(f"{'='*80}")
+            
+            try:
+                # 1. 获取基础路径数据
+                print("\n=== Getting raw path data ===")
+                path_builder_agent = FunctionPathBuilderAgent(
+                    source_location=source_location,
+                    eq_position=eq_position,
+                    client=client,
+                    model_name=model_name,
+                )
+                
+                path_data = path_builder_agent.path_data
+                print(f"Got {len(path_data)} paths")
+                
+                if not path_data:
+                    msg = "No paths found, skip"
+                    print(msg)
+                    logger.warning(msg)
+                    continue
+                
+                # 2. 初始化PathBranchExtractorAgent
+                print("\n=== Initializing PathBranchExtractorAgent ===")
+                extractor = PathBranchExtractorAgent(
+                    path_data=path_data,
+                    client=client,
+                    model_name=model_name,
+                )
+                
+                # 3. 针对每条路径提取约束
+                for path in path_data:
+                    target_path_id = path.get("path_id")
+                    if target_path_id is None:
+                        continue
+                    
+                    print(f"\n=== Extracting constraints for path {target_path_id} ===")
+                    try:
+                        result = extractor.extract_path_constraints(target_path_id)
+                        print("\n=== Extraction Result ===")
+                        constraints = result.get('execution_trace', [])
+                        print(json.dumps(constraints, indent=2, ensure_ascii=False))
+                        logger.info(
+                            "Extraction result for path %s: %s",
+                            target_path_id,
+                            json.dumps(constraints, ensure_ascii=False),
+                        )
+                    except Exception as path_err:
+                        err_msg = f"Failed to extract constraints for path {target_path_id}: {path_err}"
+                        print(err_msg)
+                        logger.error(err_msg, exc_info=True)
+                    
+            except Exception as e:
+                error_msg = f"Error processing {source_location} path {target_path_id}: {str(e)}"
+                print(f"\n!!! {error_msg}")
+                logger.error(error_msg, exc_info=True)
+                import traceback
+                traceback.print_exc()
+                continue
+            
+    finally:
+        handler.close()
+        logger.removeHandler(handler)
+        
+        try:
+            caller = CommandCaller()
+            caller.send_query({"command": "exit"})
+        except Exception:
+            pass
+
 if __name__ == "__main__":
+    ensure_ctags_ready()
     # 测试FunctionPathBuilderAgent
-    # test_function_path_builder_agent()
+    # test_function_path_builder_agent(source_location_eq_position_list)
     # exit(0)
     
     # 测试新版FunctionPathBuilderAgent（analyze_paths 流程）
-    # test_new_function_path_builder_agent()
+    test_new_function_path_builder_agent(source_location_eq_position_list)
     
     # 测试FunctionPathCheckerAgent
-    test_function_path_checker_agent()
+    # test_function_path_checker_agent(checker_test_data)
+
+    # 测试PathZ3CheckerAgent
+    # test_path_z3_checker_agent(z3_checker_test_data)
+    
+    # 测试PathBranchExtractorAgent
+    # test_path_branch_extractor_agent(z3_checker_test_data)
     
     # main_logger = setup_logger(log_type="main")
     # main_logger.info(f"start")
@@ -356,4 +588,3 @@ if __name__ == "__main__":
     #     caller.send_query({"command": "exit"})
     # except Exception:
     #     pass
-        

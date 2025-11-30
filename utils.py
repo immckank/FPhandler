@@ -1,9 +1,178 @@
 import os
+import subprocess
+import shutil
 from config import *
 import logging
 import datetime
 import json
 import re
+
+# Tree-sitter imports
+try:
+    import tree_sitter
+    from tree_sitter import Language, Parser
+    TREE_SITTER_AVAILABLE = True
+except ImportError:
+    TREE_SITTER_AVAILABLE = False
+
+# Initialize tree-sitter parser for C
+_c_parser = None
+_c_language = None
+
+def _load_language_from_capsule(capsule):
+    """Wrap a PyCapsule returned by tree_sitter_* packages into a Language object."""
+    lang = Language.__new__(Language)
+    Language.__init__(lang, capsule)
+    return lang
+
+def _init_tree_sitter():
+    """Initialize tree-sitter parser for C language."""
+    global _c_parser, _c_language
+    if not TREE_SITTER_AVAILABLE:
+        return False
+    if _c_parser is not None:
+        return True
+
+    errors = []
+    candidate_language = None
+
+    # Preferred path: use tree_sitter_languages (ships compiled grammars)
+    try:
+        from tree_sitter_languages import get_language
+        lang = get_language("c")
+        if isinstance(lang, Language):
+            candidate_language = lang
+        else:
+            errors.append(f"tree_sitter_languages returned unexpected type {type(lang)}")
+    except ImportError:
+        errors.append("tree_sitter_languages not installed")
+    except Exception as exc:
+        errors.append(f"tree_sitter_languages failed: {exc}")
+
+    # Fallback: legacy tree_sitter_c PyCapsule bindings
+    if candidate_language is None:
+        try:
+            from tree_sitter_c import language as legacy_language
+            capsule = legacy_language()
+            if isinstance(capsule, Language):
+                candidate_language = capsule
+            else:
+                try:
+                    candidate_language = _load_language_from_capsule(capsule)
+                except Exception as wrap_exc:
+                    errors.append(f"tree_sitter_c returned unsupported object {type(capsule)}: {wrap_exc}")
+        except ImportError:
+            errors.append("tree_sitter_c not installed")
+        except Exception as exc:
+            errors.append(f"tree_sitter_c failed: {exc}")
+
+    if candidate_language is None:
+        logging.warning("Failed to initialize tree-sitter C language. Attempts: %s", "; ".join(errors))
+        return False
+
+    _c_language = candidate_language
+
+    try:
+        parser = Parser()
+        if hasattr(parser, "set_language"):
+            parser.set_language(_c_language)
+        else:
+            parser.language = _c_language
+        _c_parser = parser
+        return True
+    except TypeError:
+        # Extremely old bindings may still expect Parser(language)
+        try:
+            _c_parser = Parser(_c_language)
+            return True
+        except Exception as exc:
+            logging.warning(f"Failed to bind parser to tree-sitter language: {exc}")
+    except Exception as exc:
+        logging.warning(f"Failed to initialize tree-sitter parser: {exc}")
+
+    return False
+
+def parse_code_line(code_line):
+    """
+    解析单行C代码并返回AST根节点。
+    
+    Args:
+        code_line: C代码行字符串
+        
+    Returns:
+        tree_sitter.Node: AST根节点，如果解析失败返回None
+    """
+    if not _init_tree_sitter():
+        return None
+    if not code_line or not code_line.strip():
+        return None
+    
+    # 确保代码行以分号结尾（如果还没有）
+    code = code_line.strip()
+    if not code.endswith(';') and not code.endswith('}') and not code.endswith('{'):
+        # 检查是否已经是完整语句
+        if not any(code.endswith(c) for c in [';', '}', '{', ')']):
+            code = code + ';'
+    
+    try:
+        tree = _c_parser.parse(bytes(code, 'utf8'))
+        return tree.root_node
+    except Exception as e:
+        logging.debug(f"Failed to parse code line '{code_line}': {e}")
+        return None
+
+def _extract_identifier_from_node(node, code_bytes):
+    """
+    从AST节点中提取标识符名称。
+    处理各种情况：直接标识符、指针解引用、数组访问、结构体成员访问等。
+    
+    Args:
+        node: tree-sitter节点
+        code_bytes: 原始代码的字节串
+        
+    Returns:
+        str: 标识符名称，如果无法提取返回None
+    """
+    if node is None:
+        return None
+    
+    # 如果是标识符节点，直接返回
+    if node.type == 'identifier':
+        return code_bytes[node.start_byte:node.end_byte].decode('utf8')
+    
+    # 处理指针解引用 *ptr
+    if node.type == 'pointer_expression':
+        operand = node.child_by_field_name('operand')
+        if operand:
+            return _extract_identifier_from_node(operand, code_bytes)
+    
+    # 处理数组访问 arr[index]
+    if node.type == 'subscript_expression':
+        array = node.child_by_field_name('argument')
+        if array:
+            return _extract_identifier_from_node(array, code_bytes)
+    
+    # 处理结构体成员访问 obj.field 或 obj->field
+    if node.type == 'field_expression':
+        field = node.child_by_field_name('field')
+        if field:
+            return _extract_identifier_from_node(field, code_bytes)
+    
+    # 处理括号表达式 (expr)
+    if node.type == 'parenthesized_expression':
+        expression = node.child_by_field_name('expression')
+        if expression:
+            return _extract_identifier_from_node(expression, code_bytes)
+    
+    # 对于其他类型，尝试查找第一个标识符子节点
+    for child in node.children:
+        if child.type == 'identifier':
+            return code_bytes[child.start_byte:child.end_byte].decode('utf8')
+        result = _extract_identifier_from_node(child, code_bytes)
+        if result:
+            return result
+    
+    return None
 
 # 设置日志
 def setup_logger(log_type):
@@ -128,7 +297,7 @@ def find_code_line(source_location, strip_whitespace=True):
 # 提取赋值表达式的左值变量名
 def extract_lhs_variable(assignment):
     """
-    从赋值表达式中提取左值变量名。
+    从赋值表达式中提取左值变量名（使用tree-sitter）。
     
     处理情况：
     1. 简单赋值: x = 5 -> "x"
@@ -149,9 +318,43 @@ def extract_lhs_variable(assignment):
     if assignment.startswith('return '):
         return None
     
+    # 尝试使用tree-sitter解析
+    root = parse_code_line(assignment)
+    if root is None:
+        # 如果tree-sitter解析失败，回退到原始实现
+        return _extract_lhs_variable_fallback(assignment)
+    
+    code_bytes = bytes(assignment, 'utf8')
+    
+    # 查找赋值表达式节点
+    def find_assignment(node):
+        """递归查找赋值表达式节点"""
+        if node.type == 'assignment_expression':
+            return node
+        for child in node.children:
+            result = find_assignment(child)
+            if result:
+                return result
+        return None
+    
+    assign_node = find_assignment(root)
+    if assign_node is None:
+        return None
+    
+    # 获取左值节点
+    left_node = assign_node.child_by_field_name('left')
+    if left_node is None:
+        return None
+    
+    # 提取标识符
+    var_name = _extract_identifier_from_node(left_node, code_bytes)
+    return var_name
+
+def _extract_lhs_variable_fallback(assignment):
+    """回退实现：使用原始的正则表达式方法"""
+    assignment = assignment.strip()
+    
     # 查找赋值运算符（排除 ==, !=, <=, >= 等比较运算符）
-    # 需要找到真正的赋值 =，而不是比较运算符中的 =
-    # 策略：找到所有可能的赋值位置，选择最合适的一个
     assign_candidates = []
     paren_depth = 0
     i = 0
@@ -166,43 +369,31 @@ def extract_lhs_variable(assignment):
             paren_depth -= 1
             i += 1
         elif c == '=':
-            # 检查这是不是一个赋值运算符
             next_char = assignment[i + 1] if i + 1 < len(assignment) else ''
             prev_char = assignment[i - 1] if i > 0 else ''
             
-            # 排除 ==, !=, <=, >=, +=, -=, *=, /= 等
             if next_char not in ['='] and prev_char not in ['!', '<', '>', '=', '+', '-', '*', '/', '%', '&', '|', '^']:
-                # 记录候选位置和括号深度
                 assign_candidates.append((i, paren_depth))
             i += 1
         else:
             i += 1
     
-    # 没有找到赋值运算符
     if not assign_candidates:
         return None
     
-    # 选择最合适的赋值位置：
-    # 1. 优先选择括号深度为0的（最外层）
-    # 2. 如果没有深度为0的，选择深度最大的（最内层，通常在条件语句的括号内）
     depth_zero = [pos for pos, depth in assign_candidates if depth == 0]
     if depth_zero:
-        assign_pos = depth_zero[0]  # 第一个深度为0的
+        assign_pos = depth_zero[0]
     else:
-        # 选择深度最大的第一个
         max_depth = max(depth for _, depth in assign_candidates)
         assign_pos = next(pos for pos, depth in assign_candidates if depth == max_depth)
     
-    # 提取左值部分
     lhs = assignment[:assign_pos].strip()
     
-    # 移除外层的括号和if/while等关键字
-    # 例如: "if ((value" -> "value"
     while True:
         lhs = lhs.strip()
         changed = False
         
-        # 移除开头的关键字
         for keyword in ['if', 'while', 'for', 'switch']:
             if lhs.startswith(keyword + ' '):
                 lhs = lhs[len(keyword):].strip()
@@ -213,8 +404,6 @@ def extract_lhs_variable(assignment):
                 changed = True
                 break
         
-        # 移除开头的单个左括号（如果没有匹配的右括号）
-        # 这种情况出现在 "((value" 这样的左值中
         if lhs.startswith('('):
             lhs = lhs[1:].strip()
             changed = True
@@ -222,33 +411,20 @@ def extract_lhs_variable(assignment):
         if not changed:
             break
     
-    # 现在lhs应该是类似 "value" 或 "*ptr" 或 "arr[0]" 的形式
-    # 提取实际的变量名
     lhs = lhs.strip()
-    
-    # 移除类型声明（如果存在）
-    # 例如: "int *ptr" -> "ptr", "char* str" -> "str"
     parts = lhs.split()
     if len(parts) > 1:
-        # 最后一个部分通常是变量名
         lhs = parts[-1]
     
-    # 移除前缀的 * (指针解引用)
     lhs = lhs.lstrip('*')
-    
-    # 移除数组下标 [...]
     if '[' in lhs:
         lhs = lhs[:lhs.index('[')]
-    
-    # 移除成员访问符号 -> 和 .
     if '->' in lhs:
         lhs = lhs.split('->')[-1]
     if '.' in lhs:
         lhs = lhs.split('.')[-1]
     
     lhs = lhs.strip()
-    
-    # 检查是否为有效的变量名（只包含字母、数字、下划线）
     if lhs and re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', lhs):
         return lhs
     
@@ -257,7 +433,7 @@ def extract_lhs_variable(assignment):
 # 获取赋值等号在代码行中的位置
 def get_eq_position(assignment, preserve_whitespace=True):
     """
-    找到赋值表达式中等号的字符位置。
+    找到赋值表达式中等号的字符位置（使用tree-sitter）。
     
     处理情况：
     1. 简单赋值: x = 5 -> 返回等号的索引
@@ -283,9 +459,66 @@ def get_eq_position(assignment, preserve_whitespace=True):
     if assignment.lstrip().startswith('return '):
         return None
     
-    # 查找赋值运算符（排除 ==, !=, <=, >= 等比较运算符）
-    # 需要找到真正的赋值 =，而不是比较运算符中的 =
-    # 策略：找到所有可能的赋值位置，选择最合适的一个
+    # 尝试使用tree-sitter解析
+    root = parse_code_line(assignment)
+    if root is None:
+        # 如果tree-sitter解析失败，回退到原始实现
+        return _get_eq_position_fallback(assignment, preserve_whitespace, original_assignment)
+    
+    code_bytes = bytes(assignment, 'utf8')
+    
+    # 查找赋值表达式节点
+    def find_assignment(node):
+        """递归查找赋值表达式节点"""
+        if node.type == 'assignment_expression':
+            return node
+        for child in node.children:
+            result = find_assignment(child)
+            if result:
+                return result
+        return None
+    
+    assign_node = find_assignment(root)
+    if assign_node is None:
+        return None
+    
+    # 查找赋值运算符'='的位置
+    # 在assignment_expression中，运算符在left和right之间
+    # tree-sitter的assignment_expression结构: left operator right
+    # 查找'='字符的位置
+    left_node = assign_node.child_by_field_name('left')
+    right_node = assign_node.child_by_field_name('right')
+    
+    if left_node and right_node:
+        # '='在left和right之间
+        eq_position = left_node.end_byte
+        # 跳过空白字符，找到'='
+        while eq_position < right_node.start_byte:
+            char = code_bytes[eq_position:eq_position+1].decode('utf8')
+            if char == '=':
+                # 如果preserve_whitespace为False，需要调整位置
+                if not preserve_whitespace and assignment != original_assignment:
+                    # 计算前导空白字符数
+                    leading_whitespace = len(original_assignment) - len(original_assignment.lstrip())
+                    eq_position = eq_position - leading_whitespace
+                return eq_position
+            eq_position += 1
+    
+    # 如果没有找到，尝试在节点文本中查找'='
+    assign_text = code_bytes[assign_node.start_byte:assign_node.end_byte].decode('utf8')
+    eq_pos_in_text = assign_text.find('=')
+    if eq_pos_in_text != -1:
+        eq_position = assign_node.start_byte + eq_pos_in_text
+        # 如果preserve_whitespace为False，需要调整位置
+        if not preserve_whitespace and assignment != original_assignment:
+            leading_whitespace = len(original_assignment) - len(original_assignment.lstrip())
+            eq_position = eq_position - leading_whitespace
+        return eq_position
+    
+    return None
+
+def _get_eq_position_fallback(assignment, preserve_whitespace, original_assignment):
+    """回退实现：使用原始的正则表达式方法"""
     assign_candidates = []
     paren_depth = 0
     i = 0
@@ -300,30 +533,22 @@ def get_eq_position(assignment, preserve_whitespace=True):
             paren_depth -= 1
             i += 1
         elif c == '=':
-            # 检查这是不是一个赋值运算符
             next_char = assignment[i + 1] if i + 1 < len(assignment) else ''
             prev_char = assignment[i - 1] if i > 0 else ''
             
-            # 排除 ==, !=, <=, >=, +=, -=, *=, /= 等
             if next_char not in ['='] and prev_char not in ['!', '<', '>', '=', '+', '-', '*', '/', '%', '&', '|', '^']:
-                # 记录候选位置和括号深度
                 assign_candidates.append((i, paren_depth))
             i += 1
         else:
             i += 1
     
-    # 没有找到赋值运算符
     if not assign_candidates:
         return None
     
-    # 选择最合适的赋值位置：
-    # 1. 优先选择括号深度为0的（最外层）
-    # 2. 如果没有深度为0的，选择深度最大的（最内层，通常在条件语句的括号内）
     depth_zero = [pos for pos, depth in assign_candidates if depth == 0]
     if depth_zero:
-        assign_pos = depth_zero[0]  # 第一个深度为0的
+        assign_pos = depth_zero[0]
     else:
-        # 选择深度最大的第一个
         max_depth = max(depth for _, depth in assign_candidates)
         assign_pos = next(pos for pos, depth in assign_candidates if depth == max_depth)
     
@@ -420,9 +645,20 @@ def read_group(group_json):
     return res_list
    
 def get_function_name(code_line):
-    # 找到某个代码行中所有可能为函数调用的字段
-    # 返回所有可能的函数名称列表
+    """
+    找到某个代码行中所有可能为函数调用的字段（使用tree-sitter）。
+    返回所有可能的函数名称列表。
+    """
     code_line = code_line.strip()
+    
+    # 尝试使用tree-sitter解析
+    root = parse_code_line(code_line)
+    if root is None:
+        # 如果tree-sitter解析失败，回退到原始实现
+        return _get_function_name_fallback(code_line)
+    
+    code_bytes = bytes(code_line, 'utf8')
+    function_names = []
     
     # C语言关键字列表，这些不是函数
     c_keywords = {
@@ -432,21 +668,53 @@ def get_function_name(code_line):
         'struct', 'union', 'enum', 'typedef'
     }
     
-    # 查找所有函数调用 pattern: function_name(args)
-    # 使用正则表达式找到函数调用
-    func_pattern = r'([a-zA-Z_][a-zA-Z0-9_]*)\s*\('
+    # 查找所有call_expression节点
+    def find_call_expressions(node):
+        """递归查找所有函数调用表达式"""
+        calls = []
+        if node.type == 'call_expression':
+            calls.append(node)
+        for child in node.children:
+            calls.extend(find_call_expressions(child))
+        return calls
     
+    call_nodes = find_call_expressions(root)
+    
+    for call_node in call_nodes:
+        # 获取函数名节点
+        function_node = call_node.child_by_field_name('function')
+        if function_node is None:
+            continue
+        
+        # 提取函数名
+        if function_node.type == 'identifier':
+            func_name = code_bytes[function_node.start_byte:function_node.end_byte].decode('utf8')
+        else:
+            # 可能是更复杂的表达式，尝试提取标识符
+            func_name = _extract_identifier_from_node(function_node, code_bytes)
+        
+        if func_name and func_name not in c_keywords and func_name not in function_names:
+            function_names.append(func_name)
+    
+    return function_names
+
+def _get_function_name_fallback(code_line):
+    """回退实现：使用原始的正则表达式方法"""
+    c_keywords = {
+        'if', 'while', 'for', 'switch', 'do', 'return', 'break', 'continue',
+        'goto', 'case', 'default', 'sizeof', 'typeof', '__typeof__', 
+        'static', 'extern', 'auto', 'register', 'volatile', 'const',
+        'struct', 'union', 'enum', 'typedef'
+    }
+    
+    func_pattern = r'([a-zA-Z_][a-zA-Z0-9_]*)\s*\('
     matches = list(re.finditer(func_pattern, code_line))
     
     function_names = []
     for match in matches:
         func_name = match.group(1)
-        
-        # 跳过C语言关键字
         if func_name in c_keywords:
             continue
-        
-        # 添加到函数名称列表（去重）
         if func_name not in function_names:
             function_names.append(func_name)
     
@@ -454,7 +722,7 @@ def get_function_name(code_line):
 
 def get_arg_index(code_line, variable_name): 
     """
-    找到变量在函数调用中的参数位置。
+    找到变量在函数调用中的参数位置（使用tree-sitter）。
     
     Args:
         code_line: 代码行字符串
@@ -466,7 +734,15 @@ def get_arg_index(code_line, variable_name):
     """
     code_line = code_line.strip()
     
-    # C语言关键字列表，这些不是函数
+    # 尝试使用tree-sitter解析
+    root = parse_code_line(code_line)
+    if root is None:
+        # 如果tree-sitter解析失败，回退到原始实现
+        return _get_arg_index_fallback(code_line, variable_name)
+    
+    code_bytes = bytes(code_line, 'utf8')
+    
+    # C语言关键字列表
     c_keywords = {
         'if', 'while', 'for', 'switch', 'do', 'return', 'break', 'continue',
         'goto', 'case', 'default', 'sizeof', 'typeof', '__typeof__', 
@@ -474,10 +750,96 @@ def get_arg_index(code_line, variable_name):
         'struct', 'union', 'enum', 'typedef'
     }
     
-    # 查找所有函数调用 pattern: function_name(args)
-    # 使用正则表达式找到函数调用
-    func_pattern = r'([a-zA-Z_][a-zA-Z0-9_]*)\s*\('
+    normalized_variable = variable_name.lstrip('&*')
+    if not normalized_variable:
+        normalized_variable = variable_name
     
+    # 查找所有call_expression节点
+    def find_call_expressions(node):
+        """递归查找所有函数调用表达式"""
+        calls = []
+        if node.type == 'call_expression':
+            calls.append(node)
+        for child in node.children:
+            calls.extend(find_call_expressions(child))
+        return calls
+    
+    call_nodes = find_call_expressions(root)
+    
+    for call_node in call_nodes:
+        # 获取函数名
+        function_node = call_node.child_by_field_name('function')
+        if function_node is None:
+            continue
+        
+        if function_node.type == 'identifier':
+            func_name = code_bytes[function_node.start_byte:function_node.end_byte].decode('utf8')
+        else:
+            func_name = _extract_identifier_from_node(function_node, code_bytes)
+        
+        if not func_name or func_name in c_keywords:
+            continue
+        
+        # 获取参数列表
+        arguments_node = call_node.child_by_field_name('arguments')
+        if arguments_node is None:
+            continue
+        
+        # 遍历参数
+        arg_index = 0
+        for child in arguments_node.children:
+            if child.type == 'argument_list':
+                # 参数列表节点，遍历其子节点
+                for arg_child in child.children:
+                    if arg_child.type == ',':
+                        continue  # 跳过逗号
+                    # 检查参数中是否包含目标变量
+                    arg_text = code_bytes[arg_child.start_byte:arg_child.end_byte].decode('utf8')
+                    if _variable_in_expression(arg_child, code_bytes, variable_name, normalized_variable):
+                        return (func_name, arg_index)
+                    arg_index += 1
+            elif child.type != ',':
+                # 直接是参数节点
+                if _variable_in_expression(child, code_bytes, variable_name, normalized_variable):
+                    return (func_name, arg_index)
+                arg_index += 1
+    
+    return (None, None)
+
+def _variable_in_expression(node, code_bytes, variable_name, normalized_variable):
+    """检查表达式中是否包含目标变量"""
+    if node is None:
+        return False
+    
+    # 如果是标识符节点，直接比较
+    if node.type == 'identifier':
+        ident = code_bytes[node.start_byte:node.end_byte].decode('utf8')
+        return ident == variable_name or ident == normalized_variable
+    
+    # 递归检查子节点
+    for child in node.children:
+        if _variable_in_expression(child, code_bytes, variable_name, normalized_variable):
+            return True
+    
+    # 检查节点文本中是否包含变量名
+    node_text = code_bytes[node.start_byte:node.end_byte].decode('utf8')
+    if re.search(r'\b' + re.escape(variable_name) + r'\b', node_text):
+        return True
+    if re.search(r'\b' + re.escape(normalized_variable) + r'\b', node_text):
+        return True
+    
+    return False
+
+def _get_arg_index_fallback(code_line, variable_name):
+    """回退实现：使用原始的正则表达式方法"""
+    c_keywords = {
+        'if', 'while', 'for', 'switch', 'do', 'return', 'break', 'continue',
+        'goto', 'case', 'default', 'sizeof', 'typeof', '__typeof__', 
+        'static', 'extern', 'auto', 'register', 'volatile', 'const',
+        'struct', 'union', 'enum', 'typedef'
+    }
+    
+    func_pattern = r'([a-zA-Z_][a-zA-Z0-9_]*)\s*\('
     matches = list(re.finditer(func_pattern, code_line))
     
     normalized_variable = variable_name.lstrip('&*')
@@ -490,14 +852,10 @@ def get_arg_index(code_line, variable_name):
     
     for match in matches:
         func_name = match.group(1)
-        
-        # 跳过C语言关键字
         if func_name in c_keywords:
             continue
             
-        start_paren = match.end() - 1  # '(' 的位置
-        
-        # 找到匹配的右括号
+        start_paren = match.end() - 1
         paren_count = 1
         i = start_paren + 1
         end_paren = -1
@@ -515,13 +873,10 @@ def get_arg_index(code_line, variable_name):
         if end_paren == -1:
             continue
         
-        # 提取参数部分
         args_str = code_line[start_paren + 1:end_paren].strip()
-        
         if not args_str:
             continue
         
-        # 解析参数列表（考虑嵌套的括号和逗号）
         args = []
         current_arg = []
         depth = 0
@@ -537,27 +892,20 @@ def get_arg_index(code_line, variable_name):
                     depth -= 1
                 current_arg.append(char)
         
-        # 添加最后一个参数
         if current_arg:
             args.append(''.join(current_arg).strip())
         
-        # 检查变量名是否在参数中
         for idx, arg in enumerate(args):
-            # 检查变量名是否在参数中（可能是 &var, *var, var, var[i] 等形式）
-            # 使用单词边界匹配，确保是完整的变量名
             if re.search(r'\b' + re.escape(variable_name) + r'\b', arg):
                 return (func_name, idx)
-            
             if loose_pattern.search(arg):
                 return (func_name, idx)
     
     return (None, None)
 
 def get_formal_arg_names(code_line):
-    # 给定一个函数的声明或定义行 包含函数名称 找到所有形参的参数名称
-    # TIFFSetField(TIFF* tif, uint32 tag, ...)
     """
-    从C/C++函数声明或定义中提取形参名称
+    从C/C++函数声明或定义中提取形参名称（使用tree-sitter）。
     
     Args:
         code_line: 函数声明或定义的代码行
@@ -569,13 +917,117 @@ def get_formal_arg_names(code_line):
             'has_varargs': 是否存在可变参数（...）
         如果解析失败返回 {'args': [], 'has_varargs': False}
     """
-    # 查找第一个左括号
+    code_line = code_line.strip()
+    
+    # 尝试使用tree-sitter解析
+    root = parse_code_line(code_line)
+    if root is None:
+        # 如果tree-sitter解析失败，回退到原始实现
+        return _get_formal_arg_names_fallback(code_line)
+    
+    code_bytes = bytes(code_line, 'utf8')
+    arg_names = []
+    has_varargs = False
+    
+    # 查找function_definition或declaration节点
+    def find_function_declaration(node):
+        """查找函数定义或声明节点"""
+        if node.type in ['function_definition', 'declaration']:
+            return node
+        for child in node.children:
+            result = find_function_declaration(child)
+            if result:
+                return result
+        return None
+    
+    func_node = find_function_declaration(root)
+    if func_node is None:
+        return {'args': [], 'has_varargs': False}
+    
+    # 获取参数列表
+    # 对于function_definition，参数在declarator中
+    # 对于declaration，参数也在declarator中
+    declarator = func_node.child_by_field_name('declarator')
+    if declarator is None:
+        # 尝试直接查找parameter_list
+        param_list = func_node.child_by_field_name('parameters')
+        if param_list is None:
+            return {'args': [], 'has_varargs': False}
+    else:
+        # 从declarator中查找parameter_list
+        param_list = declarator.child_by_field_name('parameters')
+        if param_list is None:
+            return {'args': [], 'has_varargs': False}
+    
+    # 遍历参数列表
+    for child in param_list.children:
+        if child.type == 'parameter_declaration':
+            # 提取参数名
+            declarator_node = child.child_by_field_name('declarator')
+            if declarator_node:
+                # 从declarator中提取标识符
+                param_name = _extract_identifier_from_declarator(declarator_node, code_bytes)
+                if param_name:
+                    arg_names.append(param_name)
+            else:
+                # 可能没有declarator，尝试从整个参数声明中提取
+                param_name = _extract_identifier_from_node(child, code_bytes)
+                if param_name:
+                    arg_names.append(param_name)
+        elif child.type == 'variadic_parameter' or (child.type == '...'):
+            has_varargs = True
+        elif child.type == 'identifier':
+            # 直接是标识符参数
+            param_name = code_bytes[child.start_byte:child.end_byte].decode('utf8')
+            if param_name:
+                arg_names.append(param_name)
+    
+    return {'args': arg_names, 'has_varargs': has_varargs}
+
+def _extract_identifier_from_declarator(declarator_node, code_bytes):
+    """从declarator节点中提取标识符名称"""
+    if declarator_node is None:
+        return None
+    
+    # 查找identifier子节点
+    if declarator_node.type == 'identifier':
+        return code_bytes[declarator_node.start_byte:declarator_node.end_byte].decode('utf8')
+    
+    # 对于pointer_declarator，查找declarator字段
+    if declarator_node.type == 'pointer_declarator':
+        inner_declarator = declarator_node.child_by_field_name('declarator')
+        if inner_declarator:
+            return _extract_identifier_from_declarator(inner_declarator, code_bytes)
+    
+    # 对于function_declarator，查找declarator字段
+    if declarator_node.type == 'function_declarator':
+        inner_declarator = declarator_node.child_by_field_name('declarator')
+        if inner_declarator:
+            return _extract_identifier_from_declarator(inner_declarator, code_bytes)
+    
+    # 对于array_declarator，查找declarator字段
+    if declarator_node.type == 'array_declarator':
+        inner_declarator = declarator_node.child_by_field_name('declarator')
+        if inner_declarator:
+            return _extract_identifier_from_declarator(inner_declarator, code_bytes)
+    
+    # 递归查找identifier子节点
+    for child in declarator_node.children:
+        if child.type == 'identifier':
+            return code_bytes[child.start_byte:child.end_byte].decode('utf8')
+        result = _extract_identifier_from_declarator(child, code_bytes)
+        if result:
+            return result
+    
+    return None
+
+def _get_formal_arg_names_fallback(code_line):
+    """回退实现：使用原始的正则表达式方法"""
     has_varargs = False
     start_paren = code_line.find('(')
     if start_paren == -1:
         return {'args': [], 'has_varargs': False}
     
-    # 查找匹配的右括号
     depth = 0
     end_paren = -1
     for i in range(start_paren, len(code_line)):
@@ -590,13 +1042,10 @@ def get_formal_arg_names(code_line):
     if end_paren == -1:
         return {'args': [], 'has_varargs': False}
     
-    # 提取参数部分
     args_str = code_line[start_paren + 1:end_paren].strip()
-    
     if not args_str or args_str == 'void':
         return {'args': [], 'has_varargs': False}
     
-    # 解析参数列表（考虑嵌套的括号和逗号）
     params = []
     current_param = []
     depth = 0
@@ -612,56 +1061,38 @@ def get_formal_arg_names(code_line):
                 depth -= 1
             current_param.append(char)
     
-    # 添加最后一个参数
     if current_param:
         param_str = ''.join(current_param).strip()
         if param_str:
             params.append(param_str)
     
-    # 从每个参数中提取变量名
     arg_names = []
     for param in params:
-        # 跳过可变参数
         if param.strip() == '...':
             has_varargs = True
             continue
-            
-        # 移除默认值 (例如: int x = 5 -> int x)
+        
         if '=' in param:
             param = param.split('=')[0].strip()
         
-        # 处理函数指针: int (*callback)(void) -> callback
-        # 查找 (*name) 模式
         func_ptr_match = re.search(r'\(\s*\*\s*(\w+)\s*\)', param)
         if func_ptr_match:
             arg_names.append(func_ptr_match.group(1))
             continue
         
-        # 移除数组括号后的内容 (例如: char name[10] -> char name)
         param = re.sub(r'\[.*?\]', '', param)
-        
-        # 移除多余的空格和符号，准备提取变量名
-        # 去掉指针/引用符号周围的空格: char * name -> char *name
         param = param.strip()
-        
-        # 从右向左找到最后一个标识符
-        # 处理各种情况: int x, char *y, const int &z, int **p 等
-        # 使用正则表达式找到最后一个合法的C标识符
-        
-        # 移除尾部的指针/引用符号和空格
         param = param.rstrip('*& \t')
         
-        # 找到最后一个单词（变量名）
         tokens = re.findall(r'\w+', param)
         if tokens:
-            # 最后一个token就是变量名
             arg_names.append(tokens[-1])
     
     return {'args': arg_names, 'has_varargs': has_varargs}
 
 def get_actual_arg_names(code_line, func_name=None, return_call_index=False):
     """
-    从C/C++函数调用中提取实参表达式列表
+    从C/C++函数调用中提取实参表达式列表（使用tree-sitter）。
     
     Args:
         code_line: 包含函数调用的代码行
@@ -676,6 +1107,101 @@ def get_actual_arg_names(code_line, func_name=None, return_call_index=False):
     if not code_line:
         return ([], -1) if return_call_index else []
 
+    # 尝试使用tree-sitter解析
+    root = parse_code_line(code_line)
+    if root is None:
+        # 如果tree-sitter解析失败，回退到原始实现
+        return _get_actual_arg_names_fallback(code_line, func_name, return_call_index)
+    
+    code_bytes = bytes(code_line, 'utf8')
+    
+    # 查找call_expression节点
+    def find_call_expressions(node):
+        """递归查找所有函数调用表达式"""
+        calls = []
+        if node.type == 'call_expression':
+            calls.append(node)
+        for child in node.children:
+            calls.extend(find_call_expressions(child))
+        return calls
+    
+    call_nodes = find_call_expressions(root)
+    
+    # 如果指定了函数名，优先匹配
+    target_call = None
+    func_start_index = -1
+    
+    for call_node in call_nodes:
+        function_node = call_node.child_by_field_name('function')
+        if function_node is None:
+            continue
+        
+        if function_node.type == 'identifier':
+            current_func_name = code_bytes[function_node.start_byte:function_node.end_byte].decode('utf8')
+        else:
+            current_func_name = _extract_identifier_from_node(function_node, code_bytes)
+        
+        if func_name:
+            if current_func_name == func_name:
+                target_call = call_node
+                func_start_index = function_node.start_byte
+                break
+        else:
+            # 没有指定函数名，选择第一个非关键字的调用
+            keywords = {
+                'if', 'while', 'for', 'switch', 'return', 'sizeof', 'catch', 'new', 'delete',
+                'else', 'case'
+            }
+            if current_func_name and current_func_name not in keywords:
+                target_call = call_node
+                func_start_index = function_node.start_byte
+                break
+    
+    # 如果没有找到匹配的调用，使用第一个调用
+    if target_call is None and call_nodes:
+        target_call = call_nodes[0]
+        function_node = target_call.child_by_field_name('function')
+        if function_node:
+            func_start_index = function_node.start_byte
+    
+    if target_call is None:
+        return ([], func_start_index) if return_call_index else []
+    
+    # 提取参数列表
+    arguments_node = target_call.child_by_field_name('arguments')
+    if arguments_node is None:
+        return ([], func_start_index) if return_call_index else []
+    
+    actual_args = []
+    
+    # 在tree-sitter中，arguments字段通常包含括号和参数
+    # 我们需要找到参数列表部分（在括号内）
+    # 遍历arguments节点的子节点，跳过'('和')'
+    for child in arguments_node.children:
+        if child.type == ',':
+            continue  # 跳过逗号
+        elif child.type in ['(', ')']:
+            continue  # 跳过括号
+        elif child.type == 'argument_list':
+            # 如果存在argument_list节点，遍历其子节点
+            for arg_child in child.children:
+                if arg_child.type == ',':
+                    continue
+                arg_text = code_bytes[arg_child.start_byte:arg_child.end_byte].decode('utf8').strip()
+                if arg_text:
+                    actual_args.append(arg_text)
+        else:
+            # 直接是参数表达式节点
+            arg_text = code_bytes[child.start_byte:child.end_byte].decode('utf8').strip()
+            if arg_text and arg_text not in ['(', ')']:
+                actual_args.append(arg_text)
+    
+    if return_call_index:
+        return actual_args, func_start_index
+    return actual_args
+
+def _get_actual_arg_names_fallback(code_line, func_name, return_call_index):
+    """回退实现：使用原始的正则表达式方法"""
     func_start_index = -1
     start_paren = -1
 
@@ -700,13 +1226,11 @@ def get_actual_arg_names(code_line, func_name=None, return_call_index=False):
             break
 
     if start_paren == -1:
-        # 回退到原始逻辑查找第一个左括号
         start_paren = code_line.find('(')
 
     if start_paren == -1:
         return ([], func_start_index) if return_call_index else []
 
-    # 查找匹配的右括号（处理嵌套括号）
     depth = 0
     end_paren = -1
     for i in range(start_paren, len(code_line)):
@@ -721,22 +1245,18 @@ def get_actual_arg_names(code_line, func_name=None, return_call_index=False):
     if end_paren == -1:
         return ([], func_start_index) if return_call_index else []
 
-    # 提取参数部分
     args_str = code_line[start_paren + 1:end_paren].strip()
-
     if not args_str:
         return ([], func_start_index) if return_call_index else []
 
-    # 解析参数列表（考虑嵌套的括号、方括号和逗号）
     actual_args = []
     current_arg = []
-    depth = 0  # 括号和方括号的嵌套深度
-    in_string = False  # 是否在字符串字面量中
-    in_char = False    # 是否在字符字面量中
-    escape = False     # 是否是转义字符
+    depth = 0
+    in_string = False
+    in_char = False
+    escape = False
 
     for char in args_str:
-        # 处理转义字符
         if escape:
             current_arg.append(char)
             escape = False
@@ -757,12 +1277,10 @@ def get_actual_arg_names(code_line, func_name=None, return_call_index=False):
             current_arg.append(char)
             continue
 
-        # 如果在字符串或字符字面量中，直接添加
         if in_string or in_char:
             current_arg.append(char)
             continue
 
-        # 处理括号和方括号的嵌套
         if char in '([{':
             depth += 1
             current_arg.append(char)
@@ -770,7 +1288,6 @@ def get_actual_arg_names(code_line, func_name=None, return_call_index=False):
             depth -= 1
             current_arg.append(char)
         elif char == ',' and depth == 0:
-            # 遇到顶层逗号，分割参数
             arg_text = ''.join(current_arg).strip()
             if arg_text:
                 actual_args.append(arg_text)
@@ -778,7 +1295,6 @@ def get_actual_arg_names(code_line, func_name=None, return_call_index=False):
         else:
             current_arg.append(char)
 
-    # 添加最后一个参数
     if current_arg:
         arg_text = ''.join(current_arg).strip()
         if arg_text:
@@ -787,6 +1303,70 @@ def get_actual_arg_names(code_line, func_name=None, return_call_index=False):
     if return_call_index:
         return actual_args, func_start_index
     return actual_args
+
+
+def generate_ctags_index(force=False):
+    """
+    Create (or refresh) a ctags index for all C/C++ sources in the PUT project.
+
+    Args:
+        force (bool): When True, rebuilds the tags file even if it already exists.
+
+    Returns:
+        dict: {'status': 'generated'|'skipped', 'path': <tags_path>} on success,
+              or {'error': <message>} when the operation fails.
+    """
+    project_root = os.path.join(PUT_ROOT_PATH, PROJECT_NAME)
+    tags_path = os.path.join(project_root, "tags")
+
+    if not force and os.path.exists(tags_path):
+        return {"status": "skipped", "path": tags_path}
+
+    ctags_bin = shutil.which("ctags")
+    if not ctags_bin:
+        message = "ctags executable not found in PATH. Please install universal ctags."
+        logging.warning(message)
+        return {"error": message}
+
+    if not os.path.isdir(project_root):
+        message = f"Project root does not exist: {project_root}"
+        logging.error(message)
+        return {"error": message}
+
+    cmd = [
+        ctags_bin,
+        "-R",
+        "--fields=+n",
+        "--languages=C,C++",
+        "-f",
+        "tags",
+        ".",
+    ]
+
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception as exc:
+        message = f"Failed to execute ctags: {exc}"
+        logging.error(message)
+        return {"error": message}
+
+    if result.returncode != 0:
+        message = (
+            f"ctags command failed (exit {result.returncode}). "
+            f"stdout: {result.stdout or '<empty>'} "
+            f"stderr: {result.stderr or '<empty>'}"
+        )
+        logging.error(message)
+        return {"error": message}
+
+    logging.info(f"Generated ctags index at {tags_path}")
+    return {"status": "generated", "path": tags_path}
 
 if __name__ == "__main__":
     json_str = '''[[{'var_info': {'var_name': 'data', 'var_type': 'local_var', 'arg_index': 6, 'gep_info': {'gep_type': 'not_struct', 'baseobj_name': None, 'member_name': None, 'offset': 0, 'baseobj_type': 'ptr'}}, 'start_location': 'tif_dirread.c:2323', 'function_name': 'TIFFReadDirEntryFloatArray', 'return_location': 'tif_dirread.c:2525', 'classification': 'Transferred with assignment', 'source_location': 'tif_dirread.c:2524', 'reason': "Memory allocated to 'data' is assigned to '*value' output parameter at line 2524, transferring ownership to the caller.", 'arg': 'value'}], [{'var_info': {'var_name': 'data', 'var_type': 'local_var', 'arg_index': 6, 'gep_info': {'gep_type': 'not_struct', 'baseobj_name': None, 'member_name': None, 'offset': 0, 'baseobj_type': 'ptr'}}, 'start_location': 'tif_dirread.c:2323', 'function_name': 'TIFFReadDirEntryFloatArray', 'return_location': 'tif_dirread.c:2525', 'classification': 'Transferred with assignment', 'source_location': 'tif_dirread.c:2524', 'reason': "Memory allocated to 'data' is assigned to '*value' output parameter at line 2524, transferring ownership to the caller.", 'arg': 'value'}], [{'var_info': {'var_name': 'data', 'var_type': 'local_var', 'arg_index': 6, 'gep_info': {'gep_type': 'not_struct', 'baseobj_name': None, 'member_name': None, 'offset': 0, 'baseobj_type': 'ptr'}}, 'start_location': 'tif_dirread.c:2323', 'function_name': 'TIFFReadDirEntryFloatArray', 'return_location': 'tif_dirread.c:2525', 'classification': 'Transferred with assignment', 'source_location': 'tif_dirread.c:2524', 'reason': "Memory allocated to 'data' is assigned to '*value' output parameter at line 2524, transferring ownership to the caller.", 'arg': 'value'}], [{'var_info': {'var_name': 'data', 'var_type': 'local_var', 'arg_index': 6, 'gep_info': {'gep_type': 'not_struct', 'baseobj_name': None, 'member_name': None, 'offset': 0, 'baseobj_type': 'ptr'}}, 'start_location': 'tif_dirread.c:2323', 'function_name': 'TIFFReadDirEntryFloatArray', 'return_location': 'tif_dirread.c:2525', 'classification': 'Transferred with assignment', 'source_location': 'tif_dirread.c:2524', 'reason': "Memory allocated to 'data' is assigned to '*value' output parameter at line 2524, transferring ownership to the caller.", 'arg': 'value'}], [{'var_info': {'var_name': 'data', 'var_type': 'local_var', 'arg_index': 6, 'gep_info': {'gep_type': 'not_struct', 'baseobj_name': None, 'member_name': None, 'offset': 0, 'baseobj_type': 'ptr'}}, 'start_location': 'tif_dirread.c:2323', 'function_name': 'TIFFReadDirEntryFloatArray', 'return_location': 'tif_dirread.c:2525', 'classification': 'Transferred with assignment', 'source_location': 'tif_dirread.c:2524', 'reason': "Memory allocated to 'data' is assigned to '*value' output parameter at line 2524, transferring ownership to the caller.", 'arg': 'value'}], [{'var_info': {'var_name': 'data', 'var_type': 'local_var', 'arg_index': 6, 'gep_info': {'gep_type': 'not_struct', 'baseobj_name': None, 'member_name': None, 'offset': 0, 'baseobj_type': 'ptr'}}, 'start_location': 'tif_dirread.c:2323', 'function_name': 'TIFFReadDirEntryFloatArray', 'return_location': 'tif_dirread.c:2525', 'classification': 'Transferred with assignment', 'source_location': 'tif_dirread.c:2524', 'reason': "Memory allocated to 'data' is assigned to '*value' output parameter at line 2524, transferring ownership to the caller.", 'arg': 'value'}], [{'var_info': {'var_name': 'data', 'var_type': 'local_var', 'arg_index': 6, 'gep_info': {'gep_type': 'not_struct', 'baseobj_name': None, 'member_name': None, 'offset': 0, 'baseobj_type': 'ptr'}}, 'start_location': 'tif_dirread.c:2323', 'function_name': 'TIFFReadDirEntryFloatArray', 'return_location': 'tif_dirread.c:2525', 'classification': 'Transferred with assignment', 'source_location': 'tif_dirread.c:2524', 'reason': "Memory allocated to 'data' is assigned to '*value' output parameter at line 2524, transferring ownership to the caller.", 'arg': 'value'}], [{'var_info': {'var_name': 'data', 'var_type': 'local_var', 'arg_index': 6, 'gep_info': {'gep_type': 'not_struct', 'baseobj_name': None, 'member_name': None, 'offset': 0, 'baseobj_type': 'ptr'}}, 'start_location': 'tif_dirread.c:2323', 'function_name': 'TIFFReadDirEntryFloatArray', 'return_location': 'tif_dirread.c:2525', 'classification': 'Transferred with assignment', 'source_location': 'tif_dirread.c:2524', 'reason': "Memory allocated to 'data' is assigned to '*value' output parameter at line 2524, transferring ownership to the caller.", 'arg': 'value'}], [{'var_info': {'var_name': 'data', 'var_type': 'local_var', 'arg_index': 6, 'gep_info': {'gep_type': 'not_struct', 'baseobj_name': None, 'member_name': None, 'offset': 0, 'baseobj_type': 'ptr'}}, 'start_location': 'tif_dirread.c:2323', 'function_name': 'TIFFReadDirEntryFloatArray', 'return_location': 'tif_dirread.c:2525', 'classification': 'Transferred with assignment', 'source_location': 'tif_dirread.c:2524', 'reason': "Memory allocated to 'data' is assigned to '*value' output parameter at line 2524, transferring ownership to the caller.", 'arg': 'value'}], [{'var_info': {'var_name': 'data', 'var_type': 'local_var', 'arg_index': 6, 'gep_info': {'gep_type': 'not_struct', 'baseobj_name': None, 'member_name': None, 'offset': 0, 'baseobj_type': 'ptr'}}, 'start_location': 'tif_dirread.c:2323', 'function_name': 'TIFFReadDirEntryFloatArray', 'return_location': 'tif_dirread.c:2525', 'classification': 'Transferred with assignment', 'source_location': 'tif_dirread.c:2524', 'reason': "Memory allocated to 'data' is assigned to '*value' output parameter at line 2524, transferring ownership to the caller.", 'arg': 'value'}], [{'var_info': {'var_name': 'data', 'var_type': 'local_var', 'arg_index': 6, 'gep_info': {'gep_type': 'not_struct', 'baseobj_name': None, 'member_name': None, 'offset': 0, 'baseobj_type': 'ptr'}}, 'start_location': 'tif_dirread.c:2323', 'function_name': 'TIFFReadDirEntryFloatArray', 'return_location': 'tif_dirread.c:2327', 'classification': 'NullPointer', 'source_location': None, 'reason': "_TIFFmalloc fails and returns NULL, so 'data' is a null pointer at the return point."}]]'''

@@ -78,6 +78,24 @@ find_function_body_desc_free = {
     }
 }
 
+read_ctag_symbol_desc_free = {
+    "type": "function",
+    "function": {
+        "name": "read_ctag_symbol",
+        "description": "Look up symbol locations using the pre-generated ctags index.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "symbol_name": {
+                    "type": "string",
+                    "description": "Identifier to search for (function, variable, macro, etc.)."
+                }
+            },
+            "required": ["symbol_name"]
+        }
+    }
+}
+
 find_callers_desc_free = {
     "type": "function",
     "function": {
@@ -724,6 +742,29 @@ check_path_desc_function_path_checker = {
                 }
             },
             "required": ["path_id", "feasibility", "reason"]
+        }
+    }
+}
+
+# Tool description for get_local_var_type function
+get_local_var_type_desc = {
+    "type": "function",
+    "function": {
+        "name": "get_local_var_type",
+        "description": "Retrieves the type and definition information for a local variable within a specific function. This tool parses the function's source code using tree-sitter to locate the variable declaration and extract its type information, location, and the actual code line where it is declared.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "function_name": {
+                    "type": "string",
+                    "description": "The name of the function containing the local variable. Must be a non-empty string and match an existing function in the codebase."
+                },
+                "var_name": {
+                    "type": "string",
+                    "description": "The name of the local variable to look up. Must be a non-empty string and must be declared within the specified function."
+                }
+            },
+            "required": ["function_name", "var_name"]
         }
     }
 }

@@ -154,6 +154,7 @@ class FunctionPathBuilderAgent:
             "find_current_function": self.find_current_function_Tool,
             "find_function_body": self.find_function_body_Tool,
             "find_callers": self.find_callers_Tool,
+            "read_ctag_symbol": self.read_ctag_symbol_Tool,
         }
 
     def init_function_raw_path(self, source_location: str, eq_position: int) -> bool:
@@ -193,8 +194,8 @@ class FunctionPathBuilderAgent:
 
         self.path_number = self._coerce_int(raw_path_json.get("path_number"))
 
-        for idx, path_nodes in enumerate(paths, start=1):
-            normalized_nodes = self._normalize_nodes(path_nodes)
+        for idx, path in enumerate(paths, start=1):
+            normalized_nodes = self._normalize_nodes(path["path"])
             path_entry = {
                 "path_id": f"{idx}",
                 "path_classification": None,  # TODO: 后续实现内存状态分类
@@ -451,6 +452,10 @@ class FunctionPathBuilderAgent:
     
     def find_callers_Tool(self, function_name):
         return analysis_operators.find_callers(function_name)
+    
+    def read_ctag_symbol_Tool(self, symbol_name):
+        """Look up symbol occurrences via the ctags index."""
+        return analysis_operators.read_ctag_symbol(symbol_name)
 
     def complete_path_Tool(self, path_id: str, classification: str, reason: str,
                           key_operation_source_location: Optional[str] = None,
@@ -664,7 +669,7 @@ class FunctionPathBuilderAgent:
 
         prompt_parts.extend([
             "",
-            "Your task is to classify each path into one of the following memory states:",
+            " Your task is to classify each path into one of the following memory states:",
             "- HandledByCallee: memory will be handled by a callee function.",
             "- Deallocated: memory is explicitly freed (e.g., free or custom free).",
             "- ReturnedAsReturnValue: memory is returned via the function's return value.",
@@ -672,6 +677,7 @@ class FunctionPathBuilderAgent:
             "- Leak: memory is leaked at this return location.",
             "- NullPointer: the pointer remains NULL due to allocation failures.",
             "- Unreachable: the path is infeasible due to control-flow constraints."
+            "For each path, you must first check if the path is feasible. If the path is not feasible, you should classify it as Unreachable directly.",
         ])
 
         return "\n".join(prompt_parts)
@@ -766,6 +772,7 @@ class FunctionPathBuilderAgent:
             find_current_function_desc_free,
             find_function_body_desc_free,
             find_callers_desc_free,
+            read_ctag_symbol_desc_free,
             complete_path_desc_function_path_builder
         )
         return [
@@ -774,6 +781,7 @@ class FunctionPathBuilderAgent:
             find_current_function_desc_free,
             find_function_body_desc_free,
             find_callers_desc_free,
+            read_ctag_symbol_desc_free,
             complete_path_desc_function_path_builder
         ]
     
@@ -810,6 +818,8 @@ class FunctionPathBuilderAgent:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt}
         ]
+        
+        logger
         
         allowed_tools = self._get_allowed_tools()
         response = self.send_message(messages, allowed_tools)
@@ -965,11 +975,41 @@ class FunctionPathCheckerAgent:
         构建英文提示，描述所有路径的约束条件，强调路径可达性和约束冲突分析
         """
         path_count = len(self.path_data)
+        loop_pattern = re.compile(r"^\s*(for|while)\s*\(")
+
+        def format_branch_condition(expression: str, value: Any) -> str:
+            """
+            将条件转换为 assume 形式，value 为真表示直接假设表达式成立，
+            否则假设其否定成立。无法判断时默认 assume(expr)。
+            """
+            expr_text = expression or "<unknown condition>"
+            normalized = None
+            if isinstance(value, bool):
+                normalized = value
+            elif isinstance(value, str):
+                lowered = value.strip().lower()
+                if lowered in {"true", "1", "yes"}:
+                    normalized = True
+                elif lowered in {"false", "0", "no"}:
+                    normalized = False
+            if normalized is True:
+                if loop_pattern.match(expr_text):
+                    return f"assume(loop iteration continues: {expr_text})"
+                return f"assume({expr_text})"
+            if normalized is False:
+                if loop_pattern.match(expr_text):
+                    return f"assume(after loop: {expr_text})"
+                return f"assume(¬({expr_text}))"
+            if loop_pattern.match(expr_text):
+                return f"assume(loop branch: {expr_text})"
+            return f"assume({expr_text})"
         
         prompt_parts = [
             f"You are analyzing the feasibility of {path_count} execution paths from a static analysis.",
             "Each path contains a sequence of branch conditions that must be satisfied for the path to be executable.",
             "Your task is to check whether each path is feasible by analyzing the branch constraints.",
+            "The branch conditions for each path are canonicalized constraints derived after clustering many concrete executions; they represent the shared assumptions for that path cluster.",
+            "Consider a path feasible if there exists at least one real execution that can simultaneously satisfy all listed constraints.",
             ""
         ]
         
@@ -1021,22 +1061,21 @@ class FunctionPathCheckerAgent:
             
             # 构建路径描述
             prompt_parts.append(f"Path {idx} (path_id: {path_id}):")
-            prompt_parts.append(f"  Classification: {path_classification}")
+            # prompt_parts.append(f"  Classification: {path_classification}")
             
             if start_node:
                 prompt_parts.append(f"  Start: {start_node}")
             
-            if end_node:
-                prompt_parts.append(f"  End: {end_node}")
-            
             # 列出所有分支条件
             if branch_conditions:
-                prompt_parts.append(f"  Branch constraints ({len(branch_conditions)} total):")
                 for i, cond in enumerate(branch_conditions, start=1):
-                    cond_str = f"{cond['expression']} == {cond['value']}"
-                    prompt_parts.append(f"    {i}. {cond['location']}: {cond_str}")
+                    cond_str = format_branch_condition(cond["expression"], cond["value"])
+                    prompt_parts.append(f"  Branch {i}: {cond['location']}: {cond_str}")
             else:
                 prompt_parts.append("  No branch constraints (direct path)")
+
+            if end_node:
+                prompt_parts.append(f"  End: {end_node}")
             
             prompt_parts.append("")
         

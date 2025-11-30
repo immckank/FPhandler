@@ -1,2 +1,4 @@
 google-genai
 openai
+tree-sitter
+tree-sitter-c
