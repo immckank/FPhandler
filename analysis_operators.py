@@ -1762,7 +1762,6 @@ def _build_cfg_from_body(body_node, code_bytes: bytes, function_start_line: int,
                 "type": "sequential",
                 "condition": None
             })
-            print(f"DEBUG: Connected return node {exit_n['node_id']} to exit node {exit_node_id}")
             
     # Connect last block to exit node if it's not a return/jump (fallthrough)
     if basic_blocks.get("blocks"):
@@ -1802,7 +1801,6 @@ def _build_cfg_from_body(body_node, code_bytes: bytes, function_start_line: int,
                 "type": "sequential",
                 "condition": None
             })
-            print(f"DEBUG: Connected last block {last_block['node_id']} (fallthrough) to exit node {exit_node_id}")
             
     # Also connect any label blocks that are at the very end (e.g. fail_return:)
     # If the last block is a label, it might be the target of a jump and then fall through to exit
@@ -1819,7 +1817,6 @@ def _build_cfg_from_body(body_node, code_bytes: bytes, function_start_line: int,
                     "type": "sequential",
                     "condition": None
                 })
-                print(f"DEBUG: Connected end label block {last_block['node_id']} to exit node {exit_node_id}")
 
     # Connect entry node to first basic block
     if basic_blocks.get("blocks"):
@@ -1874,6 +1871,22 @@ def _build_basic_blocks(
     current_block_start_line = None
     current_block_end_line = None
     current_block_type = "normal"
+
+    def emit_single_statement_block(stmt_text: str, line_no: int, block_type: str = "normal", end_line_no: int = None):
+        """Flush a block that represents exactly one simple statement.
+        
+        Args:
+            stmt_text: The statement text
+            line_no: Starting line number
+            block_type: Type of the block
+            end_line_no: Ending line number (if None, defaults to line_no for single-line statements)
+        """
+        nonlocal current_block_statements, current_block_start_line, current_block_end_line, current_block_type
+        current_block_start_line = line_no
+        current_block_end_line = end_line_no if end_line_no is not None else line_no
+        current_block_statements = [stmt_text]
+        current_block_type = block_type
+        return add_current_block()
     
     def add_current_block():
         nonlocal current_block_statements, current_block_start_line, current_block_end_line, current_block_type, current_node_id
@@ -1912,14 +1925,10 @@ def _build_basic_blocks(
                 if label_type == "default":
                     if label.get("value") == "default" and label.get("line") == line_no:
                         label["node_id"] = node_id
-                        print(f"DEBUG: Linked default case at line {line_no} to node {node_id}")
                         return
                 else:
                     if label.get("value") != "default" and label.get("line") == line_no:
                         label["node_id"] = node_id
-                        print(
-                            f"DEBUG: Linked case value {label.get('value')} at line {line_no} to node {node_id}"
-                        )
                         return
 
     def process_statement(node, line_offset: int = 0):
@@ -1955,7 +1964,6 @@ def _build_basic_blocks(
             }
             blocks.append(branch_block)
             current_node_id += 1
-            print(f"DEBUG: Created if branch node {branch_block_id} at {filename}:{line_no} (if statement starts at line {line_no})")
             
             # Process then branch
             then_node = node.child_by_field_name("consequence")
@@ -1995,7 +2003,6 @@ def _build_basic_blocks(
                     current_node_id += 1
                     then_start_id = then_block_id
                     then_end_id = then_block_id
-                    print(f"DEBUG: Created block for single-line if then branch: {then_block_id} at {filename}:{then_line_no}")
                 
                 # Check if then branch ends with goto/return
                 if blocks_after_then > blocks_before_then:
@@ -2053,7 +2060,6 @@ def _build_basic_blocks(
                 blocks.append(else_keyword_block)
                 current_node_id += 1
                 else_start_id = else_keyword_block_id  # Use the else keyword block as the start
-                print(f"DEBUG: Created else keyword block {else_keyword_block_id} at {filename}:{else_keyword_line} (else_node at line {else_node_line})")
                 
                 blocks_before_else = len(blocks)
                 stmts_before_else = len(current_block_statements)
@@ -2080,7 +2086,6 @@ def _build_basic_blocks(
                     # That is correct: false_branch -> else_keyword -> else_content
                     # We just need to track else_end_id
                     else_end_id = blocks[-1]["node_id"]
-                    print(f"DEBUG: Else branch created {blocks_after_else - blocks_before_else} block(s), else_start_id={else_start_id}, else_end_id={else_end_id}")
                 elif else_content_start_id is None and blocks_after_else == blocks_before_else:
                     # Empty else branch - check if it's an empty compound statement
                     if else_node.type == "compound_statement":
@@ -2107,7 +2112,6 @@ def _build_basic_blocks(
                         # (Implicitly handled by sequential edges later? No, we need to ensure flow)
                         # Actually, sequential edges will handle else_keyword -> else_block
                         else_end_id = else_block_id
-                        print(f"DEBUG: Created block for single-line else branch: {else_block_id} at {filename}:{else_line_no}")
                 elif else_content_start_id:
                      # Content started, but no new blocks (unlikely if flush logic works)
                      else_end_id = else_content_start_id
@@ -2312,10 +2316,6 @@ def _build_basic_blocks(
                             "node_id": None
                         })
             
-            print(
-                f"DEBUG: Collected switch cases at {filename}:{line_no}: "
-                f"{[(label.get('value'), label.get('line')) for label in case_labels]}"
-            )
             switch_structure_entry = {
                 "type": "switch",
                 "condition_id": switch_block_id,
@@ -2370,7 +2370,6 @@ def _build_basic_blocks(
             blocks.append(case_block)
             current_node_id += 1
             _link_switch_case(line_no, "case", case_block_id)
-            print(f"DEBUG: Created case block {case_block_id} for line {line_no}")
             
             # Process the statements after the case label
             # In tree-sitter, case_statement children are: "case", value, ":", and then statements
@@ -2404,7 +2403,6 @@ def _build_basic_blocks(
             blocks.append(default_block)
             current_node_id += 1
             _link_switch_case(line_no, "default", default_block_id)
-            print(f"DEBUG: Created default block {default_block_id} for line {line_no}")
             
             # Process the statements after the default label
             # In tree-sitter, default_statement children are: "default", ":", and then statements
@@ -2478,27 +2476,16 @@ def _build_basic_blocks(
                     "target_label": target_label,
                     "location": f"{filename}:{line_no}"
                 })
-                print(f"DEBUG: Found goto statement at {filename}:{line_no}, target label: {target_label}, block_id: {goto_block_id}")
             
             return goto_block_id
         
         elif node.type in ["break_statement", "continue_statement"]:
-            # Add jump statement to current block
+            # 先完成当前块（如果有），确保 break/continue 语句独立成块
+            add_current_block()
+            # Create a new block for the break/continue statement only
             stmt_text = code_bytes[node.start_byte:node.end_byte].decode("utf8").strip()
-            if current_block_start_line is None:
-                current_block_start_line = line_no
-            current_block_statements.append(stmt_text)
-            current_block_end_line = line_no
-            
-            # Identify what this break/continue applies to
-            # This is tricky without full scope tracking, but generally applies to the nearest enclosing loop/switch
-            # We record the type so we can handle edges later
             block_type = "break" if node.type == "break_statement" else "continue"
-            
-            # Finish current block
-            # Pass the type to add_current_block to set it on the block
-            current_block_type = block_type 
-            return add_current_block()
+            return emit_single_statement_block(stmt_text, line_no, block_type)
         
         elif node.type == "compound_statement":
             # Process statements in compound statement
@@ -2573,7 +2560,6 @@ def _build_basic_blocks(
             # Store label name to node ID mapping
             if label_name:
                 label_map[label_name] = label_block_id
-                print(f"DEBUG: Found label '{label_name}' at {filename}:{label_line_no}, block_id: {label_block_id}")
             
             current_node_id += 1
             
@@ -2608,13 +2594,14 @@ def _build_basic_blocks(
             return label_block_id
         
         elif node.type in ["expression_statement", "declaration"]:
-            # Regular statement - add to current block
+            # 每条普通语句单独成块，便于精确定位
+            # 先完成当前块（如果有），确保不会累积多个语句
+            add_current_block()
             stmt_text = code_bytes[node.start_byte:node.end_byte].decode("utf8").strip()
-            if current_block_start_line is None:
-                current_block_start_line = line_no
-            current_block_statements.append(stmt_text)
-            current_block_end_line = line_no
-            return None  # Don't create new block yet
+            # 计算结束行号：如果语句跨越多行，使用 end_point[0]
+            # node.end_point[0] 是相对于函数开始的行号，需要加上 function_start_line 和 line_offset
+            end_line_no = function_start_line + node.end_point[0] + line_offset
+            return emit_single_statement_block(stmt_text, line_no, "normal", end_line_no)
         
         else:
             # Unknown statement type - try to process children
@@ -2624,31 +2611,17 @@ def _build_basic_blocks(
     
     # Process body node
     if body_node.type == "compound_statement":
-        print(f"DEBUG: Processing compound_statement with {len(body_node.children)} children")
         for i, child in enumerate(body_node.children):
             if child.type in ["{", "}"]:
                 continue
             child_line_no = function_start_line + child.start_point[0]
-            print(f"DEBUG: Processing child {i} in compound_statement: type={child.type}, line={child_line_no}")
             result = process_statement(child)
-            if result:
-                print(f"DEBUG: Processed statement in compound_statement, returned node_id: {result}")
     else:
         result = process_statement(body_node)
-        if result:
-            print(f"DEBUG: Processed body_node (not compound), returned node_id: {result}")
     
     # Add final block if any
     add_current_block()
     
-    print(f"DEBUG: _build_basic_blocks summary:")
-    print(f"  Total blocks: {len(blocks)}")
-    print(f"  Goto statements: {len(goto_map)}")
-    print(f"  Labels: {len(label_map)}")
-    if goto_map:
-        print(f"  Goto map: {goto_map}")
-    if label_map:
-        print(f"  Label map: {label_map}")
 
     current_node_id = _ensure_line_coverage_blocks(
         blocks,
@@ -2747,20 +2720,17 @@ def _build_cfg_edges(body_node, basic_blocks: Dict[str, Any], code_bytes: bytes,
     handled_blocks = set()
     
     # Build edges for goto statements
-    print(f"DEBUG: Building goto edges from {len(goto_map)} goto statements")
     for goto_info in goto_map:
         goto_block_id = goto_info.get("block_id")
         target_label = goto_info.get("target_label")
         goto_location = goto_info.get("location", "unknown")
         
         if goto_block_id is None or not target_label:
-            print(f"DEBUG: Skipping invalid goto: block_id={goto_block_id}, target={target_label}")
             continue
         
         # Find target label node
         target_node_id = label_map.get(target_label)
         if target_node_id is None:
-            print(f"DEBUG: Warning: goto at {goto_location} targets unknown label '{target_label}'")
             continue
         
         # Create edge from goto block to label block
@@ -2772,7 +2742,6 @@ def _build_cfg_edges(body_node, basic_blocks: Dict[str, Any], code_bytes: bytes,
             "label": target_label
         })
         handled_blocks.add(goto_block_id)
-        print(f"DEBUG: Added goto edge: block {goto_block_id} -> label '{target_label}' (node {target_node_id})")
     
     # Build edges for break/continue statements
     # We need to find the target for each break/continue
@@ -2874,7 +2843,6 @@ def _build_cfg_edges(body_node, basic_blocks: Dict[str, Any], code_bytes: bytes,
                         "condition": None
                     })
                     handled_blocks.add(block_id)
-                    print(f"DEBUG: Added {block_type} edge: {block_id} -> {target_node_id} (structure {s_type})")
 
     # Build edges for break/continue statements
     for block in blocks:
@@ -2975,7 +2943,6 @@ def _build_cfg_edges(body_node, basic_blocks: Dict[str, Any], code_bytes: bytes,
                         "condition": None
                     })
                     handled_blocks.add(block_id)
-                    print(f"DEBUG: Added {block_type} edge: {block_id} -> {target_node_id} (structure {s_type})")
 
     # Build edges for control flow structures
     for structure in structure_map:
@@ -3014,11 +2981,6 @@ def _build_cfg_edges(body_node, basic_blocks: Dict[str, Any], code_bytes: bytes,
                     if if_end_id is None:
                         if_end_id = _find_block_after(blocks, condition_id)
                 
-                print(f"DEBUG: Processing if statement at condition {condition_id}:")
-                print(f"  then_start_id={then_start_id}, then_end_id={then_end_id}")
-                print(f"  else_start_id={else_start_id}, else_end_id={else_end_id}")
-                print(f"  if_end_id={if_end_id}")
-                
                 # True branch edge
                 if then_start_id:
                     edges.append({
@@ -3028,7 +2990,6 @@ def _build_cfg_edges(body_node, basic_blocks: Dict[str, Any], code_bytes: bytes,
                         "condition": condition_expr
                     })
                     handled_blocks.add(condition_id)
-                    print(f"  Added true_branch: {condition_id} -> {then_start_id}")
                     
                     # If then branch doesn't end with goto/return, connect then_end to if_end
                     if not then_ends_with_jump and then_end_id and if_end_id:
@@ -3050,7 +3011,6 @@ def _build_cfg_edges(body_node, basic_blocks: Dict[str, Any], code_bytes: bytes,
                                     "condition": None
                                 })
                                 handled_blocks.add(then_end_id)
-                                print(f"  Added then_end -> if_end edge: {then_end_id} -> {if_end_id}")
                 
                 # False branch edge (else or next block after if)
                 if else_start_id:
@@ -3061,7 +3021,6 @@ def _build_cfg_edges(body_node, basic_blocks: Dict[str, Any], code_bytes: bytes,
                         "type": "false_branch",
                         "condition": condition_expr
                     })
-                    print(f"  Added false_branch (else): {condition_id} -> {else_start_id}")
                 elif has_else and if_end_id:
                     # Else branch exists but is empty - false goes to if_end
                     edges.append({
@@ -3070,7 +3029,6 @@ def _build_cfg_edges(body_node, basic_blocks: Dict[str, Any], code_bytes: bytes,
                         "type": "false_branch",
                         "condition": condition_expr
                     })
-                    print(f"  Added false_branch (empty else -> if_end): {condition_id} -> {if_end_id}")
                     
                     # Connect else_end to if_end if else doesn't end with goto/return
                     if else_end_id and if_end_id:
@@ -3091,7 +3049,6 @@ def _build_cfg_edges(body_node, basic_blocks: Dict[str, Any], code_bytes: bytes,
                                     "condition": None
                                 })
                                 handled_blocks.add(else_end_id)
-                                print(f"  Added else_end -> if_end edge: {else_end_id} -> {if_end_id}")
                 elif then_ends_with_jump and if_end_id:
                     # Then branch ends with goto/return, and we know the block after if
                     # False branch should go to the block after the entire if statement
@@ -3101,7 +3058,6 @@ def _build_cfg_edges(body_node, basic_blocks: Dict[str, Any], code_bytes: bytes,
                         "type": "false_branch",
                         "condition": condition_expr
                     })
-                    print(f"  Added false_branch (if_end, then ends with jump): {condition_id} -> {if_end_id}")
                 elif then_ends_with_jump:
                     # Then branch ends with goto/return, but if_end_id not tracked
                     # Find the block that comes after the condition in the block sequence
@@ -3121,7 +3077,6 @@ def _build_cfg_edges(body_node, basic_blocks: Dict[str, Any], code_bytes: bytes,
                                 "type": "false_branch",
                                 "condition": condition_expr
                             })
-                            print(f"  Added false_branch (fallback, then ends with jump): {condition_id} -> {candidate_id}")
                             break
                 elif then_end_id and if_end_id:
                     # No else branch, then doesn't end with jump
@@ -3132,7 +3087,6 @@ def _build_cfg_edges(body_node, basic_blocks: Dict[str, Any], code_bytes: bytes,
                         "type": "false_branch",
                         "condition": condition_expr
                     })
-                    print(f"  Added false_branch (if_end, no else): {condition_id} -> {if_end_id}")
                 elif then_end_id:
                     # Fallback: if if_end_id not available, use then_end_id
                     edges.append({
@@ -3141,7 +3095,6 @@ def _build_cfg_edges(body_node, basic_blocks: Dict[str, Any], code_bytes: bytes,
                         "type": "false_branch",
                         "condition": condition_expr
                     })
-                    print(f"  Added false_branch (after then, fallback): {condition_id} -> {then_end_id}")
                 elif if_end_id:
                     # Fallback: use if_end_id if available
                     edges.append({
@@ -3150,7 +3103,6 @@ def _build_cfg_edges(body_node, basic_blocks: Dict[str, Any], code_bytes: bytes,
                         "type": "false_branch",
                         "condition": condition_expr
                     })
-                    print(f"  Added false_branch (if_end fallback): {condition_id} -> {if_end_id}")
         
         elif struct_type == "switch":
             # Switch: condition -> case labels based on value
@@ -3187,10 +3139,7 @@ def _build_cfg_edges(body_node, basic_blocks: Dict[str, Any], code_bytes: bytes,
                                 target_block_id = b["node_id"]
                                 break
                     if target_block_id is None:
-                        print(
-                            f"DEBUG: Missing block for switch case value={label_value} line={label_line} "
-                            f"from switch node {condition_id}"
-                        )
+                        pass
                     
                     if target_block_id is not None:
                         # Prevent duplicate edges
@@ -3205,7 +3154,6 @@ def _build_cfg_edges(body_node, basic_blocks: Dict[str, Any], code_bytes: bytes,
                                 "type": "switch_case",
                                 "condition": label_value if label_value != "default" else "default"
                             })
-                            print(f"  Added switch_case edge: {condition_id} -> {target_block_id} (value: {label_value})")
                         
                         if label_value == "default":
                             has_default = True
@@ -3220,7 +3168,6 @@ def _build_cfg_edges(body_node, basic_blocks: Dict[str, Any], code_bytes: bytes,
                         "type": "switch_case",
                         "condition": "default"
                     })
-                    print(f"  Added implicit default edge: {condition_id} -> {switch_end_id}")
         
         elif struct_type in ["while", "for"]:
             # Loop: condition -> body (true) or exit (false)
@@ -3359,11 +3306,6 @@ def _build_cfg_edges(body_node, basic_blocks: Dict[str, Any], code_bytes: bytes,
             "condition": None
         })
     
-    print(f"DEBUG: _build_cfg_edges summary: {len(edges)} total edges built")
-    print(f"  Control structure edges: {len([e for e in edges if e.get('type') not in ['sequential', 'goto']])}")
-    print(f"  Goto edges: {len([e for e in edges if e.get('type') == 'goto'])}")
-    print(f"  Sequential edges: {len([e for e in edges if e.get('type') == 'sequential'])}")
-    
     return edges
 
 
@@ -3484,23 +3426,6 @@ def find_all_paths_in_cfg(function_name: str, start_line, target_line) -> Option
     
     if not start_nodes:
         logging.error(f"No node found containing line {start_line_num} in function {function_name}")
-        # Debug: show all nodes to diagnose the issue
-        print(f"DEBUG: Searching for line {start_line_num}, but no node found.")
-        print(f"DEBUG: All nodes in function (excluding entry/exit):")
-        available_lines = [(n["node_id"], n.get("type"), n.get("start_line"), n.get("end_line"), n.get("location")) 
-                          for n in nodes if n.get("type") not in ["entry", "exit"]]
-        # Show nodes near the target line
-        nearby_nodes = [(nid, t, sl, el, loc) for nid, t, sl, el, loc in available_lines 
-                       if abs(sl - start_line_num) <= 10 or abs(el - start_line_num) <= 10]
-        if nearby_nodes:
-            print(f"DEBUG: Nodes near line {start_line_num} (within 10 lines):")
-            for nid, t, sl, el, loc in sorted(nearby_nodes, key=lambda x: x[2]):
-                print(f"  Node {nid} [{t}] lines {sl}-{el} at {loc}")
-        else:
-            print(f"DEBUG: No nodes found within 10 lines of {start_line_num}")
-            print(f"DEBUG: Showing first 20 nodes in function:")
-            for nid, t, sl, el, loc in available_lines[:20]:
-                print(f"  Node {nid} [{t}] lines {sl}-{el} at {loc}")
         return None
     if not target_nodes:
         logging.error(f"No node found containing line {target_line_num} in function {function_name}")
@@ -3510,13 +3435,6 @@ def find_all_paths_in_cfg(function_name: str, start_line, target_line) -> Option
         logging.debug(f"Available nodes (excluding entry/exit): {available_lines[:10]}...")
         return None
     
-    # Debug: show found nodes
-    print(f"DEBUG: Found {len(start_nodes)} start node(s) for line {start_line_num}:")
-    for n in start_nodes:
-        print(f"  Node {n['node_id']} [{n.get('type')}] at {n.get('location')} (lines {n.get('start_line')}-{n.get('end_line')})")
-    print(f"DEBUG: Found {len(target_nodes)} target node(s) for line {target_line_num}:")
-    for n in target_nodes:
-        print(f"  Node {n['node_id']} [{n.get('type')}] at {n.get('location')} (lines {n.get('start_line')}-{n.get('end_line')})")
     
     # Build adjacency list from edges (include ALL edges including sequential for path finding)
     graph = {}
@@ -3533,33 +3451,13 @@ def find_all_paths_in_cfg(function_name: str, start_line, target_line) -> Option
             graph[source].append(target)
         edge_map[(source, target)] = edge
     
-    # Debug: output graph information
-    print(f"\nDEBUG: Graph adjacency list (total {len(graph)} nodes with outgoing edges):")
-    for node_id in sorted(graph.keys()):
-        node_info = next((n for n in nodes if n["node_id"] == node_id), None)
-        node_desc = f"{node_info.get('type', 'unknown')} at {node_info.get('location', 'unknown')}" if node_info else "unknown"
-        print(f"  Node {node_id} [{node_desc}] -> {graph[node_id]}")
-    
-    print(f"\nDEBUG: All edges (total {len(edges)}):")
-    for edge in edges:
-        source_node = next((n for n in nodes if n["node_id"] == edge.get("source")), None)
-        target_node = next((n for n in nodes if n["node_id"] == edge.get("target")), None)
-        source_desc = f"{source_node.get('type', 'unknown')} at {source_node.get('location', 'unknown')}" if source_node else "unknown"
-        target_desc = f"{target_node.get('type', 'unknown')} at {target_node.get('location', 'unknown')}" if target_node else "unknown"
-        edge_type = edge.get("type", "unknown")
-        condition = edge.get("condition", "")
-        cond_str = f" [{condition[:40]}...]" if condition and len(condition) > 40 else f" [{condition}]" if condition else ""
-        print(f"  {edge.get('source')} [{source_desc}] -> {edge.get('target')} [{target_desc}] [{edge_type}]{cond_str}")
-    
     # Find all paths from any start node to any target node
     all_paths = []
     target_node_ids = {node["node_id"] for node in target_nodes}
     
     for start_node in start_nodes:
         start_id = start_node["node_id"]
-        print(f"DEBUG: Starting DFS from node {start_id}")
         paths = _find_all_paths_dfs(start_id, target_node_ids, graph, nodes, edge_map, max_depth=100)
-        print(f"DEBUG: Found {len(paths)} path(s) from node {start_id}")
         all_paths.extend(paths)
     
     # Remove duplicate paths
@@ -3673,8 +3571,6 @@ def _find_all_paths_dfs(start_id: int, target_ids: Set[int], graph: Dict[int, Li
     
     # Explore neighbors
     neighbors = graph.get(start_id, [])
-    if not neighbors:
-        print(f"DEBUG: Node {start_id} has no outgoing edges")
     
     # For loop nodes, filter and process edges specially
     if is_loop_entry:
@@ -3714,8 +3610,6 @@ def _find_all_paths_dfs(start_id: int, target_ids: Set[int], graph: Dict[int, Li
                     loop_visited, current_path + [path_entry], max_depth
                 )
                 
-                if neighbor_paths:
-                    print(f"DEBUG: Found {len(neighbor_paths)} path(s) via loop_body edge {start_id}->{neighbor_id}")
                 paths.extend(neighbor_paths)
             
             # Path 2: Skip loop (use other edges like sequential/false branch)
@@ -3730,8 +3624,6 @@ def _find_all_paths_dfs(start_id: int, target_ids: Set[int], graph: Dict[int, Li
                     new_visited, current_path + [path_entry], max_depth
                 )
                 
-                if neighbor_paths:
-                    print(f"DEBUG: Found {len(neighbor_paths)} path(s) via skip-loop edge {start_id}->{neighbor_id}")
                 paths.extend(neighbor_paths)
         
         elif is_do_while:
@@ -3752,8 +3644,6 @@ def _find_all_paths_dfs(start_id: int, target_ids: Set[int], graph: Dict[int, Li
                     loop_visited, current_path + [path_entry], max_depth
                 )
                 
-                if neighbor_paths:
-                    print(f"DEBUG: Found {len(neighbor_paths)} path(s) via do-while loop_body edge {start_id}->{neighbor_id}")
                 paths.extend(neighbor_paths)
         
     else:
@@ -3769,7 +3659,6 @@ def _find_all_paths_dfs(start_id: int, target_ids: Set[int], graph: Dict[int, Li
                 if target_node and target_node.get("type") == "loop_entry":
                     if neighbor_id in visited:
                         # Already visited this loop, skip the continue edge
-                        print(f"DEBUG: Skipping loop_continue edge {start_id}->{neighbor_id} (loop already visited)")
                         continue
             
             path_entry = {
@@ -3783,8 +3672,6 @@ def _find_all_paths_dfs(start_id: int, target_ids: Set[int], graph: Dict[int, Li
                 new_visited, current_path + [path_entry], max_depth
             )
             
-            if neighbor_paths:
-                print(f"DEBUG: Found {len(neighbor_paths)} path(s) via edge {start_id}->{neighbor_id} [{edge_type}]")
             paths.extend(neighbor_paths)
     
     return paths
@@ -3971,6 +3858,8 @@ def trace_paths_to_exit(location: str, eq_position: str) -> List[List[Dict[str, 
         loc = op.get("location")
         if loc:
             key_locs.add(loc)
+    
+    print(f"DEBUG: Key locations: {key_locs}")
             
     # 4. Find all paths to each return location
     all_raw_paths = []
@@ -4147,13 +4036,13 @@ if __name__ == '__main__':
     # else:
     #     print(f"Failed to get CFG for {function_name}")
         
-    # # Test find_all_paths_between_lines
+    # Test find_all_paths_between_lines
     # print("\n" + "="*80)
     # print("Testing find_all_paths_between_lines")
     # print("="*80)
-    # location_line_start = "tif_dirread.c:1172"
-    # location_line_end = "tif_dirread.c:1283"
-    # function_name = "TIFFReadDirEntrySbyteArray"
+    # location_line_start = "tif_dirread.c:2280"
+    # location_line_end = "tif_dirread.c:2281"
+    # function_name = "TIFFReadDirEntrySlong8Array"
     # print(f"Finding all paths between {location_line_start} and {location_line_end} in {function_name}...")
     # paths = find_all_paths_between_lines(function_name, location_line_start, location_line_end)
     # if paths:
@@ -4192,7 +4081,7 @@ if __name__ == '__main__':
         ("tif_write.c:658", 6),
     ]
     
-    location, eq_position = source_location_eq_position_list[1]
+    location, eq_position = source_location_eq_position_list[16]
 
     # Test trace_paths_to_exit
     print("\n" + "="*80)
