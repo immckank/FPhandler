@@ -6,7 +6,7 @@ import json
 import re
 import utils
 from utils import *
-from typing import List, Dict, Any, Optional, Set
+from typing import List, Dict, Any, Optional, Set, Tuple
 from enum import Enum
 from collections import defaultdict
 
@@ -1512,6 +1512,213 @@ def get_eq_position_list(source_location: str) -> Optional[List[int]]:
             return res_json.get("store_cl", [])
     return None
 
+def _byte_offset_to_point(code_bytes: bytes, byte_index: int) -> Tuple[int, int]:
+    """Convert a byte offset inside the function source to (line, column)."""
+    if byte_index <= 0:
+        return (0, 0)
+    snippet = code_bytes[:byte_index].decode("utf8", errors="ignore")
+    line = snippet.count("\n")
+    last_newline = snippet.rfind("\n")
+    column = len(snippet) if last_newline == -1 else len(snippet) - last_newline - 1
+    return (line, column)
+
+def _extract_lhs_identifier(left_node, code_bytes: bytes) -> Optional[str]:
+    """Extract a plain identifier from assignment left-hand side."""
+    if left_node is None:
+        return None
+    current = left_node
+    while current.type == "parenthesized_expression":
+        inner = current.child_by_field_name("expression")
+        if inner is None:
+            break
+        current = inner
+    if current.type == "identifier":
+        return code_bytes[current.start_byte:current.end_byte].decode("utf8").strip()
+    return None
+
+def _collect_identifier_occurrences(node, code_bytes: bytes, context: str = "plain") -> List[Dict[str, str]]:
+    """Collect identifier occurrences within an expression along with their context."""
+    occurrences: List[Dict[str, str]] = []
+    if node is None:
+        return occurrences
+    node_type = getattr(node, "type", "")
+    if node_type == "identifier":
+        name = code_bytes[node.start_byte:node.end_byte].decode("utf8").strip()
+        if name:
+            occurrences.append({"name": name, "context": context})
+        return occurrences
+    if node_type == "pointer_expression":
+        children = list(node.children or [])
+        if len(children) >= 2 and children[0].type in {"&", "*"}:
+            operator = children[0].type
+            operand = children[1]
+            nested_context = "address_of" if operator == "&" else "dereference"
+            occurrences.extend(_collect_identifier_occurrences(operand, code_bytes, nested_context))
+            for extra in children[2:]:
+                occurrences.extend(_collect_identifier_occurrences(extra, code_bytes, context))
+            return occurrences
+    for child in node.children:
+        occurrences.extend(_collect_identifier_occurrences(child, code_bytes, context))
+    return occurrences
+
+def _extract_assignment_relation(node, code_bytes: bytes, function_start_line: int) -> Optional[Dict[str, Any]]:
+    """Build alias relation metadata from a single assignment_expression node."""
+    left = node.child_by_field_name("left")
+    right = node.child_by_field_name("right")
+    if left is None or right is None:
+        return None
+    lhs_name = _extract_lhs_identifier(left, code_bytes)
+    if not lhs_name:
+        return None
+    operator_segment = code_bytes[left.end_byte:right.start_byte]
+    operator_text = operator_segment.decode("utf8", errors="ignore").strip()
+    if operator_text != "=":
+        return None
+    relation = {
+        "lhs": lhs_name,
+        "rhs": _collect_identifier_occurrences(right, code_bytes),
+        "operator_point": None,
+    }
+    eq_index = operator_segment.find(b"=")
+    if eq_index != -1:
+        eq_byte = left.end_byte + eq_index
+        local_line, local_column = _byte_offset_to_point(code_bytes, eq_byte)
+        relation["operator_point"] = (
+            (function_start_line or 0) + local_line,
+            local_column,
+        )
+    return relation
+
+def _build_assignment_relations(tree_root, code_bytes: bytes, function_start_line: int) -> List[Dict[str, Any]]:
+    """Traverse AST and collect simple '=' assignments within the function."""
+    relations: List[Dict[str, Any]] = []
+    def _walk(node):
+        if node.type == "assignment_expression":
+            relation = _extract_assignment_relation(node, code_bytes, function_start_line)
+            if relation:
+                relations.append(relation)
+        for child in node.children:
+            _walk(child)
+    _walk(tree_root)
+    return relations
+
+def _select_assignment_relation(relations: List[Dict[str, Any]], target_line: int, target_column: Optional[int]) -> Optional[Dict[str, Any]]:
+    """Pick the assignment relation that matches the given source location."""
+    candidates = []
+    for rel in relations:
+        point = rel.get("operator_point")
+        if not point:
+            continue
+        if point[0] == target_line:
+            candidates.append(rel)
+    if not candidates:
+        return None
+    if target_column is None:
+        return candidates[0]
+    for rel in candidates:
+        point = rel.get("operator_point")
+        if point and point[1] == target_column:
+            return rel
+    return min(candidates, key=lambda rel: abs(rel["operator_point"][1] - target_column))
+
+def _extract_seed_from_line(code_line: Optional[str], eq_position: Optional[int]) -> Optional[str]:
+    """Fallback extraction of the seed variable using raw code text."""
+    if not isinstance(code_line, str):
+        return None
+    line = code_line.rstrip("\n")
+    idx = None
+    if isinstance(eq_position, int):
+        if 0 <= eq_position < len(line) and line[eq_position] == "=":
+            idx = eq_position
+    if idx is None:
+        idx = line.find("=")
+    if idx == -1:
+        return None
+    lhs_fragment = line[:idx].rstrip()
+    while lhs_fragment and lhs_fragment[-1] in "*&":
+        lhs_fragment = lhs_fragment[:-1].rstrip()
+    match = re.search(r"[A-Za-z_]\w*$", lhs_fragment)
+    if match:
+        return match.group(0)
+    return normalize_identifier(lhs_fragment)
+
+def get_alias_set(location: str, eq_position: int) -> List[str]:
+    """
+    Collect alias variables for the assignment located at (location, eq_position).
+
+    Args:
+        location: Source location in the form 'file:line'.
+        eq_position: Column index of the '=' sign in the assignment line.
+
+    Returns:
+        List of variable names aliasing the seed variable（包含种子变量本身）.
+    """
+    if not isinstance(location, str) or ":" not in location:
+        logging.warning("get_alias_set requires location in 'file:line' format.")
+        return []
+    try:
+        target_line = int(location.split(":")[-1])
+    except (ValueError, TypeError):
+        logging.warning("get_alias_set unable to parse source line from %s", location)
+        return []
+    try:
+        target_column = int(eq_position)
+    except (ValueError, TypeError):
+        target_column = None
+
+    code_line = find_code_line(location, strip_whitespace=False)
+    func_meta = find_current_function(location)
+    if not func_meta or func_meta.get("error"):
+        logging.warning("get_alias_set failed to locate function for %s", location)
+        return []
+
+    function_source = func_meta.get("function_body")
+    if not isinstance(function_source, str) or not function_source.strip():
+        logging.warning("get_alias_set received empty function body for %s", location)
+        return []
+
+    function_start_line = func_meta.get("start_line") or 0
+    try:
+        function_start_line = int(function_start_line)
+    except (ValueError, TypeError):
+        function_start_line = 0
+
+    tree, code_bytes = _parse_function_ast(function_source)
+    if tree is None or code_bytes is None:
+        logging.warning("tree-sitter parser unavailable; cannot compute alias set.")
+        return []
+
+    relations = _build_assignment_relations(tree.root_node, code_bytes, function_start_line)
+    if not relations:
+        return []
+
+    seed_relation = _select_assignment_relation(relations, target_line, target_column)
+    seed_var = seed_relation.get("lhs") if seed_relation else None
+    if not seed_var:
+        seed_var = _extract_seed_from_line(code_line, target_column)
+    if not seed_var:
+        logging.warning("get_alias_set failed to resolve seed variable at %s (eq=%s)", location, eq_position)
+        return []
+
+    alias_set: Set[str] = {seed_var}
+    changed = True
+    while changed:
+        changed = False
+        for relation in relations:
+            lhs = relation.get("lhs")
+            if not lhs or lhs in alias_set:
+                continue
+            rhs_refs = relation.get("rhs") or []
+            for ref in rhs_refs:
+                if ref.get("context") != "plain":
+                    continue
+                if ref.get("name") in alias_set:
+                    alias_set.add(lhs)
+                    changed = True
+                    break
+
+    return sorted(alias_set)
+
 def get_gep_position_list(source_location: str) -> Optional[List[int]]:
     
     return None
@@ -2009,10 +2216,6 @@ def find_all_paths_between_lines(function_name: str, start_location: str, target
     return find_all_paths_in_cfg(function_name, start_line, target_line)
 
 
-
-
-
-
 def trace_paths_to_exit(location: str, eq_position: str) -> List[List[Dict[str, Any]]]:
     """Generates filtered paths from a start location to the function exit.
     
@@ -2270,23 +2473,9 @@ if __name__ == '__main__':
     ]
     
     for location, eq_position in source_location_eq_position_list:
-        print(f"Testing trace_paths_to_exit for {location} at eq_position {eq_position}")
-        paths = trace_paths_to_exit(location, eq_position)
-        if paths:
-            print(f"Found {len(paths)} filtered paths:")
-            for i, path in enumerate(paths, 1):
-                print(f"\nPath {i} ({len(path)} steps):")
-                for step in path:
-                    node = step.get("node", {})
-                    edge = step.get("edge")
-                    edge_info = ""
-                    if edge:
-                        edge_info = f" -> [{edge.get('type')}]"
-                        if edge.get('condition'):
-                            edge_info += f" ({edge.get('condition')})"
-                    print(f"  Node {node.get('node_id')} [{node.get('type')}] at {node.get('location')}{edge_info}")
-        else:
-            print("No paths found.")
+        print(f"Testing get_alias_set for {location} at eq_position {eq_position}")
+        alias_set = get_alias_set(location, eq_position)
+        print(f"Alias set: {alias_set}")
     
     # location, eq_position = source_location_eq_position_list[16]
 
