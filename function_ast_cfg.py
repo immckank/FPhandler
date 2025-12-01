@@ -1,0 +1,1305 @@
+from __future__ import annotations
+
+import logging
+import re
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+
+
+FunctionBodyResolver = Callable[[str], Optional[Dict[str, Any]]]
+AstParser = Callable[[str], Tuple[Any, Optional[bytes]]]
+LineDumper = Callable[[str, int], Optional[str]]
+
+
+def _coerce_int(value: Any, *, default: int = 0) -> int:
+    """Safely coerce arbitrary values to int with fallback."""
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+@dataclass
+class _CFGDependencies:
+    find_function_body: FunctionBodyResolver
+    parse_function_ast: AstParser
+    dump_source_line: LineDumper
+
+
+_CFG_DEPENDENCIES: Optional[_CFGDependencies] = None
+
+
+def configure_function_cfg_dependencies(
+    find_function_body: FunctionBodyResolver,
+    parse_function_ast: AstParser,
+    dump_source_line: LineDumper,
+) -> None:
+    """Registers the callbacks required by FunctionCFGAnalyzer."""
+    global _CFG_DEPENDENCIES
+    if not callable(find_function_body) or not callable(parse_function_ast) or not callable(dump_source_line):
+        raise ValueError("All dependency callbacks must be callable.")
+    _CFG_DEPENDENCIES = _CFGDependencies(
+        find_function_body=find_function_body,
+        parse_function_ast=parse_function_ast,
+        dump_source_line=dump_source_line,
+    )
+
+
+def _resolve_dependencies(
+    find_function_body: Optional[FunctionBodyResolver],
+    parse_function_ast: Optional[AstParser],
+    dump_source_line: Optional[LineDumper],
+) -> _CFGDependencies:
+    global _CFG_DEPENDENCIES
+    if _CFG_DEPENDENCIES is None and any(
+        dep is None for dep in (find_function_body, parse_function_ast, dump_source_line)
+    ):
+        raise RuntimeError(
+            "FunctionCFGAnalyzer dependencies are not configured. "
+            "Call configure_function_cfg_dependencies or provide the callbacks explicitly."
+        )
+    merged = _CFG_DEPENDENCIES or _CFGDependencies(
+        find_function_body, parse_function_ast, dump_source_line  # type: ignore[arg-type]
+    )
+    return _CFGDependencies(
+        find_function_body=find_function_body or merged.find_function_body,
+        parse_function_ast=parse_function_ast or merged.parse_function_ast,
+        dump_source_line=dump_source_line or merged.dump_source_line,
+    )
+
+
+class FunctionCFGAnalyzer:
+    """Builds a CFG (Control Flow Graph) for a single function using tree-sitter AST."""
+
+    def __init__(
+        self,
+        *,
+        function_name: str,
+        filename: str,
+        function_start_line: int,
+        function_end_line: int,
+        body_node: Any,
+        body_start_line: int,
+        code_bytes: bytes,
+        dump_source_line: LineDumper,
+    ) -> None:
+        self.function_name = function_name
+        self.filename = filename
+        self.function_start_line = function_start_line
+        self.function_end_line = function_end_line
+        self.body_node = body_node
+        self.body_start_line = body_start_line
+        self.code_bytes = code_bytes
+        self._dump_source_line = dump_source_line
+
+    @classmethod
+    def from_function_name(
+        cls,
+        function_name: str,
+        *,
+        find_function_body: Optional[FunctionBodyResolver] = None,
+        parse_function_ast: Optional[AstParser] = None,
+        dump_source_line: Optional[LineDumper] = None,
+    ) -> Optional["FunctionCFGAnalyzer"]:
+        """Factory helper that loads the function body and prepares the analyzer."""
+        if not isinstance(function_name, str) or not function_name.strip():
+            logging.error("function_name must be a non-empty string")
+            return None
+
+        try:
+            deps = _resolve_dependencies(find_function_body, parse_function_ast, dump_source_line)
+        except RuntimeError as err:
+            logging.error(str(err))
+            return None
+
+        func_meta = deps.find_function_body(function_name)
+        if not func_meta or func_meta.get("error"):
+            logging.error(f"Unable to locate function body for {function_name}")
+            return None
+
+        function_source = func_meta.get("function_body")
+        if not isinstance(function_source, str) or not function_source.strip():
+            logging.error(f"Function source for {function_name} is empty")
+            return None
+
+        filename = func_meta.get("filename", "")
+        function_start_line = _coerce_int(func_meta.get("start_line"), default=0)
+        function_end_line = _coerce_int(func_meta.get("end_line"), default=0)
+
+        tree, code_bytes = deps.parse_function_ast(function_source)
+        if tree is None or code_bytes is None:
+            logging.error("tree-sitter is not available or failed to parse the function source")
+            return None
+
+        translation_unit = tree.root_node
+        function_node = cls._find_function_definition(translation_unit)
+        if function_node is None:
+            logging.debug(
+                "tree-sitter could not find explicit function definition for %s; "
+                "scanning entire snippet instead.",
+                function_name,
+            )
+            body_node = translation_unit
+            body_start_line = function_start_line
+        else:
+            body_node = function_node.child_by_field_name("body") or translation_unit
+            if body_node and body_node != translation_unit:
+                body_offset = body_node.start_point[0]
+                body_start_line = function_start_line + body_offset
+            else:
+                body_start_line = function_start_line
+
+        if body_node is None:
+            logging.error("Function body not found for %s", function_name)
+            return None
+
+        return cls(
+            function_name=function_name,
+            filename=filename,
+            function_start_line=function_start_line,
+            function_end_line=function_end_line,
+            body_node=body_node,
+            body_start_line=body_start_line,
+            code_bytes=code_bytes,
+            dump_source_line=deps.dump_source_line,
+        )
+
+    def build_cfg(self) -> Optional[Dict[str, Any]]:
+        """Builds the CFG for the prepared function body."""
+        if self.body_node is None or self.code_bytes is None:
+            return None
+
+        nodes: List[Dict[str, Any]] = []
+        edges: List[Dict[str, Any]] = []
+        next_node_id = 0
+
+        entry_node = {
+            "node_id": next_node_id,
+            "type": "entry",
+            "start_line": self.body_start_line,
+            "end_line": self.body_start_line,
+            "statements": [],
+            "location": f"{self.filename}:{self.body_start_line}",
+        }
+        nodes.append(entry_node)
+        entry_node_id = next_node_id
+        next_node_id += 1
+
+        basic_blocks = self._build_basic_blocks(start_node_id=next_node_id)
+        next_node_id = basic_blocks.get("next_id", next_node_id)
+        nodes.extend(basic_blocks.get("blocks", []))
+
+        edges.extend(self._build_cfg_edges(basic_blocks, entry_node_id))
+
+        exit_nodes = self._find_exit_nodes(basic_blocks.get("blocks", []))
+        exit_line = self._determine_exit_line(exit_nodes, basic_blocks.get("blocks", []))
+
+        exit_node_id = next_node_id
+        exit_node = {
+            "node_id": exit_node_id,
+            "type": "exit",
+            "start_line": exit_line,
+            "end_line": exit_line,
+            "statements": [],
+            "location": f"{self.filename}:{exit_line}",
+        }
+        nodes.append(exit_node)
+        next_node_id += 1
+
+        for exit_n in exit_nodes:
+            edges.append(
+                {
+                    "source": exit_n["node_id"],
+                    "target": exit_node_id,
+                    "type": "sequential",
+                    "condition": None,
+                }
+            )
+
+        blocks = basic_blocks.get("blocks", [])
+        if blocks:
+            last_block = blocks[-1]
+            if (
+                not self._block_ends_with_jump(last_block)
+                and not any(e["source"] == last_block["node_id"] for e in edges)
+            ):
+                edges.append(
+                    {
+                        "source": last_block["node_id"],
+                        "target": exit_node_id,
+                        "type": "sequential",
+                        "condition": None,
+                    }
+                )
+
+            if last_block.get("type") == "label":
+                if not any(
+                    e["source"] == last_block["node_id"] and e["target"] == exit_node_id
+                    for e in edges
+                ):
+                    edges.append(
+                        {
+                            "source": last_block["node_id"],
+                            "target": exit_node_id,
+                            "type": "sequential",
+                            "condition": None,
+                        }
+                    )
+
+            edges.insert(
+                0,
+                {
+                    "source": entry_node_id,
+                    "target": blocks[0]["node_id"],
+                    "type": "sequential",
+                    "condition": None,
+                },
+            )
+
+        return {
+            "function_name": self.function_name,
+            "filename": self.filename,
+            "nodes": nodes,
+            "edges": edges,
+        }
+
+    @staticmethod
+    def _find_function_definition(node: Any) -> Optional[Any]:
+        if node.type == "function_definition":
+            return node
+        for child in getattr(node, "children", []):
+            result = FunctionCFGAnalyzer._find_function_definition(child)
+            if result:
+                return result
+        return None
+
+    def _decode_source(self, node: Any) -> str:
+        if node is None or self.code_bytes is None:
+            return ""
+        try:
+            return self.code_bytes[node.start_byte : node.end_byte].decode("utf8").strip()
+        except Exception:
+            return ""
+
+    def _extract_condition_expression(self, node: Any) -> Optional[str]:
+        if node is None or self.code_bytes is None:
+            return None
+
+        condition_node = node.child_by_field_name("condition")
+        if condition_node:
+            return self._decode_source(condition_node)
+
+        if node.type in ["if_statement", "while_statement", "for_statement", "do_statement"]:
+            for child in node.children:
+                if child.type == "parenthesized_expression":
+                    return self._decode_source(child)
+                if child.type == "condition":
+                    return self._decode_source(child)
+        return None
+
+    def _block_ends_with_jump(self, block: Dict[str, Any]) -> bool:
+        block_type = block.get("type")
+        if block_type in {"return", "goto", "break", "continue"}:
+            return True
+        statements = block.get("statements") or []
+        if not statements:
+            return False
+        tail = statements[-1].strip()
+        return any(tail.startswith(keyword) for keyword in ("return", "goto", "break", "continue"))
+
+    def _determine_exit_line(self, exit_nodes: List[Dict[str, Any]], blocks: List[Dict[str, Any]]) -> int:
+        if exit_nodes:
+            return max(exit.get("end_line", exit.get("start_line", self.body_start_line)) for exit in exit_nodes)
+        if self.function_end_line:
+            return self.function_end_line
+        if blocks:
+            last_block = blocks[-1]
+            return last_block.get("end_line", last_block.get("start_line", self.body_start_line))
+        return self.body_start_line
+
+    def _find_exit_nodes(self, blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        exit_nodes: List[Dict[str, Any]] = []
+        for block in blocks:
+            if block.get("type") == "return":
+                exit_nodes.append(block)
+                continue
+            statements = block.get("statements") or []
+            if not statements:
+                continue
+            tail = statements[-1].strip()
+            if tail.startswith("return") and not tail.startswith("return_"):
+                exit_nodes.append(block)
+        return exit_nodes
+
+    def _find_block_after(self, blocks: List[Dict[str, Any]], start_id: Optional[int]) -> Optional[int]:
+        if start_id is None:
+            return None
+        found = False
+        for block in blocks:
+            if found:
+                return block["node_id"]
+            if block["node_id"] == start_id:
+                found = True
+        return None
+
+    def _ensure_line_coverage_blocks(self, blocks: List[Dict[str, Any]], next_node_id: int) -> int:
+        if not blocks:
+            return next_node_id
+
+        covered: Set[int] = set()
+        for block in blocks:
+            start = block.get("start_line")
+            end = block.get("end_line", start)
+            if start is None:
+                continue
+            if end is None or end < start:
+                end = start
+            for line in range(start, end + 1):
+                covered.add(line)
+
+        coverage_start = max(self.function_start_line or 0, 1)
+        existing_max = max((block.get("end_line") or block.get("start_line") or 0) for block in blocks)
+        coverage_end = (
+            self.function_end_line
+            if self.function_end_line and self.function_end_line >= coverage_start
+            else existing_max
+        )
+        if coverage_end < coverage_start:
+            coverage_end = coverage_start
+
+        placeholders: List[Dict[str, Any]] = []
+        for line in range(coverage_start, coverage_end + 1):
+            if line in covered:
+                continue
+            raw_line = self._dump_source_line(self.filename, line) or ""
+            placeholders.append(
+                {
+                    "node_id": next_node_id,
+                    "type": "placeholder",
+                    "start_line": line,
+                    "end_line": line,
+                    "statements": [raw_line.strip("\n")],
+                    "location": f"{self.filename}:{line}",
+                }
+            )
+            next_node_id += 1
+
+        if placeholders:
+            blocks.extend(placeholders)
+            blocks.sort(key=lambda b: (b.get("start_line", 0), b["node_id"]))
+
+        return next_node_id
+
+    def _build_cfg_edges(self, basic_blocks: Dict[str, Any], entry_node_id: int) -> List[Dict[str, Any]]:
+        edges: List[Dict[str, Any]] = []
+        blocks = basic_blocks.get("blocks", [])
+        structure_map = basic_blocks.get("structure_map", [])
+        goto_map = basic_blocks.get("goto_map", [])
+        label_map = basic_blocks.get("label_map", {})
+
+        if not blocks:
+            return edges
+
+        block_map = {block["node_id"]: block for block in blocks}
+        handled_blocks: Set[int] = set()
+
+        def resolve_existing_block(node_id: Optional[int]) -> Optional[int]:
+            if node_id is None:
+                return None
+            if node_id in block_map:
+                return node_id
+            for candidate_id in sorted(block_map.keys()):
+                if candidate_id >= node_id:
+                    return candidate_id
+            return None
+
+        # Goto edges
+        for goto_info in goto_map:
+            goto_block_id = goto_info.get("block_id")
+            target_label = goto_info.get("target_label")
+            if goto_block_id is None or not target_label:
+                continue
+            target_node_id = label_map.get(target_label)
+            if target_node_id is None:
+                continue
+            edges.append(
+                {
+                    "source": goto_block_id,
+                    "target": target_node_id,
+                    "type": "goto",
+                    "condition": None,
+                    "label": target_label,
+                }
+            )
+            handled_blocks.add(goto_block_id)
+
+        # Break/continue edges
+        for block in blocks:
+            block_type = block.get("type")
+            if block_type not in {"break", "continue"}:
+                continue
+            block_id = block["node_id"]
+            target_node_id: Optional[int] = None
+
+            for structure in reversed(structure_map):
+                s_type = structure.get("type")
+                condition_id = structure.get("condition_id")
+                if condition_id is None or block_id <= condition_id:
+                    continue
+
+                if s_type in {"while", "for", "do"}:
+                    end_id = structure.get("loop_exit_id")
+                elif s_type == "switch":
+                    end_id = structure.get("switch_end_id")
+                elif s_type == "if":
+                    end_id = structure.get("if_end_id")
+                else:
+                    end_id = None
+
+                if end_id is not None and block_id >= end_id:
+                    continue
+
+                if block_type == "break":
+                    if s_type == "switch":
+                        target_node_id = structure.get("switch_end_id")
+                    elif s_type in {"while", "for", "do"}:
+                        target_node_id = structure.get("loop_exit_id")
+                elif block_type == "continue" and s_type in {"while", "for", "do"}:
+                    target_node_id = structure.get("condition_id")
+
+                if target_node_id:
+                    target_node_id = resolve_existing_block(target_node_id)
+                    break
+
+            if target_node_id:
+                edges.append(
+                    {
+                        "source": block_id,
+                        "target": target_node_id,
+                        "type": block_type,
+                        "condition": None,
+                    }
+                )
+                handled_blocks.add(block_id)
+
+        # Control-structure edges
+        for structure in structure_map:
+            struct_type = structure.get("type")
+            condition_id = structure.get("condition_id")
+            condition_block = block_map.get(condition_id)
+            if not condition_block:
+                continue
+            condition_expr = condition_block.get("condition")
+
+            if struct_type == "if":
+                then_start_id = structure.get("then_start_id")
+                then_end_id = structure.get("then_end_id")
+                then_ends_with_jump = structure.get("then_ends_with_jump", False)
+                else_start_id = structure.get("else_start_id")
+                else_end_id = structure.get("else_end_id")
+                has_else = structure.get("has_else", False)
+                if_end_id = structure.get("if_end_id")
+
+                if then_end_id is None and then_start_id:
+                    then_end_id = self._find_block_after(blocks, then_start_id)
+                if else_end_id is None and else_start_id:
+                    else_end_id = self._find_block_after(blocks, else_start_id)
+
+                if if_end_id is None:
+                    if else_end_id:
+                        if_end_id = self._find_block_after(blocks, else_end_id)
+                    elif then_end_id:
+                        if_end_id = self._find_block_after(blocks, then_end_id)
+                    if if_end_id is None:
+                        if_end_id = self._find_block_after(blocks, condition_id)
+
+                if then_start_id:
+                    edges.append(
+                        {
+                            "source": condition_id,
+                            "target": then_start_id,
+                            "type": "true_branch",
+                            "condition": condition_expr,
+                        }
+                    )
+                    handled_blocks.add(condition_id)
+
+                    if not then_ends_with_jump and then_end_id and if_end_id:
+                        then_end_block = block_map.get(then_end_id)
+                        if then_end_block and not self._block_ends_with_jump(then_end_block):
+                            edges.append(
+                                {
+                                    "source": then_end_id,
+                                    "target": if_end_id,
+                                    "type": "sequential",
+                                    "condition": None,
+                                }
+                            )
+                            handled_blocks.add(then_end_id)
+
+                if else_start_id:
+                    edges.append(
+                        {
+                            "source": condition_id,
+                            "target": else_start_id,
+                            "type": "false_branch",
+                            "condition": condition_expr,
+                        }
+                    )
+                elif has_else and if_end_id:
+                    edges.append(
+                        {
+                            "source": condition_id,
+                            "target": if_end_id,
+                            "type": "false_branch",
+                            "condition": condition_expr,
+                        }
+                    )
+                    if else_end_id and not self._block_ends_with_jump(block_map.get(else_end_id, {})):
+                        else_end_block = block_map.get(else_end_id)
+                        if else_end_block:
+                            edges.append(
+                                {
+                                    "source": else_end_id,
+                                    "target": if_end_id,
+                                    "type": "sequential",
+                                    "condition": None,
+                                }
+                            )
+                            handled_blocks.add(else_end_id)
+                elif then_ends_with_jump and if_end_id:
+                    edges.append(
+                        {
+                            "source": condition_id,
+                            "target": if_end_id,
+                            "type": "false_branch",
+                            "condition": condition_expr,
+                        }
+                    )
+                elif if_end_id:
+                    edges.append(
+                        {
+                            "source": condition_id,
+                            "target": if_end_id,
+                            "type": "false_branch",
+                            "condition": condition_expr,
+                        }
+                    )
+
+            elif struct_type == "switch":
+                case_labels = structure.get("case_labels", [])
+                switch_end_id = structure.get("switch_end_id")
+                switch_end_id = resolve_existing_block(switch_end_id)
+                has_default = False
+
+                for label in case_labels:
+                    target_block_id = label.get("node_id")
+                    if target_block_id is None:
+                        for blk in blocks:
+                            if blk.get("type") in {"case", "default"} and blk.get("start_line") == label.get("line"):
+                                target_block_id = blk["node_id"]
+                                break
+                    if target_block_id is None:
+                        continue
+                    edges.append(
+                        {
+                            "source": condition_id,
+                            "target": target_block_id,
+                            "type": "switch_case",
+                            "condition": label.get("value") or "default",
+                        }
+                    )
+                    if label.get("value") == "default":
+                        has_default = True
+
+                if not has_default and switch_end_id:
+                    edges.append(
+                        {
+                            "source": condition_id,
+                            "target": switch_end_id,
+                            "type": "switch_case",
+                            "condition": "default",
+                        }
+                    )
+                handled_blocks.add(condition_id)
+
+            elif struct_type in {"while", "for"}:
+                body_start_id = structure.get("body_start_id")
+                loop_exit_id = resolve_existing_block(structure.get("loop_exit_id"))
+
+                if body_start_id:
+                    edges.append(
+                        {
+                            "source": condition_id,
+                            "target": body_start_id,
+                            "type": "loop_body",
+                            "condition": condition_expr,
+                        }
+                    )
+                if loop_exit_id:
+                    edges.append(
+                        {
+                            "source": condition_id,
+                            "target": loop_exit_id,
+                            "type": "false_branch",
+                            "condition": condition_expr,
+                        }
+                    )
+                handled_blocks.add(condition_id)
+
+                body_end_id = self._find_block_after(blocks, body_start_id)
+                if body_end_id:
+                    edges.append(
+                        {
+                            "source": body_end_id,
+                            "target": condition_id,
+                            "type": "loop_continue",
+                            "condition": None,
+                        }
+                    )
+
+            elif struct_type == "do":
+                body_start_id = structure.get("body_start_id")
+                condition_index = next((i for i, b in enumerate(blocks) if b["node_id"] == condition_id), -1)
+                prev_block = blocks[condition_index - 1] if condition_index > 0 else None
+
+                if prev_block:
+                    edges.append(
+                        {
+                            "source": prev_block["node_id"],
+                            "target": condition_id,
+                            "type": "loop_continue",
+                            "condition": None,
+                        }
+                    )
+                    handled_blocks.add(prev_block["node_id"])
+
+                if body_start_id:
+                    edges.append(
+                        {
+                            "source": condition_id,
+                            "target": body_start_id,
+                            "type": "loop_body",
+                            "condition": condition_expr,
+                        }
+                    )
+                next_block_id = self._find_block_after(blocks, condition_id)
+                if next_block_id:
+                    edges.append(
+                        {
+                            "source": condition_id,
+                            "target": next_block_id,
+                            "type": "false_branch",
+                            "condition": condition_expr,
+                        }
+                    )
+                handled_blocks.add(condition_id)
+
+        # Sequential edges
+        for idx in range(len(blocks) - 1):
+            current_block = blocks[idx]
+            next_block = blocks[idx + 1]
+            current_id = current_block["node_id"]
+            next_id = next_block["node_id"]
+
+            if current_id in handled_blocks:
+                continue
+            if current_block.get("type") == "return":
+                continue
+            if self._block_ends_with_jump(current_block):
+                continue
+            if any(edge["source"] == current_id for edge in edges):
+                continue
+            if next_block.get("statements") == ["else"]:
+                continue
+
+            edges.append(
+                {"source": current_id, "target": next_id, "type": "sequential", "condition": None}
+            )
+
+        return edges
+
+    def _build_basic_blocks(self, start_node_id: int) -> Dict[str, Any]:
+        blocks: List[Dict[str, Any]] = []
+        structure_map: List[Dict[str, Any]] = []
+        goto_map: List[Dict[str, Any]] = []
+        label_map: Dict[str, int] = {}
+        current_node_id = start_node_id
+
+        current_block_statements: List[str] = []
+        current_block_start_line: Optional[int] = None
+        current_block_end_line: Optional[int] = None
+        current_block_type = "normal"
+
+        def add_current_block() -> Optional[int]:
+            nonlocal current_block_statements, current_block_start_line, current_block_end_line, current_block_type, current_node_id
+            if current_block_start_line is None:
+                return None
+            block = {
+                "node_id": current_node_id,
+                "type": current_block_type,
+                "start_line": current_block_start_line,
+                "end_line": current_block_end_line or current_block_start_line,
+                "statements": list(current_block_statements),
+                "location": f"{self.filename}:{current_block_start_line}",
+            }
+            blocks.append(block)
+            block_id = current_node_id
+            current_node_id += 1
+            current_block_statements = []
+            current_block_start_line = None
+            current_block_end_line = None
+            current_block_type = "normal"
+            return block_id
+
+        def emit_single_statement_block(
+            stmt_text: str,
+            line_no: int,
+            block_type: str = "normal",
+            end_line_no: Optional[int] = None,
+        ) -> Optional[int]:
+            nonlocal current_block_statements, current_block_start_line, current_block_end_line, current_block_type
+            current_block_start_line = line_no
+            current_block_end_line = end_line_no if end_line_no is not None else line_no
+            current_block_statements = [stmt_text]
+            current_block_type = block_type
+            return add_current_block()
+
+        def _link_switch_case(line_no: int, label_type: str, node_id: int) -> None:
+            for structure in reversed(structure_map):
+                if structure.get("type") != "switch":
+                    continue
+                for label in structure.get("case_labels", []):
+                    if label.get("node_id") is not None:
+                        continue
+                    if label_type == "default":
+                        if label.get("value") == "default" and label.get("line") == line_no:
+                            label["node_id"] = node_id
+                            return
+                    else:
+                        if label.get("value") != "default" and label.get("line") == line_no:
+                            label["node_id"] = node_id
+                            return
+
+        def process_statement(node: Any, line_offset: int = 0) -> Optional[int]:
+            nonlocal current_node_id, blocks, structure_map
+            if node is None:
+                return None
+
+            line_no = self.function_start_line + node.start_point[0] + line_offset
+
+            node_type = node.type
+
+            if node_type == "if_statement":
+                prev_block_id = add_current_block()
+                condition = self._extract_condition_expression(node)
+                branch_block_id = current_node_id
+                branch_block = {
+                    "node_id": branch_block_id,
+                    "type": "branch",
+                    "start_line": line_no,
+                    "end_line": line_no,
+                    "statements": [self._decode_source(node)],
+                    "location": f"{self.filename}:{line_no}",
+                    "condition": condition,
+                    "control_structure": "if",
+                }
+                blocks.append(branch_block)
+                current_node_id += 1
+
+                then_node = node.child_by_field_name("consequence")
+                then_start_id = None
+                then_end_id = None
+                then_ends_with_jump = False
+                if then_node:
+                    blocks_before_then = len(blocks)
+                    stmts_before_then = len(current_block_statements)
+                    then_start_id = process_statement(then_node)
+                    blocks_after_then = len(blocks)
+                    stmts_after_then = len(current_block_statements)
+                    if then_start_id is None and stmts_after_then > stmts_before_then:
+                        then_start_id = add_current_block()
+                        blocks_after_then = len(blocks)
+                    if then_start_id is None and blocks_after_then == blocks_before_then:
+                        then_line_no = self.function_start_line + then_node.start_point[0]
+                        then_block_id = current_node_id
+                        then_block = {
+                            "node_id": then_block_id,
+                            "type": "normal",
+                            "start_line": then_line_no,
+                            "end_line": then_line_no,
+                            "statements": [self._decode_source(then_node)],
+                            "location": f"{self.filename}:{then_line_no}",
+                        }
+                        blocks.append(then_block)
+                        current_node_id += 1
+                        then_start_id = then_block_id
+                        then_end_id = then_block_id
+                    if blocks_after_then > blocks_before_then:
+                        last_then_block = blocks[-1]
+                        if self._block_ends_with_jump(last_then_block):
+                            then_ends_with_jump = True
+                        then_end_id = last_then_block["node_id"]
+                    elif then_start_id:
+                        then_end_id = then_start_id
+
+                else_node = node.child_by_field_name("alternative")
+                else_start_id = None
+                else_end_id = None
+                if else_node:
+                    else_node_line = self.function_start_line + else_node.start_point[0]
+                    if else_node.type == "compound_statement":
+                        else_node_text = self._decode_source(else_node)[:1].strip()
+                        if else_node_text == "{":
+                            else_keyword_line = (
+                                else_node_line - 1 if else_node_line > self.function_start_line else else_node_line
+                            )
+                        else:
+                            else_keyword_line = else_node_line
+                    else:
+                        else_keyword_line = else_node_line
+
+                    else_keyword_block_id = current_node_id
+                    else_keyword_block = {
+                        "node_id": else_keyword_block_id,
+                        "type": "normal",
+                        "start_line": else_keyword_line,
+                        "end_line": else_keyword_line,
+                        "statements": ["else"],
+                        "location": f"{self.filename}:{else_keyword_line}",
+                    }
+                    blocks.append(else_keyword_block)
+                    current_node_id += 1
+                    else_start_id = else_keyword_block_id
+
+                    blocks_before_else = len(blocks)
+                    stmts_before_else = len(current_block_statements)
+                    else_content_start_id = process_statement(else_node)
+                    blocks_after_else = len(blocks)
+                    stmts_after_else = len(current_block_statements)
+                    if else_content_start_id is None and stmts_after_else > stmts_before_else:
+                        flushed_id = add_current_block()
+                        blocks_after_else = len(blocks)
+                        if flushed_id is not None:
+                            else_content_start_id = flushed_id
+                    if blocks_after_else > blocks_before_else:
+                        else_end_id = blocks[-1]["node_id"]
+                    elif else_content_start_id is None and blocks_after_else == blocks_before_else:
+                        if else_node.type == "compound_statement":
+                            else_end_id = else_start_id
+                        else:
+                            else_line_no = self.function_start_line + else_node.start_point[0]
+                            else_block_id = current_node_id
+                            else_block = {
+                                "node_id": else_block_id,
+                                "type": "normal",
+                                "start_line": else_line_no,
+                                "end_line": else_line_no,
+                                "statements": [self._decode_source(else_node)],
+                                "location": f"{self.filename}:{else_line_no}",
+                            }
+                            blocks.append(else_block)
+                            current_node_id += 1
+                            else_end_id = else_block_id
+                    elif else_content_start_id:
+                        else_end_id = else_content_start_id
+                    else:
+                        else_end_id = else_start_id
+
+                blocks_before_if_end = len(blocks)
+                add_current_block()
+                blocks_after_if_end = len(blocks)
+                if_end_id = None
+                if blocks_after_if_end > blocks_before_if_end:
+                    if_end_id = blocks[-1]["node_id"]
+
+                structure_map.append(
+                    {
+                        "type": "if",
+                        "condition_id": branch_block_id,
+                        "prev_id": prev_block_id,
+                        "then_start_id": then_start_id,
+                        "then_end_id": then_end_id,
+                        "then_ends_with_jump": then_ends_with_jump,
+                        "else_start_id": else_start_id,
+                        "else_end_id": else_end_id,
+                        "has_else": else_node is not None,
+                        "if_end_id": if_end_id,
+                    }
+                )
+
+                return branch_block_id
+
+            if node_type == "while_statement":
+                prev_block_id = add_current_block()
+                condition = self._extract_condition_expression(node)
+                loop_entry_id = current_node_id
+                loop_entry_block = {
+                    "node_id": loop_entry_id,
+                    "type": "loop_entry",
+                    "start_line": line_no,
+                    "end_line": line_no,
+                    "statements": [self._decode_source(node)],
+                    "location": f"{self.filename}:{line_no}",
+                    "condition": condition,
+                    "control_structure": "while",
+                }
+                blocks.append(loop_entry_block)
+                current_node_id += 1
+
+                body_node_inner = node.child_by_field_name("body")
+                body_start_id = process_statement(body_node_inner) if body_node_inner else None
+                loop_exit_id = add_current_block()
+                if loop_exit_id is None:
+                    loop_exit_id = current_node_id
+
+                structure_map.append(
+                    {
+                        "type": "while",
+                        "condition_id": loop_entry_id,
+                        "prev_id": prev_block_id,
+                        "body_start_id": body_start_id,
+                        "loop_exit_id": loop_exit_id,
+                    }
+                )
+                return loop_entry_id
+
+            if node_type == "for_statement":
+                prev_block_id = add_current_block()
+                condition = self._extract_condition_expression(node)
+                loop_entry_id = current_node_id
+                loop_entry_block = {
+                    "node_id": loop_entry_id,
+                    "type": "loop_entry",
+                    "start_line": line_no,
+                    "end_line": line_no,
+                    "statements": [self._decode_source(node)],
+                    "location": f"{self.filename}:{line_no}",
+                    "condition": condition,
+                    "control_structure": "for",
+                }
+                blocks.append(loop_entry_block)
+                current_node_id += 1
+
+                body_node_inner = node.child_by_field_name("body")
+                body_start_id = process_statement(body_node_inner) if body_node_inner else None
+                loop_exit_id = add_current_block()
+                if loop_exit_id is None:
+                    loop_exit_id = current_node_id
+
+                structure_map.append(
+                    {
+                        "type": "for",
+                        "condition_id": loop_entry_id,
+                        "prev_id": prev_block_id,
+                        "body_start_id": body_start_id,
+                        "loop_exit_id": loop_exit_id,
+                    }
+                )
+                return loop_entry_id
+
+            if node_type == "do_statement":
+                prev_block_id = add_current_block()
+                body_node_inner = node.child_by_field_name("body")
+                body_start_id = process_statement(body_node_inner) if body_node_inner else None
+                condition = self._extract_condition_expression(node)
+                loop_entry_id = current_node_id
+                loop_entry_block = {
+                    "node_id": loop_entry_id,
+                    "type": "loop_entry",
+                    "start_line": line_no,
+                    "end_line": line_no,
+                    "statements": [self._decode_source(node)],
+                    "location": f"{self.filename}:{line_no}",
+                    "condition": condition,
+                    "control_structure": "do",
+                }
+                blocks.append(loop_entry_block)
+                current_node_id += 1
+
+                structure_map.append(
+                    {
+                        "type": "do",
+                        "condition_id": loop_entry_id,
+                        "prev_id": prev_block_id,
+                        "body_start_id": body_start_id,
+                    }
+                )
+
+                add_current_block()
+                return loop_entry_id
+
+            if node_type == "switch_statement":
+                prev_block_id = add_current_block()
+                condition = self._extract_condition_expression(node)
+                switch_block_id = current_node_id
+                switch_block = {
+                    "node_id": switch_block_id,
+                    "type": "switch",
+                    "start_line": line_no,
+                    "end_line": line_no,
+                    "statements": [self._decode_source(node)],
+                    "location": f"{self.filename}:{line_no}",
+                    "condition": condition,
+                }
+                blocks.append(switch_block)
+                current_node_id += 1
+
+                case_labels: List[Dict[str, Any]] = []
+                body_node_inner = node.child_by_field_name("body")
+                if body_node_inner:
+                    for child in body_node_inner.children:
+                        if child.type == "case_statement":
+                            case_line = self.function_start_line + child.start_point[0]
+                            case_expr_node = child.child_by_field_name("value")
+                            case_value = (
+                                self.code_bytes[case_expr_node.start_byte : case_expr_node.end_byte]
+                                .decode("utf8")
+                                .strip()
+                                if case_expr_node
+                                else None
+                            )
+                            case_labels.append({"line": case_line, "value": case_value, "node_id": None})
+                        elif child.type == "default_statement":
+                            case_labels.append(
+                                {
+                                    "line": self.function_start_line + child.start_point[0],
+                                    "value": "default",
+                                    "node_id": None,
+                                }
+                            )
+
+                switch_structure_entry = {
+                    "type": "switch",
+                    "condition_id": switch_block_id,
+                    "prev_id": prev_block_id,
+                    "case_labels": case_labels,
+                    "switch_end_id": None,
+                }
+                structure_map.append(switch_structure_entry)
+                if body_node_inner:
+                    process_statement(body_node_inner)
+
+                switch_end_id = add_current_block()
+                if switch_end_id is None:
+                    switch_end_line = self.function_start_line + (
+                        body_node_inner.end_point[0] if body_node_inner else node.end_point[0]
+                    )
+                    switch_end_id = current_node_id
+                    blocks.append(
+                        {
+                            "node_id": switch_end_id,
+                            "type": "switch_end",
+                            "start_line": switch_end_line,
+                            "end_line": switch_end_line,
+                            "statements": [],
+                            "location": f"{self.filename}:{switch_end_line}",
+                        }
+                    )
+                    current_node_id += 1
+
+                switch_structure_entry["switch_end_id"] = switch_end_id
+                return switch_block_id
+
+            if node_type == "case_statement":
+                add_current_block()
+                stmt_text = self._decode_source(node)
+                case_block_id = current_node_id
+                case_block = {
+                    "node_id": case_block_id,
+                    "type": "case",
+                    "start_line": line_no,
+                    "end_line": line_no,
+                    "statements": [stmt_text],
+                    "location": f"{self.filename}:{line_no}",
+                }
+                blocks.append(case_block)
+                current_node_id += 1
+                _link_switch_case(line_no, "case", case_block_id)
+
+                value_node = node.child_by_field_name("value")
+                for child in node.children:
+                    if child.type in ["case", ":", "default"]:
+                        continue
+                    if value_node and child.id == value_node.id:
+                        continue
+                    process_statement(child)
+                return case_block_id
+
+            if node_type == "default_statement":
+                add_current_block()
+                stmt_text = self._decode_source(node)
+                default_block_id = current_node_id
+                default_block = {
+                    "node_id": default_block_id,
+                    "type": "default",
+                    "start_line": line_no,
+                    "end_line": line_no,
+                    "statements": [stmt_text],
+                    "location": f"{self.filename}:{line_no}",
+                }
+                blocks.append(default_block)
+                current_node_id += 1
+                _link_switch_case(line_no, "default", default_block_id)
+
+                for child in node.children:
+                    if child.type in ["default", ":"]:
+                        continue
+                    process_statement(child)
+                return default_block_id
+
+            if node_type == "return_statement":
+                add_current_block()
+                return emit_single_statement_block(self._decode_source(node), line_no, "return")
+
+            if node_type == "goto_statement":
+                add_current_block()
+                stmt_text = self._decode_source(node)
+                target_label = None
+                for child in node.children:
+                    if child.type == "identifier":
+                        target_label = self.code_bytes[child.start_byte : child.end_byte].decode("utf8").strip()
+                        break
+                if not target_label:
+                    match = re.match(r"goto\s+(\w+)\s*;", stmt_text)
+                    if match:
+                        target_label = match.group(1)
+                goto_block_id = current_node_id
+                goto_block = {
+                    "node_id": goto_block_id,
+                    "type": "normal",
+                    "start_line": line_no,
+                    "end_line": line_no,
+                    "statements": [stmt_text],
+                    "location": f"{self.filename}:{line_no}",
+                }
+                blocks.append(goto_block)
+                current_node_id += 1
+
+                if target_label:
+                    goto_map.append(
+                        {
+                            "block_id": goto_block_id,
+                            "target_label": target_label,
+                            "location": f"{self.filename}:{line_no}",
+                        }
+                    )
+
+                return goto_block_id
+
+            if node_type in ["break_statement", "continue_statement"]:
+                add_current_block()
+                stmt_text = self._decode_source(node)
+                block_type = "break" if node_type == "break_statement" else "continue"
+                return emit_single_statement_block(stmt_text, line_no, block_type)
+
+            if node_type == "compound_statement":
+                first_id = None
+                for child in node.children:
+                    if child.type in ["{", "}"]:
+                        continue
+                    result_id = process_statement(child)
+                    if first_id is None and result_id is not None:
+                        first_id = result_id
+                return first_id
+
+            if node_type == "labeled_statement":
+                add_current_block()
+                label_name = None
+                label_line_no = line_no
+
+                for child in node.children:
+                    if child.type == "statement_label":
+                        for grandchild in child.children:
+                            if grandchild.type == "identifier":
+                                label_name = (
+                                    self.code_bytes[grandchild.start_byte : grandchild.end_byte].decode("utf8").strip()
+                                )
+                                label_line_no = self.function_start_line + grandchild.start_point[0]
+                                break
+                        if label_name:
+                            break
+                    elif child.type == "identifier":
+                        label_name = self.code_bytes[child.start_byte : child.end_byte].decode("utf8").strip()
+                        label_line_no = self.function_start_line + child.start_point[0]
+                        break
+                    elif child.type == ":":
+                        continue
+
+                stmt_text = self._decode_source(node)
+                if not label_name:
+                    match = re.match(r"^(\w+)\s*:", stmt_text)
+                    if match:
+                        label_name = match.group(1)
+
+                label_block_id = current_node_id
+                label_block = {
+                    "node_id": label_block_id,
+                    "type": "label",
+                    "start_line": label_line_no,
+                    "end_line": label_line_no,
+                    "statements": [stmt_text],
+                    "location": f"{self.filename}:{label_line_no}",
+                    "label_name": label_name,
+                }
+                blocks.append(label_block)
+
+                if label_name:
+                    label_map[label_name] = label_block_id
+
+                current_node_id += 1
+
+                body_node_inner = node.child_by_field_name("body")
+                if body_node_inner:
+                    process_statement(body_node_inner)
+                else:
+                    for child in node.children:
+                        if child.type in ["statement_label", "identifier", ":", "statement_identifier"]:
+                            continue
+                        process_statement(child)
+                        break
+
+                return label_block_id
+
+            if node_type in ["expression_statement", "declaration"]:
+                add_current_block()
+                stmt_text = self._decode_source(node)
+                end_line_no = self.function_start_line + node.end_point[0] + line_offset
+                return emit_single_statement_block(stmt_text, line_no, "normal", end_line_no)
+
+            for child in node.children:
+                process_statement(child)
+            return None
+
+        body_node = self.body_node
+        if body_node is None or self.code_bytes is None:
+            return {
+                "blocks": blocks,
+                "next_id": current_node_id,
+                "structure_map": structure_map,
+                "goto_map": goto_map,
+                "label_map": label_map,
+            }
+
+        if body_node.type == "compound_statement":
+            for child in body_node.children:
+                if child.type in ["{", "}"]:
+                    continue
+                process_statement(child)
+        else:
+            process_statement(body_node)
+
+        add_current_block()
+
+        current_node_id = self._ensure_line_coverage_blocks(blocks, current_node_id)
+
+        return {
+            "blocks": blocks,
+            "next_id": current_node_id,
+            "structure_map": structure_map,
+            "goto_map": goto_map,
+            "label_map": label_map,
+        }
+
