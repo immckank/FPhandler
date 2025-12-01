@@ -4034,6 +4034,8 @@ def trace_paths_to_exit(location: str, eq_position: str) -> List[List[Dict[str, 
         for branch_step in base_branches:
             node_id = branch_step["node"]["node_id"]
             edge_type = branch_step["edge"]["type"]
+            # For switch_case, also get the condition value to distinguish different cases
+            edge_condition = branch_step["edge"].get("condition") if edge_type == "switch_case" else None
             
             is_consistent = True
             for other_path in group[1:]:
@@ -4044,7 +4046,12 @@ def trace_paths_to_exit(location: str, eq_position: str) -> List[List[Dict[str, 
                         # Check edge type
                         other_edge = other_step.get("edge")
                         if other_edge and other_edge.get("type") == edge_type:
-                            found = True
+                            # For switch_case, also check that the condition matches
+                            if edge_type == "switch_case":
+                                if other_edge.get("condition") == edge_condition:
+                                    found = True
+                            else:
+                                found = True
                         break
                 if not found:
                     is_consistent = False
@@ -4092,60 +4099,61 @@ def trace_paths_to_exit(location: str, eq_position: str) -> List[List[Dict[str, 
 
 
 if __name__ == '__main__':
-    # Test find_lvalue_key_svfgnode
-    print("\n" + "="*80)
-    print("Testing find_lvalue_key_svfgnode")
-    print("="*80)
-    # Example from user query: "tif_dirwrite.c:839", eq_position "8"
-    location = "tif_getimage.c:370"
-    eq_position = "18"
-    print(f"Finding key SVFG nodes for {location} at eq_pos {eq_position}...")
-    key_nodes = find_lvalue_key_svfgnode(location, eq_position)
-    print(f"Found {len(key_nodes)} key nodes:")
-    for node in key_nodes:
-        print(f"  {node.get('node_type')}: {node.get('location')}")
+    # # Test find_lvalue_key_svfgnode
+    # print("\n" + "="*80)
+    # print("Testing find_lvalue_key_svfgnode")
+    # print("="*80)
+    # # Example from user query: "tif_dirwrite.c:839", eq_position "8"
+    # location = "tif_getimage.c:370"
+    # eq_position = "18"
+    # print(f"Finding key SVFG nodes for {location} at eq_pos {eq_position}...")
+    # key_nodes = find_lvalue_key_svfgnode(location, eq_position)
+    # print(f"Found {len(key_nodes)} key nodes:")
+    # for node in key_nodes:
+    #     print(f"  {node.get('node_type')}: {node.get('location')}")
 
-    # Test find_return_locations
-    print("\n" + "="*80)
-    print("Testing find_return_locations")
-    print("="*80)
-    # Using TIFFWriteDirectorySec as it is the function containing the example location
-    function_name = "TIFFRGBAImageBegin" 
-    print(f"Finding return locations for {function_name}...")
-    ret_locs = find_return_locations(function_name)
-    print(f"Found {len(ret_locs)} return locations:")
-    for loc in ret_locs:
-        print(f"  {loc}")
+    # # Test find_return_locations
+    # print("\n" + "="*80)
+    # print("Testing find_return_locations")
+    # print("="*80)
+    # # Using TIFFWriteDirectorySec as it is the function containing the example location
+    # function_name = "TIFFRGBAImageBegin" 
+    # print(f"Finding return locations for {function_name}...")
+    # ret_locs = find_return_locations(function_name)
+    # print(f"Found {len(ret_locs)} return locations:")
+    # for loc in ret_locs:
+    #     print(f"  {loc}")
     
-    print("\n" + "="*80)
-    print(f"Debug: Checking CFG nodes for return locations in {function_name}")
-    print("="*80)
-    cfg = get_cfg_by_function_name(function_name)
-    if cfg:
-        nodes = cfg.get("nodes", [])
-        for loc in ret_locs:
-            try:
-                line_num = int(loc.split(":")[-1])
-                matching_nodes = _find_nodes_by_line(nodes, line_num)
-                print(f"Location: {loc} (Line {line_num})")
-                if matching_nodes:
-                    for node in matching_nodes:
-                        print(f"  Matched Node {node['node_id']} [{node.get('type')}] lines {node.get('start_line')}-{node.get('end_line')}")
-                        if node.get('statements'):
-                            print(f"    Statements: {node.get('statements')}")
-                else:
-                    print(f"  No matching CFG node found.")
-            except Exception as e:
-                print(f"  Error processing location {loc}: {e}")
-    else:
-        print(f"Failed to get CFG for {function_name}")
+    # print("\n" + "="*80)
+    # print(f"Debug: Checking CFG nodes for return locations in {function_name}")
+    # print("="*80)
+    # cfg = get_cfg_by_function_name(function_name)
+    # if cfg:
+    #     nodes = cfg.get("nodes", [])
+    #     for loc in ret_locs:
+    #         try:
+    #             line_num = int(loc.split(":")[-1])
+    #             matching_nodes = _find_nodes_by_line(nodes, line_num)
+    #             print(f"Location: {loc} (Line {line_num})")
+    #             if matching_nodes:
+    #                 for node in matching_nodes:
+    #                     print(f"  Matched Node {node['node_id']} [{node.get('type')}] lines {node.get('start_line')}-{node.get('end_line')}")
+    #                     if node.get('statements'):
+    #                         print(f"    Statements: {node.get('statements')}")
+    #             else:
+    #                 print(f"  No matching CFG node found.")
+    #         except Exception as e:
+    #             print(f"  Error processing location {loc}: {e}")
+    # else:
+    #     print(f"Failed to get CFG for {function_name}")
         
     # # Test find_all_paths_between_lines
     # print("\n" + "="*80)
     # print("Testing find_all_paths_between_lines")
     # print("="*80)
-    # location_line_start = "tif_getimage.c:308"
-    # location_line_end = "tif_getimage.c:325"
+    # location_line_start = "tif_dirread.c:1172"
+    # location_line_end = "tif_dirread.c:1283"
+    # function_name = "TIFFReadDirEntrySbyteArray"
     # print(f"Finding all paths between {location_line_start} and {location_line_end} in {function_name}...")
     # paths = find_all_paths_between_lines(function_name, location_line_start, location_line_end)
     # if paths:
@@ -4164,13 +4172,33 @@ if __name__ == '__main__':
     # else:
     #     print("No paths found.")
         
+    source_location_eq_position_list = [
+        ("tif_dirread.c:1166", 6),
+        ("tif_dirread.c:1519", 6),
+        ("tif_dirread.c:1686", 6),
+        ("tif_dirread.c:1855", 6),
+        ("tif_dirread.c:2188", 6),
+        ("tif_dirread.c:2323", 6),
+        ("tif_dirread.c:2568", 6),
+        ("tif_dirread.c:2797", 6),
+        ("tif_dirread.c:4981", 9),
+        ("tif_dirwrite.c:839", 8),
+        ("tif_dirwrite.c:1688", 7),
+        ("tif_dirwrite.c:1746", 7),
+        ("tif_dirwrite.c:1934", 4),
+        ("tif_getimage.c:370", 18),
+        ("tif_jpeg.c:2057", 20),
+        ("tif_read.c:1421", 20),
+        ("tif_write.c:658", 6),
+    ]
     
+    location, eq_position = source_location_eq_position_list[1]
 
     # Test trace_paths_to_exit
     print("\n" + "="*80)
     print("Testing trace_paths_to_exit")
     print("="*80)
-    print(f"Tracing paths from {location} to exit in {function_name}...")
+    # print(f"Tracing paths from {location} to exit in {function_name}...")
     paths = trace_paths_to_exit(location, eq_position)
     if paths:
         print(f"Found {len(paths)} filtered paths:")
