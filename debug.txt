@@ -25461,3 +25461,1615 @@ Path 72 (12 nodes):
   11. Node 265 [normal] at tif_dirwrite.c:912
       -> [sequential]
   12. Node 266 [normal] at tif_dirwrite.c:914
+
+================================================================================
+Testing find_return_locations
+================================================================================
+Finding return locations for TIFFRGBAImageBegin...
+Found 5 return locations:
+  tif_getimage.c:276
+  tif_getimage.c:496
+  tif_getimage.c:463
+  tif_getimage.c:497
+  tif_getimage.c:492
+
+================================================================================
+Debug: Checking CFG nodes for return locations in TIFFRGBAImageBegin
+================================================================================
+DEBUG: Created if branch node 2 at tif_getimage.c:275 (if statement starts at line 275)
+DEBUG: Created case block 6 for line 297
+DEBUG: Created case block 7 for line 298
+DEBUG: Created case block 8 for line 299
+DEBUG: Created case block 9 for line 300
+DEBUG: Created case block 10 for line 301
+DEBUG: Created case block 12 for line 303
+DEBUG: Found goto statement at tif_getimage.c:306, target label: fail_return, block_id: 14
+DEBUG: Collected switch cases at tif_getimage.c:296: [('1', 297), ('2', 298), ('4', 299), ('8', 300), ('16', 301), (None, 303)]
+DEBUG: Linked case value 1 at line 297 to node 15
+DEBUG: Created case block 15 for line 297
+DEBUG: Linked case value 2 at line 298 to node 16
+DEBUG: Created case block 16 for line 298
+DEBUG: Linked case value 4 at line 299 to node 17
+DEBUG: Created case block 17 for line 299
+DEBUG: Linked case value 8 at line 300 to node 18
+DEBUG: Created case block 18 for line 300
+DEBUG: Linked case value 16 at line 301 to node 19
+DEBUG: Created case block 19 for line 301
+DEBUG: Linked case value None at line 303 to node 21
+DEBUG: Created case block 21 for line 303
+DEBUG: Found goto statement at tif_getimage.c:306, target label: fail_return, block_id: 23
+DEBUG: Created if branch node 26 at tif_getimage.c:312 (if statement starts at line 312)
+DEBUG: Created case block 28 for line 315
+DEBUG: Created if branch node 29 at tif_getimage.c:316 (if statement starts at line 316)
+DEBUG: Created case block 32 for line 319
+DEBUG: Created case block 33 for line 320
+DEBUG: Collected switch cases at tif_getimage.c:314: [('EXTRASAMPLE_UNSPECIFIED', 315), ('EXTRASAMPLE_ASSOCALPHA', 319), ('EXTRASAMPLE_UNASSALPHA', 320)]
+DEBUG: Linked case value EXTRASAMPLE_UNSPECIFIED at line 315 to node 35
+DEBUG: Created case block 35 for line 315
+DEBUG: Created if branch node 36 at tif_getimage.c:316 (if statement starts at line 316)
+DEBUG: Linked case value EXTRASAMPLE_ASSOCALPHA at line 319 to node 39
+DEBUG: Created case block 39 for line 319
+DEBUG: Linked case value EXTRASAMPLE_UNASSALPHA at line 320 to node 40
+DEBUG: Created case block 40 for line 320
+DEBUG: Created if branch node 43 at tif_getimage.c:327 (if statement starts at line 327)
+DEBUG: Created if branch node 45 at tif_getimage.c:330 (if statement starts at line 330)
+DEBUG: Created if branch node 48 at tif_getimage.c:342 (if statement starts at line 342)
+DEBUG: Created case block 50 for line 344
+DEBUG: Created if branch node 51 at tif_getimage.c:345 (if statement starts at line 345)
+DEBUG: Created else keyword block 53 at tif_getimage.c:347 (else_node at line 347)
+DEBUG: Else branch created 1 block(s), else_start_id=53, else_end_id=54
+DEBUG: Created case block 56 for line 350
+DEBUG: Created case block 58 for line 353
+DEBUG: Found goto statement at tif_getimage.c:355, target label: fail_return, block_id: 60
+DEBUG: Collected switch cases at tif_getimage.c:343: [('1', 344), ('3', 350), (None, 353)]
+DEBUG: Linked case value 1 at line 344 to node 61
+DEBUG: Created case block 61 for line 344
+DEBUG: Created if branch node 62 at tif_getimage.c:345 (if statement starts at line 345)
+DEBUG: Created else keyword block 64 at tif_getimage.c:347 (else_node at line 347)
+DEBUG: Else branch created 1 block(s), else_start_id=64, else_end_id=65
+DEBUG: Linked case value 3 at line 350 to node 67
+DEBUG: Created case block 67 for line 350
+DEBUG: Linked case value None at line 353 to node 69
+DEBUG: Created case block 69 for line 353
+DEBUG: Found goto statement at tif_getimage.c:355, target label: fail_return, block_id: 71
+DEBUG: Created case block 74 for line 359
+DEBUG: Created if branch node 75 at tif_getimage.c:360 (if statement starts at line 360)
+DEBUG: Found goto statement at tif_getimage.c:363, target label: fail_return, block_id: 77
+DEBUG: Created if branch node 79 at tif_getimage.c:371 (if statement starts at line 371)
+DEBUG: Found goto statement at tif_getimage.c:373, target label: fail_return, block_id: 81
+DEBUG: Created case block 83 for line 381
+DEBUG: Created case block 84 for line 382
+DEBUG: Created if branch node 85 at tif_getimage.c:383 (if statement starts at line 383)
+DEBUG: Found goto statement at tif_getimage.c:392, target label: fail_return, block_id: 87
+DEBUG: Created case block 89 for line 395
+DEBUG: Created if branch node 90 at tif_getimage.c:397 (if statement starts at line 397)
+DEBUG: Created case block 92 for line 401
+DEBUG: Created case block 94 for line 410
+DEBUG: Collected switch cases at tif_getimage.c:400: [('COMPRESSION_JPEG', 401), (None, 410)]
+DEBUG: Linked case value COMPRESSION_JPEG at line 401 to node 96
+DEBUG: Created case block 96 for line 401
+DEBUG: Linked case value None at line 410 to node 98
+DEBUG: Created case block 98 for line 410
+DEBUG: Created case block 102 for line 421
+DEBUG: Created if branch node 103 at tif_getimage.c:422 (if statement starts at line 422)
+DEBUG: Found goto statement at tif_getimage.c:425, target label: fail_return, block_id: 105
+DEBUG: Created case block 107 for line 428
+DEBUG: Created if branch node 109 at tif_getimage.c:432 (if statement starts at line 432)
+DEBUG: Found goto statement at tif_getimage.c:435, target label: fail_return, block_id: 111
+DEBUG: Created if branch node 112 at tif_getimage.c:437 (if statement starts at line 437)
+DEBUG: Found goto statement at tif_getimage.c:440, target label: fail_return, block_id: 114
+DEBUG: Created case block 116 for line 444
+DEBUG: Created if branch node 117 at tif_getimage.c:445 (if statement starts at line 445)
+DEBUG: Found goto statement at tif_getimage.c:448, target label: fail_return, block_id: 119
+DEBUG: Created case block 121 for line 454
+DEBUG: Created if branch node 122 at tif_getimage.c:455 (if statement starts at line 455)
+DEBUG: Found goto statement at tif_getimage.c:458, target label: fail_return, block_id: 124
+DEBUG: Created if branch node 125 at tif_getimage.c:460 (if statement starts at line 460)
+DEBUG: Created case block 129 for line 469
+DEBUG: Created case block 131 for line 471
+DEBUG: Found goto statement at tif_getimage.c:474, target label: fail_return, block_id: 133
+DEBUG: Collected switch cases at tif_getimage.c:358: [('PHOTOMETRIC_PALETTE', 359), ('PHOTOMETRIC_MINISWHITE', 381), ('PHOTOMETRIC_MINISBLACK', 382), ('PHOTOMETRIC_YCBCR', 395), ('PHOTOMETRIC_RGB', 421), ('PHOTOMETRIC_SEPARATED', 428), ('PHOTOMETRIC_LOGL', 444), ('PHOTOMETRIC_LOGLUV', 454), ('PHOTOMETRIC_CIELAB', 469), (None, 471)]
+DEBUG: Linked case value PHOTOMETRIC_PALETTE at line 359 to node 134
+DEBUG: Created case block 134 for line 359
+DEBUG: Created if branch node 135 at tif_getimage.c:360 (if statement starts at line 360)
+DEBUG: Found goto statement at tif_getimage.c:363, target label: fail_return, block_id: 137
+DEBUG: Created if branch node 139 at tif_getimage.c:371 (if statement starts at line 371)
+DEBUG: Found goto statement at tif_getimage.c:373, target label: fail_return, block_id: 141
+DEBUG: Linked case value PHOTOMETRIC_MINISWHITE at line 381 to node 143
+DEBUG: Created case block 143 for line 381
+DEBUG: Linked case value PHOTOMETRIC_MINISBLACK at line 382 to node 144
+DEBUG: Created case block 144 for line 382
+DEBUG: Created if branch node 145 at tif_getimage.c:383 (if statement starts at line 383)
+DEBUG: Found goto statement at tif_getimage.c:392, target label: fail_return, block_id: 147
+DEBUG: Linked case value PHOTOMETRIC_YCBCR at line 395 to node 149
+DEBUG: Created case block 149 for line 395
+DEBUG: Created if branch node 150 at tif_getimage.c:397 (if statement starts at line 397)
+DEBUG: Created case block 152 for line 401
+DEBUG: Created case block 154 for line 410
+DEBUG: Collected switch cases at tif_getimage.c:400: [('COMPRESSION_JPEG', 401), (None, 410)]
+DEBUG: Linked case value COMPRESSION_JPEG at line 401 to node 156
+DEBUG: Created case block 156 for line 401
+DEBUG: Linked case value None at line 410 to node 158
+DEBUG: Created case block 158 for line 410
+DEBUG: Linked case value PHOTOMETRIC_RGB at line 421 to node 162
+DEBUG: Created case block 162 for line 421
+DEBUG: Created if branch node 163 at tif_getimage.c:422 (if statement starts at line 422)
+DEBUG: Found goto statement at tif_getimage.c:425, target label: fail_return, block_id: 165
+DEBUG: Linked case value PHOTOMETRIC_SEPARATED at line 428 to node 167
+DEBUG: Created case block 167 for line 428
+DEBUG: Created if branch node 169 at tif_getimage.c:432 (if statement starts at line 432)
+DEBUG: Found goto statement at tif_getimage.c:435, target label: fail_return, block_id: 171
+DEBUG: Created if branch node 172 at tif_getimage.c:437 (if statement starts at line 437)
+DEBUG: Found goto statement at tif_getimage.c:440, target label: fail_return, block_id: 174
+DEBUG: Linked case value PHOTOMETRIC_LOGL at line 444 to node 176
+DEBUG: Created case block 176 for line 444
+DEBUG: Created if branch node 177 at tif_getimage.c:445 (if statement starts at line 445)
+DEBUG: Found goto statement at tif_getimage.c:448, target label: fail_return, block_id: 179
+DEBUG: Linked case value PHOTOMETRIC_LOGLUV at line 454 to node 181
+DEBUG: Created case block 181 for line 454
+DEBUG: Created if branch node 182 at tif_getimage.c:455 (if statement starts at line 455)
+DEBUG: Found goto statement at tif_getimage.c:458, target label: fail_return, block_id: 184
+DEBUG: Created if branch node 185 at tif_getimage.c:460 (if statement starts at line 460)
+DEBUG: Linked case value PHOTOMETRIC_CIELAB at line 469 to node 189
+DEBUG: Created case block 189 for line 469
+DEBUG: Linked case value None at line 471 to node 191
+DEBUG: Created case block 191 for line 471
+DEBUG: Found goto statement at tif_getimage.c:474, target label: fail_return, block_id: 193
+DEBUG: Created if branch node 196 at tif_getimage.c:481 (if statement starts at line 481)
+DEBUG: Created if branch node 197 at tif_getimage.c:482 (if statement starts at line 482)
+DEBUG: Found goto statement at tif_getimage.c:484, target label: fail_return, block_id: 199
+DEBUG: Created else keyword block 200 at tif_getimage.c:486 (else_node at line 486)
+DEBUG: Created if branch node 201 at tif_getimage.c:487 (if statement starts at line 487)
+DEBUG: Found goto statement at tif_getimage.c:489, target label: fail_return, block_id: 203
+DEBUG: Else branch created 3 block(s), else_start_id=200, else_end_id=203
+DEBUG: Found label 'fail_return' at tif_getimage.c:494, block_id: 205
+DEBUG: _build_basic_blocks summary:
+  Total blocks: 207
+  Goto statements: 24
+  Labels: 1
+  Goto map: [{'block_id': 14, 'target_label': 'fail_return', 'location': 'tif_getimage.c:306'}, {'block_id': 23, 'target_label': 'fail_return', 'location': 'tif_getimage.c:306'}, {'block_id': 60, 'target_label': 'fail_return', 'location': 'tif_getimage.c:355'}, {'block_id': 71, 'target_label': 'fail_return', 'location': 'tif_getimage.c:355'}, {'block_id': 77, 'target_label': 'fail_return', 'location': 'tif_getimage.c:363'}, {'block_id': 81, 'target_label': 'fail_return', 'location': 'tif_getimage.c:373'}, {'block_id': 87, 'target_label': 'fail_return', 'location': 'tif_getimage.c:392'}, {'block_id': 105, 'target_label': 'fail_return', 'location': 'tif_getimage.c:425'}, {'block_id': 111, 'target_label': 'fail_return', 'location': 'tif_getimage.c:435'}, {'block_id': 114, 'target_label': 'fail_return', 'location': 'tif_getimage.c:440'}, {'block_id': 119, 'target_label': 'fail_return', 'location': 'tif_getimage.c:448'}, {'block_id': 124, 'target_label': 'fail_return', 'location': 'tif_getimage.c:458'}, {'block_id': 133, 'target_label': 'fail_return', 'location': 'tif_getimage.c:474'}, {'block_id': 137, 'target_label': 'fail_return', 'location': 'tif_getimage.c:363'}, {'block_id': 141, 'target_label': 'fail_return', 'location': 'tif_getimage.c:373'}, {'block_id': 147, 'target_label': 'fail_return', 'location': 'tif_getimage.c:392'}, {'block_id': 165, 'target_label': 'fail_return', 'location': 'tif_getimage.c:425'}, {'block_id': 171, 'target_label': 'fail_return', 'location': 'tif_getimage.c:435'}, {'block_id': 174, 'target_label': 'fail_return', 'location': 'tif_getimage.c:440'}, {'block_id': 179, 'target_label': 'fail_return', 'location': 'tif_getimage.c:448'}, {'block_id': 184, 'target_label': 'fail_return', 'location': 'tif_getimage.c:458'}, {'block_id': 193, 'target_label': 'fail_return', 'location': 'tif_getimage.c:474'}, {'block_id': 199, 'target_label': 'fail_return', 'location': 'tif_getimage.c:484'}, {'block_id': 203, 'target_label': 'fail_return', 'location': 'tif_getimage.c:489'}]
+  Label map: {'fail_return': 205}
+DEBUG: Building goto edges from 24 goto statements
+DEBUG: Added goto edge: block 14 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 23 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 60 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 71 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 77 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 81 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 87 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 105 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 111 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 114 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 119 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 124 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 133 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 137 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 141 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 147 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 165 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 171 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 174 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 179 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 184 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 193 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 199 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 203 -> label 'fail_return' (node 205)
+DEBUG: Added break edge: 11 -> 24 (structure switch)
+DEBUG: Added break edge: 20 -> 24 (structure switch)
+DEBUG: Added break edge: 31 -> 42 (structure switch)
+DEBUG: Added break edge: 38 -> 42 (structure switch)
+DEBUG: Added break edge: 34 -> 42 (structure switch)
+DEBUG: Added break edge: 41 -> 42 (structure switch)
+DEBUG: Added break edge: 55 -> 72 (structure switch)
+DEBUG: Added break edge: 66 -> 72 (structure switch)
+DEBUG: Added break edge: 57 -> 72 (structure switch)
+DEBUG: Added break edge: 68 -> 72 (structure switch)
+DEBUG: Added break edge: 88 -> 194 (structure switch)
+DEBUG: Added break edge: 148 -> 194 (structure switch)
+DEBUG: Added break edge: 93 -> 194 (structure switch)
+DEBUG: Added break edge: 97 -> 194 (structure switch)
+DEBUG: Added break edge: 153 -> 160 (structure switch)
+DEBUG: Added break edge: 157 -> 160 (structure switch)
+DEBUG: Added break edge: 95 -> 194 (structure switch)
+DEBUG: Added break edge: 99 -> 194 (structure switch)
+DEBUG: Added break edge: 155 -> 160 (structure switch)
+DEBUG: Added break edge: 159 -> 160 (structure switch)
+DEBUG: Added break edge: 101 -> 194 (structure switch)
+DEBUG: Added break edge: 161 -> 194 (structure switch)
+DEBUG: Added break edge: 106 -> 194 (structure switch)
+DEBUG: Added break edge: 166 -> 194 (structure switch)
+DEBUG: Added break edge: 115 -> 194 (structure switch)
+DEBUG: Added break edge: 175 -> 194 (structure switch)
+DEBUG: Added break edge: 120 -> 194 (structure switch)
+DEBUG: Added break edge: 180 -> 194 (structure switch)
+DEBUG: Added break edge: 128 -> 194 (structure switch)
+DEBUG: Added break edge: 188 -> 194 (structure switch)
+DEBUG: Added break edge: 130 -> 194 (structure switch)
+DEBUG: Added break edge: 190 -> 194 (structure switch)
+DEBUG: Added break edge: 11 -> 24 (structure switch)
+DEBUG: Added break edge: 20 -> 24 (structure switch)
+DEBUG: Added break edge: 31 -> 42 (structure switch)
+DEBUG: Added break edge: 38 -> 42 (structure switch)
+DEBUG: Added break edge: 34 -> 42 (structure switch)
+DEBUG: Added break edge: 41 -> 42 (structure switch)
+DEBUG: Added break edge: 55 -> 72 (structure switch)
+DEBUG: Added break edge: 66 -> 72 (structure switch)
+DEBUG: Added break edge: 57 -> 72 (structure switch)
+DEBUG: Added break edge: 68 -> 72 (structure switch)
+DEBUG: Added break edge: 88 -> 194 (structure switch)
+DEBUG: Added break edge: 148 -> 194 (structure switch)
+DEBUG: Added break edge: 93 -> 194 (structure switch)
+DEBUG: Added break edge: 97 -> 194 (structure switch)
+DEBUG: Added break edge: 153 -> 160 (structure switch)
+DEBUG: Added break edge: 157 -> 160 (structure switch)
+DEBUG: Added break edge: 95 -> 194 (structure switch)
+DEBUG: Added break edge: 99 -> 194 (structure switch)
+DEBUG: Added break edge: 155 -> 160 (structure switch)
+DEBUG: Added break edge: 159 -> 160 (structure switch)
+DEBUG: Added break edge: 101 -> 194 (structure switch)
+DEBUG: Added break edge: 161 -> 194 (structure switch)
+DEBUG: Added break edge: 106 -> 194 (structure switch)
+DEBUG: Added break edge: 166 -> 194 (structure switch)
+DEBUG: Added break edge: 115 -> 194 (structure switch)
+DEBUG: Added break edge: 175 -> 194 (structure switch)
+DEBUG: Added break edge: 120 -> 194 (structure switch)
+DEBUG: Added break edge: 180 -> 194 (structure switch)
+DEBUG: Added break edge: 128 -> 194 (structure switch)
+DEBUG: Added break edge: 188 -> 194 (structure switch)
+DEBUG: Added break edge: 130 -> 194 (structure switch)
+DEBUG: Added break edge: 190 -> 194 (structure switch)
+DEBUG: Processing if statement at condition 2:
+  then_start_id=3, then_end_id=3
+  else_start_id=None, else_end_id=None
+  if_end_id=209
+  Added true_branch: 2 -> 3
+  Added false_branch (if_end, then ends with jump): 2 -> 209
+  Added switch_case edge: 5 -> 15 (value: 1)
+  Added switch_case edge: 5 -> 16 (value: 2)
+  Added switch_case edge: 5 -> 17 (value: 4)
+  Added switch_case edge: 5 -> 18 (value: 8)
+  Added switch_case edge: 5 -> 19 (value: 16)
+  Added switch_case edge: 5 -> 21 (value: None)
+  Added implicit default edge: 5 -> 24
+DEBUG: Processing if statement at condition 29:
+  then_start_id=30, then_end_id=30
+  else_start_id=None, else_end_id=None
+  if_end_id=37
+  Added true_branch: 29 -> 30
+  Added then_end -> if_end edge: 30 -> 37
+  Added false_branch (if_end, no else): 29 -> 37
+  Added switch_case edge: 27 -> 35 (value: EXTRASAMPLE_UNSPECIFIED)
+  Added switch_case edge: 27 -> 39 (value: EXTRASAMPLE_ASSOCALPHA)
+  Added switch_case edge: 27 -> 40 (value: EXTRASAMPLE_UNASSALPHA)
+  Added implicit default edge: 27 -> 42
+DEBUG: Processing if statement at condition 36:
+  then_start_id=37, then_end_id=37
+  else_start_id=None, else_end_id=None
+  if_end_id=31
+  Added true_branch: 36 -> 37
+  Added then_end -> if_end edge: 37 -> 31
+  Added false_branch (if_end, no else): 36 -> 31
+DEBUG: Processing if statement at condition 26:
+  then_start_id=27, then_end_id=42
+  else_start_id=None, else_end_id=None
+  if_end_id=214
+  Added true_branch: 26 -> 27
+  Added then_end -> if_end edge: 42 -> 214
+  Added false_branch (if_end, no else): 26 -> 214
+DEBUG: Processing if statement at condition 43:
+  then_start_id=44, then_end_id=44
+  else_start_id=None, else_end_id=None
+  if_end_id=217
+  Added true_branch: 43 -> 44
+  Added then_end -> if_end edge: 44 -> 217
+  Added false_branch (if_end, no else): 43 -> 217
+DEBUG: Processing if statement at condition 45:
+  then_start_id=46, then_end_id=46
+  else_start_id=None, else_end_id=None
+  if_end_id=221
+  Added true_branch: 45 -> 46
+  Added then_end -> if_end edge: 46 -> 221
+  Added false_branch (if_end, no else): 45 -> 221
+DEBUG: Processing if statement at condition 51:
+  then_start_id=52, then_end_id=52
+  else_start_id=53, else_end_id=54
+  if_end_id=65
+  Added true_branch: 51 -> 52
+  Added then_end -> if_end edge: 52 -> 65
+  Added false_branch (else): 51 -> 53
+  Added switch_case edge: 49 -> 61 (value: 1)
+  Added switch_case edge: 49 -> 67 (value: 3)
+  Added switch_case edge: 49 -> 69 (value: None)
+  Added implicit default edge: 49 -> 72
+DEBUG: Processing if statement at condition 62:
+  then_start_id=63, then_end_id=63
+  else_start_id=64, else_end_id=65
+  if_end_id=55
+  Added true_branch: 62 -> 63
+  Added then_end -> if_end edge: 63 -> 55
+  Added false_branch (else): 62 -> 64
+DEBUG: Processing if statement at condition 48:
+  then_start_id=49, then_end_id=72
+  else_start_id=None, else_end_id=None
+  if_end_id=224
+  Added true_branch: 48 -> 49
+  Added then_end -> if_end edge: 72 -> 224
+  Added false_branch (if_end, no else): 48 -> 224
+DEBUG: Processing if statement at condition 75:
+  then_start_id=77, then_end_id=77
+  else_start_id=None, else_end_id=None
+  if_end_id=137
+  Added true_branch: 75 -> 77
+  Added false_branch (if_end, then ends with jump): 75 -> 137
+DEBUG: Processing if statement at condition 79:
+  then_start_id=81, then_end_id=81
+  else_start_id=None, else_end_id=None
+  if_end_id=141
+  Added true_branch: 79 -> 81
+  Added false_branch (if_end, then ends with jump): 79 -> 141
+DEBUG: Processing if statement at condition 85:
+  then_start_id=87, then_end_id=87
+  else_start_id=None, else_end_id=None
+  if_end_id=147
+  Added true_branch: 85 -> 87
+  Added false_branch (if_end, then ends with jump): 85 -> 147
+  Added switch_case edge: 91 -> 96 (value: COMPRESSION_JPEG)
+  Added switch_case edge: 91 -> 98 (value: None)
+  Added implicit default edge: 91 -> 100
+DEBUG: Processing if statement at condition 90:
+  then_start_id=91, then_end_id=100
+  else_start_id=None, else_end_id=None
+  if_end_id=160
+  Added true_branch: 90 -> 91
+  Added then_end -> if_end edge: 100 -> 160
+  Added false_branch (if_end, no else): 90 -> 160
+DEBUG: Processing if statement at condition 103:
+  then_start_id=105, then_end_id=105
+  else_start_id=None, else_end_id=None
+  if_end_id=165
+  Added true_branch: 103 -> 105
+  Added false_branch (if_end, then ends with jump): 103 -> 165
+DEBUG: Processing if statement at condition 109:
+  then_start_id=111, then_end_id=111
+  else_start_id=None, else_end_id=None
+  if_end_id=171
+  Added true_branch: 109 -> 111
+  Added false_branch (if_end, then ends with jump): 109 -> 171
+DEBUG: Processing if statement at condition 112:
+  then_start_id=114, then_end_id=114
+  else_start_id=None, else_end_id=None
+  if_end_id=174
+  Added true_branch: 112 -> 114
+  Added false_branch (if_end, then ends with jump): 112 -> 174
+DEBUG: Processing if statement at condition 117:
+  then_start_id=119, then_end_id=119
+  else_start_id=None, else_end_id=None
+  if_end_id=179
+  Added true_branch: 117 -> 119
+  Added false_branch (if_end, then ends with jump): 117 -> 179
+DEBUG: Processing if statement at condition 122:
+  then_start_id=124, then_end_id=124
+  else_start_id=None, else_end_id=None
+  if_end_id=184
+  Added true_branch: 122 -> 124
+  Added false_branch (if_end, then ends with jump): 122 -> 184
+DEBUG: Processing if statement at condition 125:
+  then_start_id=127, then_end_id=127
+  else_start_id=None, else_end_id=None
+  if_end_id=187
+  Added true_branch: 125 -> 127
+  Added false_branch (if_end, then ends with jump): 125 -> 187
+  Added switch_case edge: 73 -> 134 (value: PHOTOMETRIC_PALETTE)
+  Added switch_case edge: 73 -> 143 (value: PHOTOMETRIC_MINISWHITE)
+  Added switch_case edge: 73 -> 144 (value: PHOTOMETRIC_MINISBLACK)
+  Added switch_case edge: 73 -> 149 (value: PHOTOMETRIC_YCBCR)
+  Added switch_case edge: 73 -> 162 (value: PHOTOMETRIC_RGB)
+  Added switch_case edge: 73 -> 167 (value: PHOTOMETRIC_SEPARATED)
+  Added switch_case edge: 73 -> 176 (value: PHOTOMETRIC_LOGL)
+  Added switch_case edge: 73 -> 181 (value: PHOTOMETRIC_LOGLUV)
+  Added switch_case edge: 73 -> 189 (value: PHOTOMETRIC_CIELAB)
+  Added switch_case edge: 73 -> 191 (value: None)
+  Added implicit default edge: 73 -> 194
+DEBUG: Processing if statement at condition 135:
+  then_start_id=137, then_end_id=137
+  else_start_id=None, else_end_id=None
+  if_end_id=226
+  Added true_branch: 135 -> 137
+  Added false_branch (if_end, then ends with jump): 135 -> 226
+DEBUG: Processing if statement at condition 139:
+  then_start_id=141, then_end_id=141
+  else_start_id=None, else_end_id=None
+  if_end_id=229
+  Added true_branch: 139 -> 141
+  Added false_branch (if_end, then ends with jump): 139 -> 229
+DEBUG: Processing if statement at condition 145:
+  then_start_id=147, then_end_id=147
+  else_start_id=None, else_end_id=None
+  if_end_id=240
+  Added true_branch: 145 -> 147
+  Added false_branch (if_end, then ends with jump): 145 -> 240
+  Added switch_case edge: 151 -> 156 (value: COMPRESSION_JPEG)
+  Added switch_case edge: 151 -> 158 (value: None)
+  Added implicit default edge: 151 -> 160
+DEBUG: Processing if statement at condition 150:
+  then_start_id=151, then_end_id=160
+  else_start_id=None, else_end_id=None
+  if_end_id=249
+  Added true_branch: 150 -> 151
+  Added then_end -> if_end edge: 160 -> 249
+  Added false_branch (if_end, no else): 150 -> 249
+DEBUG: Processing if statement at condition 163:
+  then_start_id=165, then_end_id=165
+  else_start_id=None, else_end_id=None
+  if_end_id=256
+  Added true_branch: 163 -> 165
+  Added false_branch (if_end, then ends with jump): 163 -> 256
+DEBUG: Processing if statement at condition 169:
+  then_start_id=171, then_end_id=171
+  else_start_id=None, else_end_id=None
+  if_end_id=259
+  Added true_branch: 169 -> 171
+  Added false_branch (if_end, then ends with jump): 169 -> 259
+DEBUG: Processing if statement at condition 172:
+  then_start_id=174, then_end_id=174
+  else_start_id=None, else_end_id=None
+  if_end_id=261
+  Added true_branch: 172 -> 174
+  Added false_branch (if_end, then ends with jump): 172 -> 261
+DEBUG: Processing if statement at condition 177:
+  then_start_id=179, then_end_id=179
+  else_start_id=None, else_end_id=None
+  if_end_id=264
+  Added true_branch: 177 -> 179
+  Added false_branch (if_end, then ends with jump): 177 -> 264
+DEBUG: Processing if statement at condition 182:
+  then_start_id=184, then_end_id=184
+  else_start_id=None, else_end_id=None
+  if_end_id=266
+  Added true_branch: 182 -> 184
+  Added false_branch (if_end, then ends with jump): 182 -> 266
+DEBUG: Processing if statement at condition 185:
+  then_start_id=187, then_end_id=187
+  else_start_id=None, else_end_id=None
+  if_end_id=268
+  Added true_branch: 185 -> 187
+  Added false_branch (if_end, then ends with jump): 185 -> 268
+DEBUG: Processing if statement at condition 197:
+  then_start_id=199, then_end_id=199
+  else_start_id=None, else_end_id=None
+  if_end_id=271
+  Added true_branch: 197 -> 199
+  Added false_branch (if_end, then ends with jump): 197 -> 271
+DEBUG: Processing if statement at condition 201:
+  then_start_id=203, then_end_id=203
+  else_start_id=None, else_end_id=None
+  if_end_id=272
+  Added true_branch: 201 -> 203
+  Added false_branch (if_end, then ends with jump): 201 -> 272
+DEBUG: Processing if statement at condition 196:
+  then_start_id=197, then_end_id=199
+  else_start_id=200, else_end_id=203
+  if_end_id=272
+  Added true_branch: 196 -> 197
+  Added false_branch (else): 196 -> 200
+DEBUG: _build_cfg_edges summary: 315 total edges built
+  Control structure edges: 160
+  Goto edges: 24
+  Sequential edges: 131
+DEBUG: Connected return node 3 to exit node 276
+DEBUG: Connected return node 127 to exit node 276
+DEBUG: Connected return node 187 to exit node 276
+DEBUG: Connected return node 204 to exit node 276
+DEBUG: Connected return node 207 to exit node 276
+DEBUG: Connected last block 275 (fallthrough) to exit node 276
+Location: tif_getimage.c:276 (Line 276)
+  Matched Node 3 [return] lines 276-276
+    Statements: ['return 0;']
+Location: tif_getimage.c:496 (Line 496)
+  Matched Node 207 [return] lines 496-496
+    Statements: ['return 0;']
+  Matched Node 276 [exit] lines 496-496
+Location: tif_getimage.c:463 (Line 463)
+  Matched Node 127 [return] lines 463-463
+    Statements: ['return (0);']
+  Matched Node 187 [return] lines 463-463
+    Statements: ['return (0);']
+Location: tif_getimage.c:497 (Line 497)
+  Matched Node 275 [placeholder] lines 497-497
+    Statements: ['}']
+Location: tif_getimage.c:492 (Line 492)
+  Matched Node 204 [return] lines 492-492
+    Statements: ['return 1;']
+
+================================================================================
+Testing find_all_paths_between_lines
+================================================================================
+Finding all paths between tif_getimage.c:308 and tif_getimage.c:325 in TIFFRGBAImageBegin...
+DEBUG: Created if branch node 2 at tif_getimage.c:275 (if statement starts at line 275)
+DEBUG: Created case block 6 for line 297
+DEBUG: Created case block 7 for line 298
+DEBUG: Created case block 8 for line 299
+DEBUG: Created case block 9 for line 300
+DEBUG: Created case block 10 for line 301
+DEBUG: Created case block 12 for line 303
+DEBUG: Found goto statement at tif_getimage.c:306, target label: fail_return, block_id: 14
+DEBUG: Collected switch cases at tif_getimage.c:296: [('1', 297), ('2', 298), ('4', 299), ('8', 300), ('16', 301), (None, 303)]
+DEBUG: Linked case value 1 at line 297 to node 15
+DEBUG: Created case block 15 for line 297
+DEBUG: Linked case value 2 at line 298 to node 16
+DEBUG: Created case block 16 for line 298
+DEBUG: Linked case value 4 at line 299 to node 17
+DEBUG: Created case block 17 for line 299
+DEBUG: Linked case value 8 at line 300 to node 18
+DEBUG: Created case block 18 for line 300
+DEBUG: Linked case value 16 at line 301 to node 19
+DEBUG: Created case block 19 for line 301
+DEBUG: Linked case value None at line 303 to node 21
+DEBUG: Created case block 21 for line 303
+DEBUG: Found goto statement at tif_getimage.c:306, target label: fail_return, block_id: 23
+DEBUG: Created if branch node 26 at tif_getimage.c:312 (if statement starts at line 312)
+DEBUG: Created case block 28 for line 315
+DEBUG: Created if branch node 29 at tif_getimage.c:316 (if statement starts at line 316)
+DEBUG: Created case block 32 for line 319
+DEBUG: Created case block 33 for line 320
+DEBUG: Collected switch cases at tif_getimage.c:314: [('EXTRASAMPLE_UNSPECIFIED', 315), ('EXTRASAMPLE_ASSOCALPHA', 319), ('EXTRASAMPLE_UNASSALPHA', 320)]
+DEBUG: Linked case value EXTRASAMPLE_UNSPECIFIED at line 315 to node 35
+DEBUG: Created case block 35 for line 315
+DEBUG: Created if branch node 36 at tif_getimage.c:316 (if statement starts at line 316)
+DEBUG: Linked case value EXTRASAMPLE_ASSOCALPHA at line 319 to node 39
+DEBUG: Created case block 39 for line 319
+DEBUG: Linked case value EXTRASAMPLE_UNASSALPHA at line 320 to node 40
+DEBUG: Created case block 40 for line 320
+DEBUG: Created if branch node 43 at tif_getimage.c:327 (if statement starts at line 327)
+DEBUG: Created if branch node 45 at tif_getimage.c:330 (if statement starts at line 330)
+DEBUG: Created if branch node 48 at tif_getimage.c:342 (if statement starts at line 342)
+DEBUG: Created case block 50 for line 344
+DEBUG: Created if branch node 51 at tif_getimage.c:345 (if statement starts at line 345)
+DEBUG: Created else keyword block 53 at tif_getimage.c:347 (else_node at line 347)
+DEBUG: Else branch created 1 block(s), else_start_id=53, else_end_id=54
+DEBUG: Created case block 56 for line 350
+DEBUG: Created case block 58 for line 353
+DEBUG: Found goto statement at tif_getimage.c:355, target label: fail_return, block_id: 60
+DEBUG: Collected switch cases at tif_getimage.c:343: [('1', 344), ('3', 350), (None, 353)]
+DEBUG: Linked case value 1 at line 344 to node 61
+DEBUG: Created case block 61 for line 344
+DEBUG: Created if branch node 62 at tif_getimage.c:345 (if statement starts at line 345)
+DEBUG: Created else keyword block 64 at tif_getimage.c:347 (else_node at line 347)
+DEBUG: Else branch created 1 block(s), else_start_id=64, else_end_id=65
+DEBUG: Linked case value 3 at line 350 to node 67
+DEBUG: Created case block 67 for line 350
+DEBUG: Linked case value None at line 353 to node 69
+DEBUG: Created case block 69 for line 353
+DEBUG: Found goto statement at tif_getimage.c:355, target label: fail_return, block_id: 71
+DEBUG: Created case block 74 for line 359
+DEBUG: Created if branch node 75 at tif_getimage.c:360 (if statement starts at line 360)
+DEBUG: Found goto statement at tif_getimage.c:363, target label: fail_return, block_id: 77
+DEBUG: Created if branch node 79 at tif_getimage.c:371 (if statement starts at line 371)
+DEBUG: Found goto statement at tif_getimage.c:373, target label: fail_return, block_id: 81
+DEBUG: Created case block 83 for line 381
+DEBUG: Created case block 84 for line 382
+DEBUG: Created if branch node 85 at tif_getimage.c:383 (if statement starts at line 383)
+DEBUG: Found goto statement at tif_getimage.c:392, target label: fail_return, block_id: 87
+DEBUG: Created case block 89 for line 395
+DEBUG: Created if branch node 90 at tif_getimage.c:397 (if statement starts at line 397)
+DEBUG: Created case block 92 for line 401
+DEBUG: Created case block 94 for line 410
+DEBUG: Collected switch cases at tif_getimage.c:400: [('COMPRESSION_JPEG', 401), (None, 410)]
+DEBUG: Linked case value COMPRESSION_JPEG at line 401 to node 96
+DEBUG: Created case block 96 for line 401
+DEBUG: Linked case value None at line 410 to node 98
+DEBUG: Created case block 98 for line 410
+DEBUG: Created case block 102 for line 421
+DEBUG: Created if branch node 103 at tif_getimage.c:422 (if statement starts at line 422)
+DEBUG: Found goto statement at tif_getimage.c:425, target label: fail_return, block_id: 105
+DEBUG: Created case block 107 for line 428
+DEBUG: Created if branch node 109 at tif_getimage.c:432 (if statement starts at line 432)
+DEBUG: Found goto statement at tif_getimage.c:435, target label: fail_return, block_id: 111
+DEBUG: Created if branch node 112 at tif_getimage.c:437 (if statement starts at line 437)
+DEBUG: Found goto statement at tif_getimage.c:440, target label: fail_return, block_id: 114
+DEBUG: Created case block 116 for line 444
+DEBUG: Created if branch node 117 at tif_getimage.c:445 (if statement starts at line 445)
+DEBUG: Found goto statement at tif_getimage.c:448, target label: fail_return, block_id: 119
+DEBUG: Created case block 121 for line 454
+DEBUG: Created if branch node 122 at tif_getimage.c:455 (if statement starts at line 455)
+DEBUG: Found goto statement at tif_getimage.c:458, target label: fail_return, block_id: 124
+DEBUG: Created if branch node 125 at tif_getimage.c:460 (if statement starts at line 460)
+DEBUG: Created case block 129 for line 469
+DEBUG: Created case block 131 for line 471
+DEBUG: Found goto statement at tif_getimage.c:474, target label: fail_return, block_id: 133
+DEBUG: Collected switch cases at tif_getimage.c:358: [('PHOTOMETRIC_PALETTE', 359), ('PHOTOMETRIC_MINISWHITE', 381), ('PHOTOMETRIC_MINISBLACK', 382), ('PHOTOMETRIC_YCBCR', 395), ('PHOTOMETRIC_RGB', 421), ('PHOTOMETRIC_SEPARATED', 428), ('PHOTOMETRIC_LOGL', 444), ('PHOTOMETRIC_LOGLUV', 454), ('PHOTOMETRIC_CIELAB', 469), (None, 471)]
+DEBUG: Linked case value PHOTOMETRIC_PALETTE at line 359 to node 134
+DEBUG: Created case block 134 for line 359
+DEBUG: Created if branch node 135 at tif_getimage.c:360 (if statement starts at line 360)
+DEBUG: Found goto statement at tif_getimage.c:363, target label: fail_return, block_id: 137
+DEBUG: Created if branch node 139 at tif_getimage.c:371 (if statement starts at line 371)
+DEBUG: Found goto statement at tif_getimage.c:373, target label: fail_return, block_id: 141
+DEBUG: Linked case value PHOTOMETRIC_MINISWHITE at line 381 to node 143
+DEBUG: Created case block 143 for line 381
+DEBUG: Linked case value PHOTOMETRIC_MINISBLACK at line 382 to node 144
+DEBUG: Created case block 144 for line 382
+DEBUG: Created if branch node 145 at tif_getimage.c:383 (if statement starts at line 383)
+DEBUG: Found goto statement at tif_getimage.c:392, target label: fail_return, block_id: 147
+DEBUG: Linked case value PHOTOMETRIC_YCBCR at line 395 to node 149
+DEBUG: Created case block 149 for line 395
+DEBUG: Created if branch node 150 at tif_getimage.c:397 (if statement starts at line 397)
+DEBUG: Created case block 152 for line 401
+DEBUG: Created case block 154 for line 410
+DEBUG: Collected switch cases at tif_getimage.c:400: [('COMPRESSION_JPEG', 401), (None, 410)]
+DEBUG: Linked case value COMPRESSION_JPEG at line 401 to node 156
+DEBUG: Created case block 156 for line 401
+DEBUG: Linked case value None at line 410 to node 158
+DEBUG: Created case block 158 for line 410
+DEBUG: Linked case value PHOTOMETRIC_RGB at line 421 to node 162
+DEBUG: Created case block 162 for line 421
+DEBUG: Created if branch node 163 at tif_getimage.c:422 (if statement starts at line 422)
+DEBUG: Found goto statement at tif_getimage.c:425, target label: fail_return, block_id: 165
+DEBUG: Linked case value PHOTOMETRIC_SEPARATED at line 428 to node 167
+DEBUG: Created case block 167 for line 428
+DEBUG: Created if branch node 169 at tif_getimage.c:432 (if statement starts at line 432)
+DEBUG: Found goto statement at tif_getimage.c:435, target label: fail_return, block_id: 171
+DEBUG: Created if branch node 172 at tif_getimage.c:437 (if statement starts at line 437)
+DEBUG: Found goto statement at tif_getimage.c:440, target label: fail_return, block_id: 174
+DEBUG: Linked case value PHOTOMETRIC_LOGL at line 444 to node 176
+DEBUG: Created case block 176 for line 444
+DEBUG: Created if branch node 177 at tif_getimage.c:445 (if statement starts at line 445)
+DEBUG: Found goto statement at tif_getimage.c:448, target label: fail_return, block_id: 179
+DEBUG: Linked case value PHOTOMETRIC_LOGLUV at line 454 to node 181
+DEBUG: Created case block 181 for line 454
+DEBUG: Created if branch node 182 at tif_getimage.c:455 (if statement starts at line 455)
+DEBUG: Found goto statement at tif_getimage.c:458, target label: fail_return, block_id: 184
+DEBUG: Created if branch node 185 at tif_getimage.c:460 (if statement starts at line 460)
+DEBUG: Linked case value PHOTOMETRIC_CIELAB at line 469 to node 189
+DEBUG: Created case block 189 for line 469
+DEBUG: Linked case value None at line 471 to node 191
+DEBUG: Created case block 191 for line 471
+DEBUG: Found goto statement at tif_getimage.c:474, target label: fail_return, block_id: 193
+DEBUG: Created if branch node 196 at tif_getimage.c:481 (if statement starts at line 481)
+DEBUG: Created if branch node 197 at tif_getimage.c:482 (if statement starts at line 482)
+DEBUG: Found goto statement at tif_getimage.c:484, target label: fail_return, block_id: 199
+DEBUG: Created else keyword block 200 at tif_getimage.c:486 (else_node at line 486)
+DEBUG: Created if branch node 201 at tif_getimage.c:487 (if statement starts at line 487)
+DEBUG: Found goto statement at tif_getimage.c:489, target label: fail_return, block_id: 203
+DEBUG: Else branch created 3 block(s), else_start_id=200, else_end_id=203
+DEBUG: Found label 'fail_return' at tif_getimage.c:494, block_id: 205
+DEBUG: _build_basic_blocks summary:
+  Total blocks: 207
+  Goto statements: 24
+  Labels: 1
+  Goto map: [{'block_id': 14, 'target_label': 'fail_return', 'location': 'tif_getimage.c:306'}, {'block_id': 23, 'target_label': 'fail_return', 'location': 'tif_getimage.c:306'}, {'block_id': 60, 'target_label': 'fail_return', 'location': 'tif_getimage.c:355'}, {'block_id': 71, 'target_label': 'fail_return', 'location': 'tif_getimage.c:355'}, {'block_id': 77, 'target_label': 'fail_return', 'location': 'tif_getimage.c:363'}, {'block_id': 81, 'target_label': 'fail_return', 'location': 'tif_getimage.c:373'}, {'block_id': 87, 'target_label': 'fail_return', 'location': 'tif_getimage.c:392'}, {'block_id': 105, 'target_label': 'fail_return', 'location': 'tif_getimage.c:425'}, {'block_id': 111, 'target_label': 'fail_return', 'location': 'tif_getimage.c:435'}, {'block_id': 114, 'target_label': 'fail_return', 'location': 'tif_getimage.c:440'}, {'block_id': 119, 'target_label': 'fail_return', 'location': 'tif_getimage.c:448'}, {'block_id': 124, 'target_label': 'fail_return', 'location': 'tif_getimage.c:458'}, {'block_id': 133, 'target_label': 'fail_return', 'location': 'tif_getimage.c:474'}, {'block_id': 137, 'target_label': 'fail_return', 'location': 'tif_getimage.c:363'}, {'block_id': 141, 'target_label': 'fail_return', 'location': 'tif_getimage.c:373'}, {'block_id': 147, 'target_label': 'fail_return', 'location': 'tif_getimage.c:392'}, {'block_id': 165, 'target_label': 'fail_return', 'location': 'tif_getimage.c:425'}, {'block_id': 171, 'target_label': 'fail_return', 'location': 'tif_getimage.c:435'}, {'block_id': 174, 'target_label': 'fail_return', 'location': 'tif_getimage.c:440'}, {'block_id': 179, 'target_label': 'fail_return', 'location': 'tif_getimage.c:448'}, {'block_id': 184, 'target_label': 'fail_return', 'location': 'tif_getimage.c:458'}, {'block_id': 193, 'target_label': 'fail_return', 'location': 'tif_getimage.c:474'}, {'block_id': 199, 'target_label': 'fail_return', 'location': 'tif_getimage.c:484'}, {'block_id': 203, 'target_label': 'fail_return', 'location': 'tif_getimage.c:489'}]
+  Label map: {'fail_return': 205}
+DEBUG: Building goto edges from 24 goto statements
+DEBUG: Added goto edge: block 14 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 23 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 60 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 71 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 77 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 81 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 87 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 105 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 111 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 114 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 119 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 124 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 133 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 137 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 141 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 147 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 165 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 171 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 174 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 179 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 184 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 193 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 199 -> label 'fail_return' (node 205)
+DEBUG: Added goto edge: block 203 -> label 'fail_return' (node 205)
+DEBUG: Added break edge: 11 -> 24 (structure switch)
+DEBUG: Added break edge: 20 -> 24 (structure switch)
+DEBUG: Added break edge: 31 -> 42 (structure switch)
+DEBUG: Added break edge: 38 -> 42 (structure switch)
+DEBUG: Added break edge: 34 -> 42 (structure switch)
+DEBUG: Added break edge: 41 -> 42 (structure switch)
+DEBUG: Added break edge: 55 -> 72 (structure switch)
+DEBUG: Added break edge: 66 -> 72 (structure switch)
+DEBUG: Added break edge: 57 -> 72 (structure switch)
+DEBUG: Added break edge: 68 -> 72 (structure switch)
+DEBUG: Added break edge: 88 -> 194 (structure switch)
+DEBUG: Added break edge: 148 -> 194 (structure switch)
+DEBUG: Added break edge: 93 -> 194 (structure switch)
+DEBUG: Added break edge: 97 -> 194 (structure switch)
+DEBUG: Added break edge: 153 -> 160 (structure switch)
+DEBUG: Added break edge: 157 -> 160 (structure switch)
+DEBUG: Added break edge: 95 -> 194 (structure switch)
+DEBUG: Added break edge: 99 -> 194 (structure switch)
+DEBUG: Added break edge: 155 -> 160 (structure switch)
+DEBUG: Added break edge: 159 -> 160 (structure switch)
+DEBUG: Added break edge: 101 -> 194 (structure switch)
+DEBUG: Added break edge: 161 -> 194 (structure switch)
+DEBUG: Added break edge: 106 -> 194 (structure switch)
+DEBUG: Added break edge: 166 -> 194 (structure switch)
+DEBUG: Added break edge: 115 -> 194 (structure switch)
+DEBUG: Added break edge: 175 -> 194 (structure switch)
+DEBUG: Added break edge: 120 -> 194 (structure switch)
+DEBUG: Added break edge: 180 -> 194 (structure switch)
+DEBUG: Added break edge: 128 -> 194 (structure switch)
+DEBUG: Added break edge: 188 -> 194 (structure switch)
+DEBUG: Added break edge: 130 -> 194 (structure switch)
+DEBUG: Added break edge: 190 -> 194 (structure switch)
+DEBUG: Added break edge: 11 -> 24 (structure switch)
+DEBUG: Added break edge: 20 -> 24 (structure switch)
+DEBUG: Added break edge: 31 -> 42 (structure switch)
+DEBUG: Added break edge: 38 -> 42 (structure switch)
+DEBUG: Added break edge: 34 -> 42 (structure switch)
+DEBUG: Added break edge: 41 -> 42 (structure switch)
+DEBUG: Added break edge: 55 -> 72 (structure switch)
+DEBUG: Added break edge: 66 -> 72 (structure switch)
+DEBUG: Added break edge: 57 -> 72 (structure switch)
+DEBUG: Added break edge: 68 -> 72 (structure switch)
+DEBUG: Added break edge: 88 -> 194 (structure switch)
+DEBUG: Added break edge: 148 -> 194 (structure switch)
+DEBUG: Added break edge: 93 -> 194 (structure switch)
+DEBUG: Added break edge: 97 -> 194 (structure switch)
+DEBUG: Added break edge: 153 -> 160 (structure switch)
+DEBUG: Added break edge: 157 -> 160 (structure switch)
+DEBUG: Added break edge: 95 -> 194 (structure switch)
+DEBUG: Added break edge: 99 -> 194 (structure switch)
+DEBUG: Added break edge: 155 -> 160 (structure switch)
+DEBUG: Added break edge: 159 -> 160 (structure switch)
+DEBUG: Added break edge: 101 -> 194 (structure switch)
+DEBUG: Added break edge: 161 -> 194 (structure switch)
+DEBUG: Added break edge: 106 -> 194 (structure switch)
+DEBUG: Added break edge: 166 -> 194 (structure switch)
+DEBUG: Added break edge: 115 -> 194 (structure switch)
+DEBUG: Added break edge: 175 -> 194 (structure switch)
+DEBUG: Added break edge: 120 -> 194 (structure switch)
+DEBUG: Added break edge: 180 -> 194 (structure switch)
+DEBUG: Added break edge: 128 -> 194 (structure switch)
+DEBUG: Added break edge: 188 -> 194 (structure switch)
+DEBUG: Added break edge: 130 -> 194 (structure switch)
+DEBUG: Added break edge: 190 -> 194 (structure switch)
+DEBUG: Processing if statement at condition 2:
+  then_start_id=3, then_end_id=3
+  else_start_id=None, else_end_id=None
+  if_end_id=209
+  Added true_branch: 2 -> 3
+  Added false_branch (if_end, then ends with jump): 2 -> 209
+  Added switch_case edge: 5 -> 15 (value: 1)
+  Added switch_case edge: 5 -> 16 (value: 2)
+  Added switch_case edge: 5 -> 17 (value: 4)
+  Added switch_case edge: 5 -> 18 (value: 8)
+  Added switch_case edge: 5 -> 19 (value: 16)
+  Added switch_case edge: 5 -> 21 (value: None)
+  Added implicit default edge: 5 -> 24
+DEBUG: Processing if statement at condition 29:
+  then_start_id=30, then_end_id=30
+  else_start_id=None, else_end_id=None
+  if_end_id=37
+  Added true_branch: 29 -> 30
+  Added then_end -> if_end edge: 30 -> 37
+  Added false_branch (if_end, no else): 29 -> 37
+  Added switch_case edge: 27 -> 35 (value: EXTRASAMPLE_UNSPECIFIED)
+  Added switch_case edge: 27 -> 39 (value: EXTRASAMPLE_ASSOCALPHA)
+  Added switch_case edge: 27 -> 40 (value: EXTRASAMPLE_UNASSALPHA)
+  Added implicit default edge: 27 -> 42
+DEBUG: Processing if statement at condition 36:
+  then_start_id=37, then_end_id=37
+  else_start_id=None, else_end_id=None
+  if_end_id=31
+  Added true_branch: 36 -> 37
+  Added then_end -> if_end edge: 37 -> 31
+  Added false_branch (if_end, no else): 36 -> 31
+DEBUG: Processing if statement at condition 26:
+  then_start_id=27, then_end_id=42
+  else_start_id=None, else_end_id=None
+  if_end_id=214
+  Added true_branch: 26 -> 27
+  Added then_end -> if_end edge: 42 -> 214
+  Added false_branch (if_end, no else): 26 -> 214
+DEBUG: Processing if statement at condition 43:
+  then_start_id=44, then_end_id=44
+  else_start_id=None, else_end_id=None
+  if_end_id=217
+  Added true_branch: 43 -> 44
+  Added then_end -> if_end edge: 44 -> 217
+  Added false_branch (if_end, no else): 43 -> 217
+DEBUG: Processing if statement at condition 45:
+  then_start_id=46, then_end_id=46
+  else_start_id=None, else_end_id=None
+  if_end_id=221
+  Added true_branch: 45 -> 46
+  Added then_end -> if_end edge: 46 -> 221
+  Added false_branch (if_end, no else): 45 -> 221
+DEBUG: Processing if statement at condition 51:
+  then_start_id=52, then_end_id=52
+  else_start_id=53, else_end_id=54
+  if_end_id=65
+  Added true_branch: 51 -> 52
+  Added then_end -> if_end edge: 52 -> 65
+  Added false_branch (else): 51 -> 53
+  Added switch_case edge: 49 -> 61 (value: 1)
+  Added switch_case edge: 49 -> 67 (value: 3)
+  Added switch_case edge: 49 -> 69 (value: None)
+  Added implicit default edge: 49 -> 72
+DEBUG: Processing if statement at condition 62:
+  then_start_id=63, then_end_id=63
+  else_start_id=64, else_end_id=65
+  if_end_id=55
+  Added true_branch: 62 -> 63
+  Added then_end -> if_end edge: 63 -> 55
+  Added false_branch (else): 62 -> 64
+DEBUG: Processing if statement at condition 48:
+  then_start_id=49, then_end_id=72
+  else_start_id=None, else_end_id=None
+  if_end_id=224
+  Added true_branch: 48 -> 49
+  Added then_end -> if_end edge: 72 -> 224
+  Added false_branch (if_end, no else): 48 -> 224
+DEBUG: Processing if statement at condition 75:
+  then_start_id=77, then_end_id=77
+  else_start_id=None, else_end_id=None
+  if_end_id=137
+  Added true_branch: 75 -> 77
+  Added false_branch (if_end, then ends with jump): 75 -> 137
+DEBUG: Processing if statement at condition 79:
+  then_start_id=81, then_end_id=81
+  else_start_id=None, else_end_id=None
+  if_end_id=141
+  Added true_branch: 79 -> 81
+  Added false_branch (if_end, then ends with jump): 79 -> 141
+DEBUG: Processing if statement at condition 85:
+  then_start_id=87, then_end_id=87
+  else_start_id=None, else_end_id=None
+  if_end_id=147
+  Added true_branch: 85 -> 87
+  Added false_branch (if_end, then ends with jump): 85 -> 147
+  Added switch_case edge: 91 -> 96 (value: COMPRESSION_JPEG)
+  Added switch_case edge: 91 -> 98 (value: None)
+  Added implicit default edge: 91 -> 100
+DEBUG: Processing if statement at condition 90:
+  then_start_id=91, then_end_id=100
+  else_start_id=None, else_end_id=None
+  if_end_id=160
+  Added true_branch: 90 -> 91
+  Added then_end -> if_end edge: 100 -> 160
+  Added false_branch (if_end, no else): 90 -> 160
+DEBUG: Processing if statement at condition 103:
+  then_start_id=105, then_end_id=105
+  else_start_id=None, else_end_id=None
+  if_end_id=165
+  Added true_branch: 103 -> 105
+  Added false_branch (if_end, then ends with jump): 103 -> 165
+DEBUG: Processing if statement at condition 109:
+  then_start_id=111, then_end_id=111
+  else_start_id=None, else_end_id=None
+  if_end_id=171
+  Added true_branch: 109 -> 111
+  Added false_branch (if_end, then ends with jump): 109 -> 171
+DEBUG: Processing if statement at condition 112:
+  then_start_id=114, then_end_id=114
+  else_start_id=None, else_end_id=None
+  if_end_id=174
+  Added true_branch: 112 -> 114
+  Added false_branch (if_end, then ends with jump): 112 -> 174
+DEBUG: Processing if statement at condition 117:
+  then_start_id=119, then_end_id=119
+  else_start_id=None, else_end_id=None
+  if_end_id=179
+  Added true_branch: 117 -> 119
+  Added false_branch (if_end, then ends with jump): 117 -> 179
+DEBUG: Processing if statement at condition 122:
+  then_start_id=124, then_end_id=124
+  else_start_id=None, else_end_id=None
+  if_end_id=184
+  Added true_branch: 122 -> 124
+  Added false_branch (if_end, then ends with jump): 122 -> 184
+DEBUG: Processing if statement at condition 125:
+  then_start_id=127, then_end_id=127
+  else_start_id=None, else_end_id=None
+  if_end_id=187
+  Added true_branch: 125 -> 127
+  Added false_branch (if_end, then ends with jump): 125 -> 187
+  Added switch_case edge: 73 -> 134 (value: PHOTOMETRIC_PALETTE)
+  Added switch_case edge: 73 -> 143 (value: PHOTOMETRIC_MINISWHITE)
+  Added switch_case edge: 73 -> 144 (value: PHOTOMETRIC_MINISBLACK)
+  Added switch_case edge: 73 -> 149 (value: PHOTOMETRIC_YCBCR)
+  Added switch_case edge: 73 -> 162 (value: PHOTOMETRIC_RGB)
+  Added switch_case edge: 73 -> 167 (value: PHOTOMETRIC_SEPARATED)
+  Added switch_case edge: 73 -> 176 (value: PHOTOMETRIC_LOGL)
+  Added switch_case edge: 73 -> 181 (value: PHOTOMETRIC_LOGLUV)
+  Added switch_case edge: 73 -> 189 (value: PHOTOMETRIC_CIELAB)
+  Added switch_case edge: 73 -> 191 (value: None)
+  Added implicit default edge: 73 -> 194
+DEBUG: Processing if statement at condition 135:
+  then_start_id=137, then_end_id=137
+  else_start_id=None, else_end_id=None
+  if_end_id=226
+  Added true_branch: 135 -> 137
+  Added false_branch (if_end, then ends with jump): 135 -> 226
+DEBUG: Processing if statement at condition 139:
+  then_start_id=141, then_end_id=141
+  else_start_id=None, else_end_id=None
+  if_end_id=229
+  Added true_branch: 139 -> 141
+  Added false_branch (if_end, then ends with jump): 139 -> 229
+DEBUG: Processing if statement at condition 145:
+  then_start_id=147, then_end_id=147
+  else_start_id=None, else_end_id=None
+  if_end_id=240
+  Added true_branch: 145 -> 147
+  Added false_branch (if_end, then ends with jump): 145 -> 240
+  Added switch_case edge: 151 -> 156 (value: COMPRESSION_JPEG)
+  Added switch_case edge: 151 -> 158 (value: None)
+  Added implicit default edge: 151 -> 160
+DEBUG: Processing if statement at condition 150:
+  then_start_id=151, then_end_id=160
+  else_start_id=None, else_end_id=None
+  if_end_id=249
+  Added true_branch: 150 -> 151
+  Added then_end -> if_end edge: 160 -> 249
+  Added false_branch (if_end, no else): 150 -> 249
+DEBUG: Processing if statement at condition 163:
+  then_start_id=165, then_end_id=165
+  else_start_id=None, else_end_id=None
+  if_end_id=256
+  Added true_branch: 163 -> 165
+  Added false_branch (if_end, then ends with jump): 163 -> 256
+DEBUG: Processing if statement at condition 169:
+  then_start_id=171, then_end_id=171
+  else_start_id=None, else_end_id=None
+  if_end_id=259
+  Added true_branch: 169 -> 171
+  Added false_branch (if_end, then ends with jump): 169 -> 259
+DEBUG: Processing if statement at condition 172:
+  then_start_id=174, then_end_id=174
+  else_start_id=None, else_end_id=None
+  if_end_id=261
+  Added true_branch: 172 -> 174
+  Added false_branch (if_end, then ends with jump): 172 -> 261
+DEBUG: Processing if statement at condition 177:
+  then_start_id=179, then_end_id=179
+  else_start_id=None, else_end_id=None
+  if_end_id=264
+  Added true_branch: 177 -> 179
+  Added false_branch (if_end, then ends with jump): 177 -> 264
+DEBUG: Processing if statement at condition 182:
+  then_start_id=184, then_end_id=184
+  else_start_id=None, else_end_id=None
+  if_end_id=266
+  Added true_branch: 182 -> 184
+  Added false_branch (if_end, then ends with jump): 182 -> 266
+DEBUG: Processing if statement at condition 185:
+  then_start_id=187, then_end_id=187
+  else_start_id=None, else_end_id=None
+  if_end_id=268
+  Added true_branch: 185 -> 187
+  Added false_branch (if_end, then ends with jump): 185 -> 268
+DEBUG: Processing if statement at condition 197:
+  then_start_id=199, then_end_id=199
+  else_start_id=None, else_end_id=None
+  if_end_id=271
+  Added true_branch: 197 -> 199
+  Added false_branch (if_end, then ends with jump): 197 -> 271
+DEBUG: Processing if statement at condition 201:
+  then_start_id=203, then_end_id=203
+  else_start_id=None, else_end_id=None
+  if_end_id=272
+  Added true_branch: 201 -> 203
+  Added false_branch (if_end, then ends with jump): 201 -> 272
+DEBUG: Processing if statement at condition 196:
+  then_start_id=197, then_end_id=199
+  else_start_id=200, else_end_id=203
+  if_end_id=272
+  Added true_branch: 196 -> 197
+  Added false_branch (else): 196 -> 200
+DEBUG: _build_cfg_edges summary: 315 total edges built
+  Control structure edges: 160
+  Goto edges: 24
+  Sequential edges: 131
+DEBUG: Connected return node 3 to exit node 276
+DEBUG: Connected return node 127 to exit node 276
+DEBUG: Connected return node 187 to exit node 276
+DEBUG: Connected return node 204 to exit node 276
+DEBUG: Connected return node 207 to exit node 276
+DEBUG: Connected last block 275 (fallthrough) to exit node 276
+DEBUG: Found 1 start node(s) for line 308:
+  Node 25 [normal] at tif_getimage.c:308 (lines 308-310)
+DEBUG: Found 1 target node(s) for line 325:
+  Node 215 [placeholder] at tif_getimage.c:325 (lines 325-325)
+
+DEBUG: Graph adjacency list (total 232 nodes with outgoing edges):
+  Node 0 [entry at tif_getimage.c:265] -> [1]
+  Node 1 [normal at tif_getimage.c:265] -> [208]
+  Node 2 [branch at tif_getimage.c:275] -> [3, 209]
+  Node 3 [return at tif_getimage.c:276] -> [276]
+  Node 4 [normal at tif_getimage.c:279] -> [5]
+  Node 5 [switch at tif_getimage.c:296] -> [15, 16, 17, 18, 19, 21, 24]
+  Node 6 [case at tif_getimage.c:297] -> [15]
+  Node 7 [case at tif_getimage.c:298] -> [16]
+  Node 8 [case at tif_getimage.c:299] -> [17]
+  Node 9 [case at tif_getimage.c:300] -> [18]
+  Node 11 [break at tif_getimage.c:302] -> [24]
+  Node 13 [normal at tif_getimage.c:304] -> [22]
+  Node 14 [normal at tif_getimage.c:306] -> [205]
+  Node 15 [case at tif_getimage.c:297] -> [7]
+  Node 16 [case at tif_getimage.c:298] -> [8]
+  Node 17 [case at tif_getimage.c:299] -> [9]
+  Node 18 [case at tif_getimage.c:300] -> [10]
+  Node 20 [break at tif_getimage.c:302] -> [24]
+  Node 22 [normal at tif_getimage.c:304] -> [211]
+  Node 23 [normal at tif_getimage.c:306] -> [205]
+  Node 24 [switch_end at tif_getimage.c:307] -> [25]
+  Node 25 [normal at tif_getimage.c:308] -> [212]
+  Node 26 [branch at tif_getimage.c:312] -> [27, 214]
+  Node 27 [switch at tif_getimage.c:314] -> [35, 39, 40, 42]
+  Node 29 [branch at tif_getimage.c:316] -> [30, 37]
+  Node 30 [normal at tif_getimage.c:317] -> [37]
+  Node 31 [break at tif_getimage.c:318] -> [42]
+  Node 32 [case at tif_getimage.c:319] -> [39]
+  Node 34 [break at tif_getimage.c:321] -> [42]
+  Node 36 [branch at tif_getimage.c:316] -> [37, 31]
+  Node 37 [normal at tif_getimage.c:317] -> [31]
+  Node 38 [break at tif_getimage.c:318] -> [42]
+  Node 39 [case at tif_getimage.c:319] -> [33]
+  Node 41 [break at tif_getimage.c:321] -> [42]
+  Node 42 [switch_end at tif_getimage.c:323] -> [214]
+  Node 43 [branch at tif_getimage.c:327] -> [44, 217]
+  Node 44 [normal at tif_getimage.c:328] -> [217]
+  Node 45 [branch at tif_getimage.c:330] -> [46, 221]
+  Node 46 [normal at tif_getimage.c:334] -> [221]
+  Node 47 [normal at tif_getimage.c:339] -> [48]
+  Node 48 [branch at tif_getimage.c:342] -> [49, 224]
+  Node 49 [switch at tif_getimage.c:343] -> [61, 67, 69, 72]
+  Node 51 [branch at tif_getimage.c:345] -> [52, 53]
+  Node 52 [normal at tif_getimage.c:346] -> [65]
+  Node 54 [normal at tif_getimage.c:348] -> [65]
+  Node 55 [break at tif_getimage.c:349] -> [72]
+  Node 57 [break at tif_getimage.c:351] -> [72]
+  Node 59 [normal at tif_getimage.c:354] -> [70]
+  Node 60 [normal at tif_getimage.c:355] -> [205]
+  Node 62 [branch at tif_getimage.c:345] -> [63, 64]
+  Node 63 [normal at tif_getimage.c:346] -> [55]
+  Node 64 [normal at tif_getimage.c:347] -> [54]
+  Node 65 [normal at tif_getimage.c:348] -> [55]
+  Node 66 [break at tif_getimage.c:349] -> [72]
+  Node 68 [break at tif_getimage.c:351] -> [72]
+  Node 70 [normal at tif_getimage.c:354] -> [60]
+  Node 71 [normal at tif_getimage.c:355] -> [205]
+  Node 72 [switch_end at tif_getimage.c:356] -> [224]
+  Node 73 [switch at tif_getimage.c:358] -> [134, 143, 144, 149, 162, 167, 176, 181, 189, 191, 194]
+  Node 75 [branch at tif_getimage.c:360] -> [77, 137]
+  Node 76 [normal at tif_getimage.c:362] -> [136]
+  Node 77 [normal at tif_getimage.c:363] -> [205]
+  Node 78 [normal at tif_getimage.c:367] -> [138]
+  Node 79 [branch at tif_getimage.c:371] -> [81, 141]
+  Node 80 [normal at tif_getimage.c:372] -> [140]
+  Node 81 [normal at tif_getimage.c:373] -> [205]
+  Node 82 [normal at tif_getimage.c:376] -> [142]
+  Node 83 [case at tif_getimage.c:381] -> [143]
+  Node 85 [branch at tif_getimage.c:383] -> [87, 147]
+  Node 86 [normal at tif_getimage.c:386] -> [146]
+  Node 87 [normal at tif_getimage.c:392] -> [205]
+  Node 88 [break at tif_getimage.c:394] -> [194]
+  Node 90 [branch at tif_getimage.c:397] -> [91, 160]
+  Node 91 [switch at tif_getimage.c:400] -> [96, 98, 100]
+  Node 93 [break at tif_getimage.c:407] -> [194]
+  Node 95 [break at tif_getimage.c:411] -> [194]
+  Node 97 [break at tif_getimage.c:407] -> [194]
+  Node 99 [break at tif_getimage.c:411] -> [194]
+  Node 100 [switch_end at tif_getimage.c:413] -> [160]
+  Node 101 [break at tif_getimage.c:420] -> [194]
+  Node 103 [branch at tif_getimage.c:422] -> [105, 165]
+  Node 104 [normal at tif_getimage.c:423] -> [164]
+  Node 105 [normal at tif_getimage.c:425] -> [205]
+  Node 106 [break at tif_getimage.c:427] -> [194]
+  Node 108 [normal at tif_getimage.c:430] -> [168]
+  Node 109 [branch at tif_getimage.c:432] -> [111, 171]
+  Node 110 [normal at tif_getimage.c:433] -> [170]
+  Node 111 [normal at tif_getimage.c:435] -> [205]
+  Node 112 [branch at tif_getimage.c:437] -> [114, 174]
+  Node 113 [normal at tif_getimage.c:438] -> [173]
+  Node 114 [normal at tif_getimage.c:440] -> [205]
+  Node 115 [break at tif_getimage.c:443] -> [194]
+  Node 117 [branch at tif_getimage.c:445] -> [119, 179]
+  Node 118 [normal at tif_getimage.c:446] -> [178]
+  Node 119 [normal at tif_getimage.c:448] -> [205]
+  Node 120 [break at tif_getimage.c:450] -> [194]
+  Node 122 [branch at tif_getimage.c:455] -> [124, 184]
+  Node 123 [normal at tif_getimage.c:456] -> [183]
+  Node 124 [normal at tif_getimage.c:458] -> [205]
+  Node 125 [branch at tif_getimage.c:460] -> [127, 187]
+  Node 126 [normal at tif_getimage.c:461] -> [186]
+  Node 127 [return at tif_getimage.c:463] -> [276]
+  Node 128 [break at tif_getimage.c:465] -> [194]
+  Node 130 [break at tif_getimage.c:470] -> [194]
+  Node 132 [normal at tif_getimage.c:472] -> [192]
+  Node 133 [normal at tif_getimage.c:474] -> [205]
+  Node 135 [branch at tif_getimage.c:360] -> [137, 226]
+  Node 136 [normal at tif_getimage.c:362] -> [77]
+  Node 137 [normal at tif_getimage.c:363] -> [205]
+  Node 138 [normal at tif_getimage.c:367] -> [79]
+  Node 139 [branch at tif_getimage.c:371] -> [141, 229]
+  Node 140 [normal at tif_getimage.c:372] -> [81]
+  Node 141 [normal at tif_getimage.c:373] -> [205]
+  Node 142 [normal at tif_getimage.c:376] -> [231]
+  Node 143 [case at tif_getimage.c:381] -> [84]
+  Node 145 [branch at tif_getimage.c:383] -> [147, 240]
+  Node 146 [normal at tif_getimage.c:386] -> [235]
+  Node 147 [normal at tif_getimage.c:392] -> [205]
+  Node 148 [break at tif_getimage.c:394] -> [194]
+  Node 150 [branch at tif_getimage.c:397] -> [151, 249]
+  Node 151 [switch at tif_getimage.c:400] -> [156, 158, 160]
+  Node 153 [break at tif_getimage.c:407] -> [160]
+  Node 155 [break at tif_getimage.c:411] -> [160]
+  Node 157 [break at tif_getimage.c:407] -> [160]
+  Node 159 [break at tif_getimage.c:411] -> [160]
+  Node 160 [switch_end at tif_getimage.c:413] -> [249]
+  Node 161 [break at tif_getimage.c:420] -> [194]
+  Node 163 [branch at tif_getimage.c:422] -> [165, 256]
+  Node 164 [normal at tif_getimage.c:423] -> [255]
+  Node 165 [normal at tif_getimage.c:425] -> [205]
+  Node 166 [break at tif_getimage.c:427] -> [194]
+  Node 168 [normal at tif_getimage.c:430] -> [109]
+  Node 169 [branch at tif_getimage.c:432] -> [171, 259]
+  Node 170 [normal at tif_getimage.c:433] -> [258]
+  Node 171 [normal at tif_getimage.c:435] -> [205]
+  Node 172 [branch at tif_getimage.c:437] -> [174, 261]
+  Node 173 [normal at tif_getimage.c:438] -> [260]
+  Node 174 [normal at tif_getimage.c:440] -> [205]
+  Node 175 [break at tif_getimage.c:443] -> [194]
+  Node 177 [branch at tif_getimage.c:445] -> [179, 264]
+  Node 178 [normal at tif_getimage.c:446] -> [263]
+  Node 179 [normal at tif_getimage.c:448] -> [205]
+  Node 180 [break at tif_getimage.c:450] -> [194]
+  Node 182 [branch at tif_getimage.c:455] -> [184, 266]
+  Node 183 [normal at tif_getimage.c:456] -> [265]
+  Node 184 [normal at tif_getimage.c:458] -> [205]
+  Node 185 [branch at tif_getimage.c:460] -> [187, 268]
+  Node 186 [normal at tif_getimage.c:461] -> [267]
+  Node 187 [return at tif_getimage.c:463] -> [276]
+  Node 188 [break at tif_getimage.c:465] -> [194]
+  Node 190 [break at tif_getimage.c:470] -> [194]
+  Node 192 [normal at tif_getimage.c:472] -> [269]
+  Node 193 [normal at tif_getimage.c:474] -> [205]
+  Node 194 [switch_end at tif_getimage.c:475] -> [195]
+  Node 195 [normal at tif_getimage.c:476] -> [270]
+  Node 196 [branch at tif_getimage.c:481] -> [197, 200]
+  Node 197 [branch at tif_getimage.c:482] -> [199, 271]
+  Node 198 [normal at tif_getimage.c:483] -> [199]
+  Node 199 [normal at tif_getimage.c:484] -> [205]
+  Node 200 [normal at tif_getimage.c:486] -> [201]
+  Node 201 [branch at tif_getimage.c:487] -> [203, 272]
+  Node 202 [normal at tif_getimage.c:488] -> [203]
+  Node 203 [normal at tif_getimage.c:489] -> [205]
+  Node 204 [return at tif_getimage.c:492] -> [276]
+  Node 206 [normal at tif_getimage.c:495] -> [207]
+  Node 207 [return at tif_getimage.c:496] -> [276]
+  Node 208 [placeholder at tif_getimage.c:274] -> [2]
+  Node 209 [placeholder at tif_getimage.c:277] -> [210]
+  Node 210 [placeholder at tif_getimage.c:278] -> [4]
+  Node 211 [placeholder at tif_getimage.c:305] -> [14]
+  Node 212 [placeholder at tif_getimage.c:311] -> [26]
+  Node 213 [placeholder at tif_getimage.c:313] -> [27]
+  Node 214 [placeholder at tif_getimage.c:324] -> [215]
+  Node 215 [placeholder at tif_getimage.c:325] -> [216]
+  Node 216 [placeholder at tif_getimage.c:326] -> [43]
+  Node 217 [placeholder at tif_getimage.c:329] -> [45]
+  Node 218 [placeholder at tif_getimage.c:331] -> [219]
+  Node 219 [placeholder at tif_getimage.c:332] -> [220]
+  Node 220 [placeholder at tif_getimage.c:333] -> [46]
+  Node 221 [placeholder at tif_getimage.c:336] -> [222]
+  Node 222 [placeholder at tif_getimage.c:337] -> [223]
+  Node 223 [placeholder at tif_getimage.c:338] -> [47]
+  Node 224 [placeholder at tif_getimage.c:357] -> [73]
+  Node 225 [placeholder at tif_getimage.c:361] -> [76]
+  Node 226 [placeholder at tif_getimage.c:364] -> [227]
+  Node 227 [placeholder at tif_getimage.c:365] -> [228]
+  Node 228 [placeholder at tif_getimage.c:366] -> [78]
+  Node 229 [placeholder at tif_getimage.c:374] -> [230]
+  Node 230 [placeholder at tif_getimage.c:375] -> [82]
+  Node 231 [placeholder at tif_getimage.c:379] -> [232]
+  Node 232 [placeholder at tif_getimage.c:380] -> [83]
+  Node 233 [placeholder at tif_getimage.c:384] -> [234]
+  Node 234 [placeholder at tif_getimage.c:385] -> [86]
+  Node 235 [placeholder at tif_getimage.c:387] -> [236]
+  Node 236 [placeholder at tif_getimage.c:388] -> [237]
+  Node 237 [placeholder at tif_getimage.c:389] -> [238]
+  Node 238 [placeholder at tif_getimage.c:390] -> [239]
+  Node 239 [placeholder at tif_getimage.c:391] -> [87]
+  Node 240 [placeholder at tif_getimage.c:393] -> [88]
+  Node 241 [placeholder at tif_getimage.c:396] -> [90]
+  Node 242 [placeholder at tif_getimage.c:398] -> [243]
+  Node 243 [placeholder at tif_getimage.c:399] -> [91]
+  Node 244 [placeholder at tif_getimage.c:402] -> [245]
+  Node 245 [placeholder at tif_getimage.c:403] -> [246]
+  Node 246 [placeholder at tif_getimage.c:404] -> [247]
+  Node 247 [placeholder at tif_getimage.c:405] -> [248]
+  Node 248 [placeholder at tif_getimage.c:406] -> [93]
+  Node 249 [placeholder at tif_getimage.c:414] -> [250]
+  Node 250 [placeholder at tif_getimage.c:415] -> [251]
+  Node 251 [placeholder at tif_getimage.c:416] -> [252]
+  Node 252 [placeholder at tif_getimage.c:417] -> [253]
+  Node 254 [placeholder at tif_getimage.c:419] -> [101]
+  Node 255 [placeholder at tif_getimage.c:424] -> [105]
+  Node 256 [placeholder at tif_getimage.c:426] -> [106]
+  Node 257 [placeholder at tif_getimage.c:429] -> [108]
+  Node 258 [placeholder at tif_getimage.c:434] -> [111]
+  Node 259 [placeholder at tif_getimage.c:436] -> [112]
+  Node 260 [placeholder at tif_getimage.c:439] -> [114]
+  Node 261 [placeholder at tif_getimage.c:441] -> [262]
+  Node 262 [placeholder at tif_getimage.c:442] -> [115]
+  Node 263 [placeholder at tif_getimage.c:447] -> [119]
+  Node 264 [placeholder at tif_getimage.c:449] -> [120]
+  Node 265 [placeholder at tif_getimage.c:457] -> [124]
+  Node 266 [placeholder at tif_getimage.c:459] -> [125]
+  Node 267 [placeholder at tif_getimage.c:462] -> [127]
+  Node 268 [placeholder at tif_getimage.c:464] -> [128]
+  Node 269 [placeholder at tif_getimage.c:473] -> [133]
+  Node 270 [placeholder at tif_getimage.c:480] -> [196]
+  Node 272 [placeholder at tif_getimage.c:490] -> [273]
+  Node 273 [placeholder at tif_getimage.c:491] -> [204]
+  Node 274 [placeholder at tif_getimage.c:493] -> [205]
+  Node 275 [placeholder at tif_getimage.c:497] -> [276]
+
+DEBUG: All edges (total 322):
+  0 [entry at tif_getimage.c:265] -> 1 [normal at tif_getimage.c:265] [sequential]
+  14 [normal at tif_getimage.c:306] -> 205 [label at tif_getimage.c:494] [goto]
+  23 [normal at tif_getimage.c:306] -> 205 [label at tif_getimage.c:494] [goto]
+  60 [normal at tif_getimage.c:355] -> 205 [label at tif_getimage.c:494] [goto]
+  71 [normal at tif_getimage.c:355] -> 205 [label at tif_getimage.c:494] [goto]
+  77 [normal at tif_getimage.c:363] -> 205 [label at tif_getimage.c:494] [goto]
+  81 [normal at tif_getimage.c:373] -> 205 [label at tif_getimage.c:494] [goto]
+  87 [normal at tif_getimage.c:392] -> 205 [label at tif_getimage.c:494] [goto]
+  105 [normal at tif_getimage.c:425] -> 205 [label at tif_getimage.c:494] [goto]
+  111 [normal at tif_getimage.c:435] -> 205 [label at tif_getimage.c:494] [goto]
+  114 [normal at tif_getimage.c:440] -> 205 [label at tif_getimage.c:494] [goto]
+  119 [normal at tif_getimage.c:448] -> 205 [label at tif_getimage.c:494] [goto]
+  124 [normal at tif_getimage.c:458] -> 205 [label at tif_getimage.c:494] [goto]
+  133 [normal at tif_getimage.c:474] -> 205 [label at tif_getimage.c:494] [goto]
+  137 [normal at tif_getimage.c:363] -> 205 [label at tif_getimage.c:494] [goto]
+  141 [normal at tif_getimage.c:373] -> 205 [label at tif_getimage.c:494] [goto]
+  147 [normal at tif_getimage.c:392] -> 205 [label at tif_getimage.c:494] [goto]
+  165 [normal at tif_getimage.c:425] -> 205 [label at tif_getimage.c:494] [goto]
+  171 [normal at tif_getimage.c:435] -> 205 [label at tif_getimage.c:494] [goto]
+  174 [normal at tif_getimage.c:440] -> 205 [label at tif_getimage.c:494] [goto]
+  179 [normal at tif_getimage.c:448] -> 205 [label at tif_getimage.c:494] [goto]
+  184 [normal at tif_getimage.c:458] -> 205 [label at tif_getimage.c:494] [goto]
+  193 [normal at tif_getimage.c:474] -> 205 [label at tif_getimage.c:494] [goto]
+  199 [normal at tif_getimage.c:484] -> 205 [label at tif_getimage.c:494] [goto]
+  203 [normal at tif_getimage.c:489] -> 205 [label at tif_getimage.c:494] [goto]
+  11 [break at tif_getimage.c:302] -> 24 [switch_end at tif_getimage.c:307] [break]
+  20 [break at tif_getimage.c:302] -> 24 [switch_end at tif_getimage.c:307] [break]
+  31 [break at tif_getimage.c:318] -> 42 [switch_end at tif_getimage.c:323] [break]
+  38 [break at tif_getimage.c:318] -> 42 [switch_end at tif_getimage.c:323] [break]
+  34 [break at tif_getimage.c:321] -> 42 [switch_end at tif_getimage.c:323] [break]
+  41 [break at tif_getimage.c:321] -> 42 [switch_end at tif_getimage.c:323] [break]
+  55 [break at tif_getimage.c:349] -> 72 [switch_end at tif_getimage.c:356] [break]
+  66 [break at tif_getimage.c:349] -> 72 [switch_end at tif_getimage.c:356] [break]
+  57 [break at tif_getimage.c:351] -> 72 [switch_end at tif_getimage.c:356] [break]
+  68 [break at tif_getimage.c:351] -> 72 [switch_end at tif_getimage.c:356] [break]
+  88 [break at tif_getimage.c:394] -> 194 [switch_end at tif_getimage.c:475] [break]
+  148 [break at tif_getimage.c:394] -> 194 [switch_end at tif_getimage.c:475] [break]
+  93 [break at tif_getimage.c:407] -> 194 [switch_end at tif_getimage.c:475] [break]
+  97 [break at tif_getimage.c:407] -> 194 [switch_end at tif_getimage.c:475] [break]
+  153 [break at tif_getimage.c:407] -> 160 [switch_end at tif_getimage.c:413] [break]
+  157 [break at tif_getimage.c:407] -> 160 [switch_end at tif_getimage.c:413] [break]
+  95 [break at tif_getimage.c:411] -> 194 [switch_end at tif_getimage.c:475] [break]
+  99 [break at tif_getimage.c:411] -> 194 [switch_end at tif_getimage.c:475] [break]
+  155 [break at tif_getimage.c:411] -> 160 [switch_end at tif_getimage.c:413] [break]
+  159 [break at tif_getimage.c:411] -> 160 [switch_end at tif_getimage.c:413] [break]
+  101 [break at tif_getimage.c:420] -> 194 [switch_end at tif_getimage.c:475] [break]
+  161 [break at tif_getimage.c:420] -> 194 [switch_end at tif_getimage.c:475] [break]
+  106 [break at tif_getimage.c:427] -> 194 [switch_end at tif_getimage.c:475] [break]
+  166 [break at tif_getimage.c:427] -> 194 [switch_end at tif_getimage.c:475] [break]
+  115 [break at tif_getimage.c:443] -> 194 [switch_end at tif_getimage.c:475] [break]
+  175 [break at tif_getimage.c:443] -> 194 [switch_end at tif_getimage.c:475] [break]
+  120 [break at tif_getimage.c:450] -> 194 [switch_end at tif_getimage.c:475] [break]
+  180 [break at tif_getimage.c:450] -> 194 [switch_end at tif_getimage.c:475] [break]
+  128 [break at tif_getimage.c:465] -> 194 [switch_end at tif_getimage.c:475] [break]
+  188 [break at tif_getimage.c:465] -> 194 [switch_end at tif_getimage.c:475] [break]
+  130 [break at tif_getimage.c:470] -> 194 [switch_end at tif_getimage.c:475] [break]
+  190 [break at tif_getimage.c:470] -> 194 [switch_end at tif_getimage.c:475] [break]
+  11 [break at tif_getimage.c:302] -> 24 [switch_end at tif_getimage.c:307] [break]
+  20 [break at tif_getimage.c:302] -> 24 [switch_end at tif_getimage.c:307] [break]
+  31 [break at tif_getimage.c:318] -> 42 [switch_end at tif_getimage.c:323] [break]
+  38 [break at tif_getimage.c:318] -> 42 [switch_end at tif_getimage.c:323] [break]
+  34 [break at tif_getimage.c:321] -> 42 [switch_end at tif_getimage.c:323] [break]
+  41 [break at tif_getimage.c:321] -> 42 [switch_end at tif_getimage.c:323] [break]
+  55 [break at tif_getimage.c:349] -> 72 [switch_end at tif_getimage.c:356] [break]
+  66 [break at tif_getimage.c:349] -> 72 [switch_end at tif_getimage.c:356] [break]
+  57 [break at tif_getimage.c:351] -> 72 [switch_end at tif_getimage.c:356] [break]
+  68 [break at tif_getimage.c:351] -> 72 [switch_end at tif_getimage.c:356] [break]
+  88 [break at tif_getimage.c:394] -> 194 [switch_end at tif_getimage.c:475] [break]
+  148 [break at tif_getimage.c:394] -> 194 [switch_end at tif_getimage.c:475] [break]
+  93 [break at tif_getimage.c:407] -> 194 [switch_end at tif_getimage.c:475] [break]
+  97 [break at tif_getimage.c:407] -> 194 [switch_end at tif_getimage.c:475] [break]
+  153 [break at tif_getimage.c:407] -> 160 [switch_end at tif_getimage.c:413] [break]
+  157 [break at tif_getimage.c:407] -> 160 [switch_end at tif_getimage.c:413] [break]
+  95 [break at tif_getimage.c:411] -> 194 [switch_end at tif_getimage.c:475] [break]
+  99 [break at tif_getimage.c:411] -> 194 [switch_end at tif_getimage.c:475] [break]
+  155 [break at tif_getimage.c:411] -> 160 [switch_end at tif_getimage.c:413] [break]
+  159 [break at tif_getimage.c:411] -> 160 [switch_end at tif_getimage.c:413] [break]
+  101 [break at tif_getimage.c:420] -> 194 [switch_end at tif_getimage.c:475] [break]
+  161 [break at tif_getimage.c:420] -> 194 [switch_end at tif_getimage.c:475] [break]
+  106 [break at tif_getimage.c:427] -> 194 [switch_end at tif_getimage.c:475] [break]
+  166 [break at tif_getimage.c:427] -> 194 [switch_end at tif_getimage.c:475] [break]
+  115 [break at tif_getimage.c:443] -> 194 [switch_end at tif_getimage.c:475] [break]
+  175 [break at tif_getimage.c:443] -> 194 [switch_end at tif_getimage.c:475] [break]
+  120 [break at tif_getimage.c:450] -> 194 [switch_end at tif_getimage.c:475] [break]
+  180 [break at tif_getimage.c:450] -> 194 [switch_end at tif_getimage.c:475] [break]
+  128 [break at tif_getimage.c:465] -> 194 [switch_end at tif_getimage.c:475] [break]
+  188 [break at tif_getimage.c:465] -> 194 [switch_end at tif_getimage.c:475] [break]
+  130 [break at tif_getimage.c:470] -> 194 [switch_end at tif_getimage.c:475] [break]
+  190 [break at tif_getimage.c:470] -> 194 [switch_end at tif_getimage.c:475] [break]
+  2 [branch at tif_getimage.c:275] -> 3 [return at tif_getimage.c:276] [true_branch] [( !TIFFRGBAImageOK(tif, emsg) )]
+  2 [branch at tif_getimage.c:275] -> 209 [placeholder at tif_getimage.c:277] [false_branch] [( !TIFFRGBAImageOK(tif, emsg) )]
+  5 [switch at tif_getimage.c:296] -> 15 [case at tif_getimage.c:297] [switch_case] [1]
+  5 [switch at tif_getimage.c:296] -> 16 [case at tif_getimage.c:298] [switch_case] [2]
+  5 [switch at tif_getimage.c:296] -> 17 [case at tif_getimage.c:299] [switch_case] [4]
+  5 [switch at tif_getimage.c:296] -> 18 [case at tif_getimage.c:300] [switch_case] [8]
+  5 [switch at tif_getimage.c:296] -> 19 [case at tif_getimage.c:301] [switch_case] [16]
+  5 [switch at tif_getimage.c:296] -> 21 [case at tif_getimage.c:303] [switch_case]
+  5 [switch at tif_getimage.c:296] -> 24 [switch_end at tif_getimage.c:307] [switch_case] [default]
+  29 [branch at tif_getimage.c:316] -> 30 [normal at tif_getimage.c:317] [true_branch] [(img->samplesperpixel > 3)]
+  30 [normal at tif_getimage.c:317] -> 37 [normal at tif_getimage.c:317] [sequential]
+  29 [branch at tif_getimage.c:316] -> 37 [normal at tif_getimage.c:317] [false_branch] [(img->samplesperpixel > 3)]
+  27 [switch at tif_getimage.c:314] -> 35 [case at tif_getimage.c:315] [switch_case] [EXTRASAMPLE_UNSPECIFIED]
+  27 [switch at tif_getimage.c:314] -> 39 [case at tif_getimage.c:319] [switch_case] [EXTRASAMPLE_ASSOCALPHA]
+  27 [switch at tif_getimage.c:314] -> 40 [case at tif_getimage.c:320] [switch_case] [EXTRASAMPLE_UNASSALPHA]
+  27 [switch at tif_getimage.c:314] -> 42 [switch_end at tif_getimage.c:323] [switch_case] [default]
+  36 [branch at tif_getimage.c:316] -> 37 [normal at tif_getimage.c:317] [true_branch] [(img->samplesperpixel > 3)]
+  37 [normal at tif_getimage.c:317] -> 31 [break at tif_getimage.c:318] [sequential]
+  36 [branch at tif_getimage.c:316] -> 31 [break at tif_getimage.c:318] [false_branch] [(img->samplesperpixel > 3)]
+  26 [branch at tif_getimage.c:312] -> 27 [switch at tif_getimage.c:314] [true_branch] [(extrasamples >= 1)]
+  42 [switch_end at tif_getimage.c:323] -> 214 [placeholder at tif_getimage.c:324] [sequential]
+  26 [branch at tif_getimage.c:312] -> 214 [placeholder at tif_getimage.c:324] [false_branch] [(extrasamples >= 1)]
+  43 [branch at tif_getimage.c:327] -> 44 [normal at tif_getimage.c:328] [true_branch] [( !TIFFGetField(tif, TIFFTAG_PHOTOMETRIC...]
+  44 [normal at tif_getimage.c:328] -> 217 [placeholder at tif_getimage.c:329] [sequential]
+  43 [branch at tif_getimage.c:327] -> 217 [placeholder at tif_getimage.c:329] [false_branch] [( !TIFFGetField(tif, TIFFTAG_PHOTOMETRIC...]
+  45 [branch at tif_getimage.c:330] -> 46 [normal at tif_getimage.c:334] [true_branch] [( extrasamples == 0
+	    && img->samples...]
+  46 [normal at tif_getimage.c:334] -> 221 [placeholder at tif_getimage.c:336] [sequential]
+  45 [branch at tif_getimage.c:330] -> 221 [placeholder at tif_getimage.c:336] [false_branch] [( extrasamples == 0
+	    && img->samples...]
+  51 [branch at tif_getimage.c:345] -> 52 [normal at tif_getimage.c:346] [true_branch] [(isCCITTCompression(tif))]
+  52 [normal at tif_getimage.c:346] -> 65 [normal at tif_getimage.c:348] [sequential]
+  51 [branch at tif_getimage.c:345] -> 53 [normal at tif_getimage.c:347] [false_branch] [(isCCITTCompression(tif))]
+  49 [switch at tif_getimage.c:343] -> 61 [case at tif_getimage.c:344] [switch_case] [1]
+  49 [switch at tif_getimage.c:343] -> 67 [case at tif_getimage.c:350] [switch_case] [3]
+  49 [switch at tif_getimage.c:343] -> 69 [case at tif_getimage.c:353] [switch_case]
+  49 [switch at tif_getimage.c:343] -> 72 [switch_end at tif_getimage.c:356] [switch_case] [default]
+  62 [branch at tif_getimage.c:345] -> 63 [normal at tif_getimage.c:346] [true_branch] [(isCCITTCompression(tif))]
+  63 [normal at tif_getimage.c:346] -> 55 [break at tif_getimage.c:349] [sequential]
+  62 [branch at tif_getimage.c:345] -> 64 [normal at tif_getimage.c:347] [false_branch] [(isCCITTCompression(tif))]
+  48 [branch at tif_getimage.c:342] -> 49 [switch at tif_getimage.c:343] [true_branch] [(!TIFFGetField(tif, TIFFTAG_PHOTOMETRIC,...]
+  72 [switch_end at tif_getimage.c:356] -> 224 [placeholder at tif_getimage.c:357] [sequential]
+  48 [branch at tif_getimage.c:342] -> 224 [placeholder at tif_getimage.c:357] [false_branch] [(!TIFFGetField(tif, TIFFTAG_PHOTOMETRIC,...]
+  75 [branch at tif_getimage.c:360] -> 77 [normal at tif_getimage.c:363] [true_branch] [(!TIFFGetField(tif, TIFFTAG_COLORMAP,
+		...]
+  75 [branch at tif_getimage.c:360] -> 137 [normal at tif_getimage.c:363] [false_branch] [(!TIFFGetField(tif, TIFFTAG_COLORMAP,
+		...]
+  79 [branch at tif_getimage.c:371] -> 81 [normal at tif_getimage.c:373] [true_branch] [( !img->redcmap || !img->greencmap || !i...]
+  79 [branch at tif_getimage.c:371] -> 141 [normal at tif_getimage.c:373] [false_branch] [( !img->redcmap || !img->greencmap || !i...]
+  85 [branch at tif_getimage.c:383] -> 87 [normal at tif_getimage.c:392] [true_branch] [(planarconfig == PLANARCONFIG_CONTIG
+			...]
+  85 [branch at tif_getimage.c:383] -> 147 [normal at tif_getimage.c:392] [false_branch] [(planarconfig == PLANARCONFIG_CONTIG
+			...]
+  91 [switch at tif_getimage.c:400] -> 96 [case at tif_getimage.c:401] [switch_case] [COMPRESSION_JPEG]
+  91 [switch at tif_getimage.c:400] -> 98 [case at tif_getimage.c:410] [switch_case]
+  91 [switch at tif_getimage.c:400] -> 100 [switch_end at tif_getimage.c:413] [switch_case] [default]
+  90 [branch at tif_getimage.c:397] -> 91 [switch at tif_getimage.c:400] [true_branch] [(planarconfig == PLANARCONFIG_CONTIG)]
+  100 [switch_end at tif_getimage.c:413] -> 160 [switch_end at tif_getimage.c:413] [sequential]
+  90 [branch at tif_getimage.c:397] -> 160 [switch_end at tif_getimage.c:413] [false_branch] [(planarconfig == PLANARCONFIG_CONTIG)]
+  103 [branch at tif_getimage.c:422] -> 105 [normal at tif_getimage.c:425] [true_branch] [(colorchannels < 3)]
+  103 [branch at tif_getimage.c:422] -> 165 [normal at tif_getimage.c:425] [false_branch] [(colorchannels < 3)]
+  109 [branch at tif_getimage.c:432] -> 111 [normal at tif_getimage.c:435] [true_branch] [(inkset != INKSET_CMYK)]
+  109 [branch at tif_getimage.c:432] -> 171 [normal at tif_getimage.c:435] [false_branch] [(inkset != INKSET_CMYK)]
+  112 [branch at tif_getimage.c:437] -> 114 [normal at tif_getimage.c:440] [true_branch] [(img->samplesperpixel < 4)]
+  112 [branch at tif_getimage.c:437] -> 174 [normal at tif_getimage.c:440] [false_branch] [(img->samplesperpixel < 4)]
+  117 [branch at tif_getimage.c:445] -> 119 [normal at tif_getimage.c:448] [true_branch] [(compress != COMPRESSION_SGILOG)]
+  117 [branch at tif_getimage.c:445] -> 179 [normal at tif_getimage.c:448] [false_branch] [(compress != COMPRESSION_SGILOG)]
+  122 [branch at tif_getimage.c:455] -> 124 [normal at tif_getimage.c:458] [true_branch] [(compress != COMPRESSION_SGILOG && compr...]
+  122 [branch at tif_getimage.c:455] -> 184 [normal at tif_getimage.c:458] [false_branch] [(compress != COMPRESSION_SGILOG && compr...]
+  125 [branch at tif_getimage.c:460] -> 127 [return at tif_getimage.c:463] [true_branch] [(planarconfig != PLANARCONFIG_CONTIG)]
+  125 [branch at tif_getimage.c:460] -> 187 [return at tif_getimage.c:463] [false_branch] [(planarconfig != PLANARCONFIG_CONTIG)]
+  73 [switch at tif_getimage.c:358] -> 134 [case at tif_getimage.c:359] [switch_case] [PHOTOMETRIC_PALETTE]
+  73 [switch at tif_getimage.c:358] -> 143 [case at tif_getimage.c:381] [switch_case] [PHOTOMETRIC_MINISWHITE]
+  73 [switch at tif_getimage.c:358] -> 144 [case at tif_getimage.c:382] [switch_case] [PHOTOMETRIC_MINISBLACK]
+  73 [switch at tif_getimage.c:358] -> 149 [case at tif_getimage.c:395] [switch_case] [PHOTOMETRIC_YCBCR]
+  73 [switch at tif_getimage.c:358] -> 162 [case at tif_getimage.c:421] [switch_case] [PHOTOMETRIC_RGB]
+  73 [switch at tif_getimage.c:358] -> 167 [case at tif_getimage.c:428] [switch_case] [PHOTOMETRIC_SEPARATED]
+  73 [switch at tif_getimage.c:358] -> 176 [case at tif_getimage.c:444] [switch_case] [PHOTOMETRIC_LOGL]
+  73 [switch at tif_getimage.c:358] -> 181 [case at tif_getimage.c:454] [switch_case] [PHOTOMETRIC_LOGLUV]
+  73 [switch at tif_getimage.c:358] -> 189 [case at tif_getimage.c:469] [switch_case] [PHOTOMETRIC_CIELAB]
+  73 [switch at tif_getimage.c:358] -> 191 [case at tif_getimage.c:471] [switch_case]
+  73 [switch at tif_getimage.c:358] -> 194 [switch_end at tif_getimage.c:475] [switch_case] [default]
+  135 [branch at tif_getimage.c:360] -> 137 [normal at tif_getimage.c:363] [true_branch] [(!TIFFGetField(tif, TIFFTAG_COLORMAP,
+		...]
+  135 [branch at tif_getimage.c:360] -> 226 [placeholder at tif_getimage.c:364] [false_branch] [(!TIFFGetField(tif, TIFFTAG_COLORMAP,
+		...]
+  139 [branch at tif_getimage.c:371] -> 141 [normal at tif_getimage.c:373] [true_branch] [( !img->redcmap || !img->greencmap || !i...]
+  139 [branch at tif_getimage.c:371] -> 229 [placeholder at tif_getimage.c:374] [false_branch] [( !img->redcmap || !img->greencmap || !i...]
+  145 [branch at tif_getimage.c:383] -> 147 [normal at tif_getimage.c:392] [true_branch] [(planarconfig == PLANARCONFIG_CONTIG
+			...]
+  145 [branch at tif_getimage.c:383] -> 240 [placeholder at tif_getimage.c:393] [false_branch] [(planarconfig == PLANARCONFIG_CONTIG
+			...]
+  151 [switch at tif_getimage.c:400] -> 156 [case at tif_getimage.c:401] [switch_case] [COMPRESSION_JPEG]
+  151 [switch at tif_getimage.c:400] -> 158 [case at tif_getimage.c:410] [switch_case]
+  151 [switch at tif_getimage.c:400] -> 160 [switch_end at tif_getimage.c:413] [switch_case] [default]
+  150 [branch at tif_getimage.c:397] -> 151 [switch at tif_getimage.c:400] [true_branch] [(planarconfig == PLANARCONFIG_CONTIG)]
+  160 [switch_end at tif_getimage.c:413] -> 249 [placeholder at tif_getimage.c:414] [sequential]
+  150 [branch at tif_getimage.c:397] -> 249 [placeholder at tif_getimage.c:414] [false_branch] [(planarconfig == PLANARCONFIG_CONTIG)]
+  163 [branch at tif_getimage.c:422] -> 165 [normal at tif_getimage.c:425] [true_branch] [(colorchannels < 3)]
+  163 [branch at tif_getimage.c:422] -> 256 [placeholder at tif_getimage.c:426] [false_branch] [(colorchannels < 3)]
+  169 [branch at tif_getimage.c:432] -> 171 [normal at tif_getimage.c:435] [true_branch] [(inkset != INKSET_CMYK)]
+  169 [branch at tif_getimage.c:432] -> 259 [placeholder at tif_getimage.c:436] [false_branch] [(inkset != INKSET_CMYK)]
+  172 [branch at tif_getimage.c:437] -> 174 [normal at tif_getimage.c:440] [true_branch] [(img->samplesperpixel < 4)]
+  172 [branch at tif_getimage.c:437] -> 261 [placeholder at tif_getimage.c:441] [false_branch] [(img->samplesperpixel < 4)]
+  177 [branch at tif_getimage.c:445] -> 179 [normal at tif_getimage.c:448] [true_branch] [(compress != COMPRESSION_SGILOG)]
+  177 [branch at tif_getimage.c:445] -> 264 [placeholder at tif_getimage.c:449] [false_branch] [(compress != COMPRESSION_SGILOG)]
+  182 [branch at tif_getimage.c:455] -> 184 [normal at tif_getimage.c:458] [true_branch] [(compress != COMPRESSION_SGILOG && compr...]
+  182 [branch at tif_getimage.c:455] -> 266 [placeholder at tif_getimage.c:459] [false_branch] [(compress != COMPRESSION_SGILOG && compr...]
+  185 [branch at tif_getimage.c:460] -> 187 [return at tif_getimage.c:463] [true_branch] [(planarconfig != PLANARCONFIG_CONTIG)]
+  185 [branch at tif_getimage.c:460] -> 268 [placeholder at tif_getimage.c:464] [false_branch] [(planarconfig != PLANARCONFIG_CONTIG)]
+  197 [branch at tif_getimage.c:482] -> 199 [normal at tif_getimage.c:484] [true_branch] [(!PickContigCase(img))]
+  197 [branch at tif_getimage.c:482] -> 271 [placeholder at tif_getimage.c:485] [false_branch] [(!PickContigCase(img))]
+  201 [branch at tif_getimage.c:487] -> 203 [normal at tif_getimage.c:489] [true_branch] [(!PickSeparateCase(img))]
+  201 [branch at tif_getimage.c:487] -> 272 [placeholder at tif_getimage.c:490] [false_branch] [(!PickSeparateCase(img))]
+  196 [branch at tif_getimage.c:481] -> 197 [branch at tif_getimage.c:482] [true_branch] [(img->isContig)]
+  196 [branch at tif_getimage.c:481] -> 200 [normal at tif_getimage.c:486] [false_branch] [(img->isContig)]
+  1 [normal at tif_getimage.c:265] -> 208 [placeholder at tif_getimage.c:274] [sequential]
+  208 [placeholder at tif_getimage.c:274] -> 2 [branch at tif_getimage.c:275] [sequential]
+  209 [placeholder at tif_getimage.c:277] -> 210 [placeholder at tif_getimage.c:278] [sequential]
+  210 [placeholder at tif_getimage.c:278] -> 4 [normal at tif_getimage.c:279] [sequential]
+  4 [normal at tif_getimage.c:279] -> 5 [switch at tif_getimage.c:296] [sequential]
+  6 [case at tif_getimage.c:297] -> 15 [case at tif_getimage.c:297] [sequential]
+  15 [case at tif_getimage.c:297] -> 7 [case at tif_getimage.c:298] [sequential]
+  7 [case at tif_getimage.c:298] -> 16 [case at tif_getimage.c:298] [sequential]
+  16 [case at tif_getimage.c:298] -> 8 [case at tif_getimage.c:299] [sequential]
+  8 [case at tif_getimage.c:299] -> 17 [case at tif_getimage.c:299] [sequential]
+  17 [case at tif_getimage.c:299] -> 9 [case at tif_getimage.c:300] [sequential]
+  9 [case at tif_getimage.c:300] -> 18 [case at tif_getimage.c:300] [sequential]
+  18 [case at tif_getimage.c:300] -> 10 [case at tif_getimage.c:301] [sequential]
+  13 [normal at tif_getimage.c:304] -> 22 [normal at tif_getimage.c:304] [sequential]
+  22 [normal at tif_getimage.c:304] -> 211 [placeholder at tif_getimage.c:305] [sequential]
+  211 [placeholder at tif_getimage.c:305] -> 14 [normal at tif_getimage.c:306] [sequential]
+  24 [switch_end at tif_getimage.c:307] -> 25 [normal at tif_getimage.c:308] [sequential]
+  25 [normal at tif_getimage.c:308] -> 212 [placeholder at tif_getimage.c:311] [sequential]
+  212 [placeholder at tif_getimage.c:311] -> 26 [branch at tif_getimage.c:312] [sequential]
+  213 [placeholder at tif_getimage.c:313] -> 27 [switch at tif_getimage.c:314] [sequential]
+  32 [case at tif_getimage.c:319] -> 39 [case at tif_getimage.c:319] [sequential]
+  39 [case at tif_getimage.c:319] -> 33 [case at tif_getimage.c:320] [sequential]
+  214 [placeholder at tif_getimage.c:324] -> 215 [placeholder at tif_getimage.c:325] [sequential]
+  215 [placeholder at tif_getimage.c:325] -> 216 [placeholder at tif_getimage.c:326] [sequential]
+  216 [placeholder at tif_getimage.c:326] -> 43 [branch at tif_getimage.c:327] [sequential]
+  217 [placeholder at tif_getimage.c:329] -> 45 [branch at tif_getimage.c:330] [sequential]
+  218 [placeholder at tif_getimage.c:331] -> 219 [placeholder at tif_getimage.c:332] [sequential]
+  219 [placeholder at tif_getimage.c:332] -> 220 [placeholder at tif_getimage.c:333] [sequential]
+  220 [placeholder at tif_getimage.c:333] -> 46 [normal at tif_getimage.c:334] [sequential]
+  221 [placeholder at tif_getimage.c:336] -> 222 [placeholder at tif_getimage.c:337] [sequential]
+  222 [placeholder at tif_getimage.c:337] -> 223 [placeholder at tif_getimage.c:338] [sequential]
+  223 [placeholder at tif_getimage.c:338] -> 47 [normal at tif_getimage.c:339] [sequential]
+  47 [normal at tif_getimage.c:339] -> 48 [branch at tif_getimage.c:342] [sequential]
+  64 [normal at tif_getimage.c:347] -> 54 [normal at tif_getimage.c:348] [sequential]
+  54 [normal at tif_getimage.c:348] -> 65 [normal at tif_getimage.c:348] [sequential]
+  65 [normal at tif_getimage.c:348] -> 55 [break at tif_getimage.c:349] [sequential]
+  59 [normal at tif_getimage.c:354] -> 70 [normal at tif_getimage.c:354] [sequential]
+  70 [normal at tif_getimage.c:354] -> 60 [normal at tif_getimage.c:355] [sequential]
+  224 [placeholder at tif_getimage.c:357] -> 73 [switch at tif_getimage.c:358] [sequential]
+  225 [placeholder at tif_getimage.c:361] -> 76 [normal at tif_getimage.c:362] [sequential]
+  76 [normal at tif_getimage.c:362] -> 136 [normal at tif_getimage.c:362] [sequential]
+  136 [normal at tif_getimage.c:362] -> 77 [normal at tif_getimage.c:363] [sequential]
+  226 [placeholder at tif_getimage.c:364] -> 227 [placeholder at tif_getimage.c:365] [sequential]
+  227 [placeholder at tif_getimage.c:365] -> 228 [placeholder at tif_getimage.c:366] [sequential]
+  228 [placeholder at tif_getimage.c:366] -> 78 [normal at tif_getimage.c:367] [sequential]
+  78 [normal at tif_getimage.c:367] -> 138 [normal at tif_getimage.c:367] [sequential]
+  138 [normal at tif_getimage.c:367] -> 79 [branch at tif_getimage.c:371] [sequential]
+  80 [normal at tif_getimage.c:372] -> 140 [normal at tif_getimage.c:372] [sequential]
+  140 [normal at tif_getimage.c:372] -> 81 [normal at tif_getimage.c:373] [sequential]
+  229 [placeholder at tif_getimage.c:374] -> 230 [placeholder at tif_getimage.c:375] [sequential]
+  230 [placeholder at tif_getimage.c:375] -> 82 [normal at tif_getimage.c:376] [sequential]
+  82 [normal at tif_getimage.c:376] -> 142 [normal at tif_getimage.c:376] [sequential]
+  142 [normal at tif_getimage.c:376] -> 231 [placeholder at tif_getimage.c:379] [sequential]
+  231 [placeholder at tif_getimage.c:379] -> 232 [placeholder at tif_getimage.c:380] [sequential]
+  232 [placeholder at tif_getimage.c:380] -> 83 [case at tif_getimage.c:381] [sequential]
+  83 [case at tif_getimage.c:381] -> 143 [case at tif_getimage.c:381] [sequential]
+  143 [case at tif_getimage.c:381] -> 84 [case at tif_getimage.c:382] [sequential]
+  233 [placeholder at tif_getimage.c:384] -> 234 [placeholder at tif_getimage.c:385] [sequential]
+  234 [placeholder at tif_getimage.c:385] -> 86 [normal at tif_getimage.c:386] [sequential]
+  86 [normal at tif_getimage.c:386] -> 146 [normal at tif_getimage.c:386] [sequential]
+  146 [normal at tif_getimage.c:386] -> 235 [placeholder at tif_getimage.c:387] [sequential]
+  235 [placeholder at tif_getimage.c:387] -> 236 [placeholder at tif_getimage.c:388] [sequential]
+  236 [placeholder at tif_getimage.c:388] -> 237 [placeholder at tif_getimage.c:389] [sequential]
+  237 [placeholder at tif_getimage.c:389] -> 238 [placeholder at tif_getimage.c:390] [sequential]
+  238 [placeholder at tif_getimage.c:390] -> 239 [placeholder at tif_getimage.c:391] [sequential]
+  239 [placeholder at tif_getimage.c:391] -> 87 [normal at tif_getimage.c:392] [sequential]
+  240 [placeholder at tif_getimage.c:393] -> 88 [break at tif_getimage.c:394] [sequential]
+  241 [placeholder at tif_getimage.c:396] -> 90 [branch at tif_getimage.c:397] [sequential]
+  242 [placeholder at tif_getimage.c:398] -> 243 [placeholder at tif_getimage.c:399] [sequential]
+  243 [placeholder at tif_getimage.c:399] -> 91 [switch at tif_getimage.c:400] [sequential]
+  244 [placeholder at tif_getimage.c:402] -> 245 [placeholder at tif_getimage.c:403] [sequential]
+  245 [placeholder at tif_getimage.c:403] -> 246 [placeholder at tif_getimage.c:404] [sequential]
+  246 [placeholder at tif_getimage.c:404] -> 247 [placeholder at tif_getimage.c:405] [sequential]
+  247 [placeholder at tif_getimage.c:405] -> 248 [placeholder at tif_getimage.c:406] [sequential]
+  248 [placeholder at tif_getimage.c:406] -> 93 [break at tif_getimage.c:407] [sequential]
+  249 [placeholder at tif_getimage.c:414] -> 250 [placeholder at tif_getimage.c:415] [sequential]
+  250 [placeholder at tif_getimage.c:415] -> 251 [placeholder at tif_getimage.c:416] [sequential]
+  251 [placeholder at tif_getimage.c:416] -> 252 [placeholder at tif_getimage.c:417] [sequential]
+  252 [placeholder at tif_getimage.c:417] -> 253 [placeholder at tif_getimage.c:418] [sequential]
+  254 [placeholder at tif_getimage.c:419] -> 101 [break at tif_getimage.c:420] [sequential]
+  104 [normal at tif_getimage.c:423] -> 164 [normal at tif_getimage.c:423] [sequential]
+  164 [normal at tif_getimage.c:423] -> 255 [placeholder at tif_getimage.c:424] [sequential]
+  255 [placeholder at tif_getimage.c:424] -> 105 [normal at tif_getimage.c:425] [sequential]
+  256 [placeholder at tif_getimage.c:426] -> 106 [break at tif_getimage.c:427] [sequential]
+  257 [placeholder at tif_getimage.c:429] -> 108 [normal at tif_getimage.c:430] [sequential]
+  108 [normal at tif_getimage.c:430] -> 168 [normal at tif_getimage.c:430] [sequential]
+  168 [normal at tif_getimage.c:430] -> 109 [branch at tif_getimage.c:432] [sequential]
+  110 [normal at tif_getimage.c:433] -> 170 [normal at tif_getimage.c:433] [sequential]
+  170 [normal at tif_getimage.c:433] -> 258 [placeholder at tif_getimage.c:434] [sequential]
+  258 [placeholder at tif_getimage.c:434] -> 111 [normal at tif_getimage.c:435] [sequential]
+  259 [placeholder at tif_getimage.c:436] -> 112 [branch at tif_getimage.c:437] [sequential]
+  113 [normal at tif_getimage.c:438] -> 173 [normal at tif_getimage.c:438] [sequential]
+  173 [normal at tif_getimage.c:438] -> 260 [placeholder at tif_getimage.c:439] [sequential]
+  260 [placeholder at tif_getimage.c:439] -> 114 [normal at tif_getimage.c:440] [sequential]
+  261 [placeholder at tif_getimage.c:441] -> 262 [placeholder at tif_getimage.c:442] [sequential]
+  262 [placeholder at tif_getimage.c:442] -> 115 [break at tif_getimage.c:443] [sequential]
+  118 [normal at tif_getimage.c:446] -> 178 [normal at tif_getimage.c:446] [sequential]
+  178 [normal at tif_getimage.c:446] -> 263 [placeholder at tif_getimage.c:447] [sequential]
+  263 [placeholder at tif_getimage.c:447] -> 119 [normal at tif_getimage.c:448] [sequential]
+  264 [placeholder at tif_getimage.c:449] -> 120 [break at tif_getimage.c:450] [sequential]
+  123 [normal at tif_getimage.c:456] -> 183 [normal at tif_getimage.c:456] [sequential]
+  183 [normal at tif_getimage.c:456] -> 265 [placeholder at tif_getimage.c:457] [sequential]
+  265 [placeholder at tif_getimage.c:457] -> 124 [normal at tif_getimage.c:458] [sequential]
+  266 [placeholder at tif_getimage.c:459] -> 125 [branch at tif_getimage.c:460] [sequential]
+  126 [normal at tif_getimage.c:461] -> 186 [normal at tif_getimage.c:461] [sequential]
+  186 [normal at tif_getimage.c:461] -> 267 [placeholder at tif_getimage.c:462] [sequential]
+  267 [placeholder at tif_getimage.c:462] -> 127 [return at tif_getimage.c:463] [sequential]
+  268 [placeholder at tif_getimage.c:464] -> 128 [break at tif_getimage.c:465] [sequential]
+  132 [normal at tif_getimage.c:472] -> 192 [normal at tif_getimage.c:472] [sequential]
+  192 [normal at tif_getimage.c:472] -> 269 [placeholder at tif_getimage.c:473] [sequential]
+  269 [placeholder at tif_getimage.c:473] -> 133 [normal at tif_getimage.c:474] [sequential]
+  194 [switch_end at tif_getimage.c:475] -> 195 [normal at tif_getimage.c:476] [sequential]
+  195 [normal at tif_getimage.c:476] -> 270 [placeholder at tif_getimage.c:480] [sequential]
+  270 [placeholder at tif_getimage.c:480] -> 196 [branch at tif_getimage.c:481] [sequential]
+  198 [normal at tif_getimage.c:483] -> 199 [normal at tif_getimage.c:484] [sequential]
+  200 [normal at tif_getimage.c:486] -> 201 [branch at tif_getimage.c:487] [sequential]
+  202 [normal at tif_getimage.c:488] -> 203 [normal at tif_getimage.c:489] [sequential]
+  272 [placeholder at tif_getimage.c:490] -> 273 [placeholder at tif_getimage.c:491] [sequential]
+  273 [placeholder at tif_getimage.c:491] -> 204 [return at tif_getimage.c:492] [sequential]
+  274 [placeholder at tif_getimage.c:493] -> 205 [label at tif_getimage.c:494] [sequential]
+  206 [normal at tif_getimage.c:495] -> 207 [return at tif_getimage.c:496] [sequential]
+  3 [return at tif_getimage.c:276] -> 276 [exit at tif_getimage.c:496] [sequential]
+  127 [return at tif_getimage.c:463] -> 276 [exit at tif_getimage.c:496] [sequential]
+  187 [return at tif_getimage.c:463] -> 276 [exit at tif_getimage.c:496] [sequential]
+  204 [return at tif_getimage.c:492] -> 276 [exit at tif_getimage.c:496] [sequential]
+  207 [return at tif_getimage.c:496] -> 276 [exit at tif_getimage.c:496] [sequential]
+  275 [placeholder at tif_getimage.c:497] -> 276 [exit at tif_getimage.c:496] [sequential]
+DEBUG: Starting DFS from node 25
+DEBUG: Node 35 has no outgoing edges
+DEBUG: Node 33 has no outgoing edges
+DEBUG: Node 40 has no outgoing edges
+DEBUG: Found 1 path(s) via edge 214->215 [sequential]
+DEBUG: Found 1 path(s) via edge 42->214 [sequential]
+DEBUG: Found 1 path(s) via edge 27->42 [switch_case]
+DEBUG: Found 1 path(s) via edge 26->27 [true_branch]
+DEBUG: Found 1 path(s) via edge 214->215 [sequential]
+DEBUG: Found 1 path(s) via edge 26->214 [false_branch]
+DEBUG: Found 2 path(s) via edge 212->26 [sequential]
+DEBUG: Found 2 path(s) via edge 25->212 [sequential]
+DEBUG: Found 2 path(s) from node 25
+Found 2 paths:
+
+Path 1 (7 steps):
+  Node 25 [normal] at tif_getimage.c:308 -> [sequential]
+  Node 212 [placeholder] at tif_getimage.c:311 -> [sequential]
+  Node 26 [branch] at tif_getimage.c:312 -> [true_branch] ((extrasamples >= 1))
+  Node 27 [switch] at tif_getimage.c:314 -> [switch_case] (default)
+  Node 42 [switch_end] at tif_getimage.c:323 -> [sequential]
+  Node 214 [placeholder] at tif_getimage.c:324 -> [sequential]
+  Node 215 [placeholder] at tif_getimage.c:325
+
+Path 2 (5 steps):
+  Node 25 [normal] at tif_getimage.c:308 -> [sequential]
+  Node 212 [placeholder] at tif_getimage.c:311 -> [sequential]
+  Node 26 [branch] at tif_getimage.c:312 -> [false_branch] ((extrasamples >= 1))
+  Node 214 [placeholder] at tif_getimage.c:324 -> [sequential]
+  Node 215 [placeholder] at tif_getimage.c:325
