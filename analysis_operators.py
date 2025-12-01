@@ -1522,19 +1522,15 @@ def _byte_offset_to_point(code_bytes: bytes, byte_index: int) -> Tuple[int, int]
     column = len(snippet) if last_newline == -1 else len(snippet) - last_newline - 1
     return (line, column)
 
-def _extract_lhs_identifier(left_node, code_bytes: bytes) -> Optional[str]:
-    """Extract a plain identifier from assignment left-hand side."""
+def _extract_lhs_expression(left_node, code_bytes: bytes) -> Optional[str]:
+    """Extract the raw textual expression on the left side of assignment."""
     if left_node is None:
         return None
-    current = left_node
-    while current.type == "parenthesized_expression":
-        inner = current.child_by_field_name("expression")
-        if inner is None:
-            break
-        current = inner
-    if current.type == "identifier":
-        return code_bytes[current.start_byte:current.end_byte].decode("utf8").strip()
-    return None
+    try:
+        text = code_bytes[left_node.start_byte:left_node.end_byte].decode("utf8")
+    except Exception:
+        return None
+    return re.sub(r"\s+", " ", text.strip())
 
 def _collect_identifier_occurrences(node, code_bytes: bytes, context: str = "plain") -> List[Dict[str, str]]:
     """Collect identifier occurrences within an expression along with their context."""
@@ -1567,15 +1563,19 @@ def _extract_assignment_relation(node, code_bytes: bytes, function_start_line: i
     right = node.child_by_field_name("right")
     if left is None or right is None:
         return None
-    lhs_name = _extract_lhs_identifier(left, code_bytes)
-    if not lhs_name:
+    lhs_expr = _extract_lhs_expression(left, code_bytes)
+    if not lhs_expr:
         return None
+    lhs_is_identifier = left.type == "identifier"
+    lhs_base = normalize_identifier(lhs_expr)
     operator_segment = code_bytes[left.end_byte:right.start_byte]
     operator_text = operator_segment.decode("utf8", errors="ignore").strip()
     if operator_text != "=":
         return None
     relation = {
-        "lhs": lhs_name,
+        "lhs": lhs_expr,
+        "lhs_base": lhs_base,
+        "lhs_is_identifier": lhs_is_identifier,
         "rhs": _collect_identifier_occurrences(right, code_bytes),
         "operator_point": None,
     }
@@ -1634,15 +1634,100 @@ def _extract_seed_from_line(code_line: Optional[str], eq_position: Optional[int]
         idx = line.find("=")
     if idx == -1:
         return None
-    lhs_fragment = line[:idx].rstrip()
-    while lhs_fragment and lhs_fragment[-1] in "*&":
-        lhs_fragment = lhs_fragment[:-1].rstrip()
-    match = re.search(r"[A-Za-z_]\w*$", lhs_fragment)
-    if match:
-        return match.group(0)
-    return normalize_identifier(lhs_fragment)
+    lhs_fragment = line[:idx].strip()
+    if not lhs_fragment:
+        return None
+    return re.sub(r"\s+", " ", lhs_fragment)
 
-def get_alias_set(location: str, eq_position: int) -> List[str]:
+def _replace_expression_base(expression: str, old_base: Optional[str], new_base: Optional[str]) -> Optional[str]:
+    """Replace the base identifier inside a complex expression with a new alias."""
+    if not expression or not old_base or not new_base:
+        return None
+    pattern = r"(?<![A-Za-z0-9_])" + re.escape(old_base) + r"(?![A-Za-z0-9_])"
+    match = re.search(pattern, expression)
+    if not match:
+        return None
+    start, end = match.span()
+    return expression[:start] + new_base + expression[end:]
+
+def _build_gep_info(expression: str) -> Dict[str, Any]:
+    """
+    Build gep_info structure for an expression, supporting nested member access.
+    
+    Args:
+        expression: Variable expression (e.g., "tif", "tif->tif_rawdata", "basebase->base->member")
+    
+    Returns:
+        Dictionary with gep_info structure containing:
+        - type: "base" or "member"
+        - gep_type: "not_struct", "member", etc.
+        - baseobj_name: outermost base object name (for member access)
+        - member_name: final member name (for member access)
+        - member_path: list of member names in the path (for nested access like base->mid->member)
+        - offset: offset value
+        - baseobj_type: "ptr" (for ->), "struct" (for .), or None (for base)
+    """
+    expr = expression.strip()
+    
+    # Check for arrow operator (->) - supports nested access
+    # Pattern: identifier -> identifier (-> identifier)*
+    arrow_pattern = r'([A-Za-z_]\w*)(?:\s*->\s*([A-Za-z_]\w*))+'
+    arrow_match = re.match(arrow_pattern, expr)
+    
+    if arrow_match:
+        # Extract all parts of the path
+        parts = re.findall(r'([A-Za-z_]\w*)', expr)
+        if len(parts) >= 2:
+            baseobj_name = parts[0]
+            member_path = parts[1:]
+            member_name = parts[-1]  # Final member
+            
+            return {
+                "type": "member",
+                "gep_type": "member",
+                "baseobj_name": baseobj_name,
+                "member_name": member_name,
+                "member_path": member_path,  # Full path: [mid1, mid2, ..., final_member]
+                "offset": 0,
+                "baseobj_type": "ptr"
+            }
+    
+    # Check for dot operator (.) - supports nested access
+    # Pattern: identifier . identifier (. identifier)*
+    dot_pattern = r'([A-Za-z_]\w*)(?:\s*\.\s*([A-Za-z_]\w*))+'
+    dot_match = re.match(dot_pattern, expr)
+    
+    if dot_match:
+        # Extract all parts of the path
+        parts = re.findall(r'([A-Za-z_]\w*)', expr)
+        if len(parts) >= 2:
+            baseobj_name = parts[0]
+            member_path = parts[1:]
+            member_name = parts[-1]  # Final member
+            
+            return {
+                "type": "member",
+                "gep_type": "member",
+                "baseobj_name": baseobj_name,
+                "member_name": member_name,
+                "member_path": member_path,  # Full path: [mid1, mid2, ..., final_member]
+                "offset": 0,
+                "baseobj_type": "struct"
+            }
+    
+    # It's a base variable (no member access)
+    base_name = normalize_identifier(expr)
+    return {
+        "type": "base",
+        "gep_type": "not_struct",
+        "baseobj_name": None,
+        "member_name": None,
+        "member_path": None,
+        "offset": 0,
+        "baseobj_type": None
+    }
+
+def get_alias_set(location: str, eq_position: int) -> List[Dict[str, Any]]:
     """
     Collect alias variables for the assignment located at (location, eq_position).
 
@@ -1651,7 +1736,16 @@ def get_alias_set(location: str, eq_position: int) -> List[str]:
         eq_position: Column index of the '=' sign in the assignment line.
 
     Returns:
-        List of variable names aliasing the seed variable（包含种子变量本身）.
+        List of dictionaries, each containing:
+        - "name": variable name or expression (e.g., "tif", "tif->tif_rawdata", "basebase->base->member")
+        - "gep_info": dictionary with type information
+            - "type": "base" or "member"
+            - "gep_type": "not_struct", "member", etc.
+            - "baseobj_name": outermost base object name (if member access)
+            - "member_name": final member name (if member access)
+            - "member_path": list of member names in the path (for nested access like base->mid->member)
+            - "offset": offset value
+            - "baseobj_type": "ptr" (for ->), "struct" (for .), or None (for base)
     """
     if not isinstance(location, str) or ":" not in location:
         logging.warning("get_alias_set requires location in 'file:line' format.")
@@ -1693,31 +1787,75 @@ def get_alias_set(location: str, eq_position: int) -> List[str]:
         return []
 
     seed_relation = _select_assignment_relation(relations, target_line, target_column)
-    seed_var = seed_relation.get("lhs") if seed_relation else None
-    if not seed_var:
-        seed_var = _extract_seed_from_line(code_line, target_column)
-    if not seed_var:
+    seed_expr = seed_relation.get("lhs") if seed_relation else None
+    if not seed_expr:
+        seed_expr = _extract_seed_from_line(code_line, target_column)
+    if not seed_expr:
         logging.warning("get_alias_set failed to resolve seed variable at %s (eq=%s)", location, eq_position)
         return []
 
-    alias_set: Set[str] = {seed_var}
+    seed_base = normalize_identifier(seed_expr)
+    plain_aliases: Set[str] = set()
+    if seed_base:
+        plain_aliases.add(seed_base)
+    else:
+        plain_aliases.add(seed_expr)
+
     changed = True
-    while changed:
+    while changed and plain_aliases:
         changed = False
         for relation in relations:
-            lhs = relation.get("lhs")
-            if not lhs or lhs in alias_set:
+            if not relation.get("lhs_is_identifier"):
+                continue
+            lhs_base = relation.get("lhs_base")
+            if not lhs_base or lhs_base in plain_aliases:
                 continue
             rhs_refs = relation.get("rhs") or []
             for ref in rhs_refs:
                 if ref.get("context") != "plain":
                     continue
-                if ref.get("name") in alias_set:
-                    alias_set.add(lhs)
+                if ref.get("name") in plain_aliases:
+                    plain_aliases.add(lhs_base)
                     changed = True
                     break
 
-    return sorted(alias_set)
+    # Collect all alias expressions
+    alias_expressions: Set[str] = set()
+    if seed_expr:
+        alias_expressions.add(seed_expr)
+
+    # Add member access expressions derived from base aliases
+    if seed_expr and seed_base:
+        for alias_name in plain_aliases:
+            substituted = _replace_expression_base(seed_expr, seed_base, alias_name)
+            if substituted:
+                alias_expressions.add(re.sub(r"\s+", " ", substituted.strip()))
+
+    # Build result list with structured format
+    result: List[Dict[str, Any]] = []
+    seen_names: Set[str] = set()
+    
+    # Add seed expression first
+    if seed_expr:
+        seed_normalized = re.sub(r"\s+", " ", seed_expr.strip())
+        if seed_normalized not in seen_names:
+            result.append({
+                "name": seed_normalized,
+                "gep_info": _build_gep_info(seed_normalized)
+            })
+            seen_names.add(seed_normalized)
+    
+    # Add member access expressions
+    for expr in sorted(alias_expressions):
+        expr_normalized = re.sub(r"\s+", " ", expr.strip())
+        if expr_normalized not in seen_names and expr_normalized != seed_expr:
+            result.append({
+                "name": expr_normalized,
+                "gep_info": _build_gep_info(expr_normalized)
+            })
+            seen_names.add(expr_normalized)
+    
+    return result
 
 def get_gep_position_list(source_location: str) -> Optional[List[int]]:
     
@@ -1835,548 +1973,6 @@ configure_function_cfg_dependencies(
     dump_source_line=dump_source_line,
 )
 
-
-def find_all_paths_in_cfg(function_name: str, start_line, target_line) -> Optional[List[List[Dict[str, Any]]]]:
-    """Finds all paths from a starting line to a target line in a function's control flow graph.
-    
-    Args:
-        function_name: Name of the function
-        start_line: Starting line number (int) or location string (e.g., "filename:line" or "839")
-        target_line: Target line number (int) or location string (e.g., "filename:line" or "945")
-        
-    Returns:
-        List of paths, where each path is a list of dictionaries representing nodes and edges.
-        Each dictionary contains:
-        - "node": node information (id, type, location, statements)
-        - "edge": edge information (type, condition) if there's an edge to next node
-        Returns None if the function or lines cannot be found.
-    """
-    # Extract line numbers if strings are provided
-    def extract_line_number(line_input):
-        if isinstance(line_input, int):
-            return line_input
-        if isinstance(line_input, str):
-            # Try format "filename:line"
-            if ":" in line_input:
-                try:
-                    return int(line_input.split(":")[-1])
-                except ValueError:
-                    pass
-            # Try direct integer string
-            try:
-                return int(line_input)
-            except ValueError:
-                pass
-        return None
-    
-    start_line_num = extract_line_number(start_line)
-    target_line_num = extract_line_number(target_line)
-    
-    if start_line_num is None:
-        logging.error(f"Invalid start_line format: {start_line}. Expected int or string like 'filename:line' or 'line'")
-        return None
-    if target_line_num is None:
-        logging.error(f"Invalid target_line format: {target_line}. Expected int or string like 'filename:line' or 'line'")
-        return None
-    
-    # Get CFG for the function
-    analyzer = FunctionCFGAnalyzer.from_function_name(function_name)
-    if analyzer is None:
-        logging.error(f"Failed to prepare CFG analyzer for {function_name}")
-        return None
-
-    cfg = analyzer.build_cfg()
-    if not cfg:
-        logging.error(f"Failed to build CFG for function {function_name}")
-        return None
-    
-    nodes = cfg.get("nodes", [])
-    edges = cfg.get("edges", [])
-    
-    # Find nodes containing the start and target lines
-    # Exclude entry/exit nodes as they have incorrect line numbers
-    start_nodes = _find_nodes_by_line(nodes, start_line_num, exclude_types=["entry", "exit"])
-    target_nodes = _find_nodes_by_line(nodes, target_line_num, exclude_types=["entry", "exit"])
-    
-    if not start_nodes:
-        logging.error(f"No node found containing line {start_line_num} in function {function_name}")
-        return None
-    if not target_nodes:
-        logging.error(f"No node found containing line {target_line_num} in function {function_name}")
-        # Debug: show available nodes
-        available_lines = [(n["node_id"], n.get("type"), n.get("start_line"), n.get("end_line"), n.get("location")) 
-                          for n in nodes if n.get("type") not in ["entry", "exit"]]
-        logging.debug(f"Available nodes (excluding entry/exit): {available_lines[:10]}...")
-        return None
-    
-    
-    # Build adjacency list from edges (include ALL edges including sequential for path finding)
-    graph = {}
-    edge_map = {}  # (source, target) -> edge info
-    for edge in edges:
-        source = edge.get("source")
-        target = edge.get("target")
-        edge_type = edge.get("type", "sequential")
-        
-        # Include ALL edge types for path finding (sequential edges are needed for complete paths)
-        if source not in graph:
-            graph[source] = []
-        if target not in graph[source]:  # Avoid duplicate edges
-            graph[source].append(target)
-        edge_map[(source, target)] = edge
-    
-    # Find all paths from any start node to any target node
-    all_paths = []
-    target_node_ids = {node["node_id"] for node in target_nodes}
-    
-    for start_node in start_nodes:
-        start_id = start_node["node_id"]
-        paths = _find_all_paths_dfs(start_id, target_node_ids, graph, nodes, edge_map, max_depth=100)
-        all_paths.extend(paths)
-    
-    # Remove duplicate paths
-    unique_paths = _remove_duplicate_paths(all_paths)
-    
-    return unique_paths if unique_paths else None
-
-
-def _find_nodes_by_line(nodes: List[Dict[str, Any]], line_number: int, exclude_types: List[str] = None) -> List[Dict[str, Any]]:
-    """Finds all nodes that contain the given line number.
-    
-    Args:
-        nodes: List of node dictionaries
-        line_number: Target line number
-        exclude_types: List of node types to exclude (e.g., ["entry", "exit"])
-        
-    Returns:
-        List of nodes that contain this line number
-    """
-    if exclude_types is None:
-        exclude_types = []
-    
-    matching_nodes = []
-    for node in nodes:
-        node_type = node.get("type", "")
-        if node_type in exclude_types:
-            continue
-            
-        start_line = node.get("start_line", 0)
-        end_line = node.get("end_line", 0)
-        # Only match if the line is within the node's line range
-        # For nodes with same start and end line, only match if exactly equal
-        if start_line == end_line:
-            if start_line == line_number:
-                matching_nodes.append(node)
-        else:
-            if start_line <= line_number <= end_line:
-                matching_nodes.append(node)
-    
-    # Sort by specificity: prefer nodes with smaller range that contain the line
-    # Nodes where the line is closer to the start are preferred
-    matching_nodes.sort(key=lambda n: (
-        n.get("end_line", 0) - n.get("start_line", 0),  # Smaller range first
-        abs(n.get("start_line", 0) - line_number)  # Closer to start line first
-    ))
-    
-    return matching_nodes
-
-
-def _find_all_paths_dfs(start_id: int, target_ids: Set[int], graph: Dict[int, List[int]], 
-                        nodes: List[Dict[str, Any]], edge_map: Dict, 
-                        visited: Set[int] = None, current_path: List[Dict[str, Any]] = None,
-                        max_depth: int = 100, max_paths: int = 1000) -> List[List[Dict[str, Any]]]:
-    """Uses DFS to find all paths from start to any target node.
-    
-    Args:
-        start_id: Starting node ID
-        target_ids: Set of target node IDs
-        graph: Adjacency list representation of the graph
-        nodes: List of all node dictionaries
-        edge_map: Map from (source, target) to edge info
-        visited: Set of visited nodes in current path (to detect cycles in current path)
-        current_path: Current path being explored
-        max_depth: Maximum path depth to prevent infinite loops
-        max_paths: Maximum number of paths to find (to prevent explosion)
-        
-    Returns:
-        List of paths, each path is a list of dictionaries with node and edge info
-    """
-    if visited is None:
-        visited = set()
-    if current_path is None:
-        current_path = []
-    
-    # Check depth limit
-    if len(current_path) >= max_depth:
-        return []
-    
-    # Check if we've reached a target
-    if start_id in target_ids:
-        # Create a copy of current path with the target node
-        node_map = {node["node_id"]: node for node in nodes}
-        if start_id in node_map:
-            final_path = current_path + [{"node": node_map[start_id], "edge": None}]
-            return [final_path]
-        return []
-    
-    # Check for cycles in current path (prevent infinite loops within same path)
-    # But allow revisiting nodes in different paths
-    if start_id in visited:
-        return []  # Skip paths that form cycles within the same path
-    
-    # Get node info
-    node_map = {node["node_id"]: node for node in nodes}
-    if start_id not in node_map:
-        return []
-    
-    current_node = node_map[start_id]
-    paths = []
-    
-    # Mark current node as visited for this path
-    new_visited = visited.copy()
-    new_visited.add(start_id)
-    
-    # Check if current node is a loop entry node
-    node_type = current_node.get("type", "")
-    control_structure = current_node.get("control_structure", "")
-    is_loop_entry = (node_type == "loop_entry")
-    is_while_or_for = (control_structure in ["while", "for"])
-    is_do_while = (control_structure == "do")
-    
-    # Explore neighbors
-    neighbors = graph.get(start_id, [])
-    
-    # For loop nodes, filter and process edges specially
-    if is_loop_entry:
-        loop_body_edges = []
-        loop_continue_edges = []
-        other_edges = []
-        
-        # Categorize edges
-        for neighbor_id in neighbors:
-            edge_info = edge_map.get((start_id, neighbor_id), {})
-            edge_type = edge_info.get("type", "unknown") if edge_info else "unknown"
-            
-            if edge_type == "loop_body":
-                loop_body_edges.append((neighbor_id, edge_info))
-            elif edge_type == "loop_continue":
-                loop_continue_edges.append((neighbor_id, edge_info))
-            else:
-                other_edges.append((neighbor_id, edge_info))
-        
-        # Process edges based on loop type
-        if is_while_or_for:
-            # while/for: two paths - enter loop once OR skip loop
-            # Path 1: Enter loop body once (then skip loop_continue)
-            for neighbor_id, edge_info in loop_body_edges:
-                # Mark loop as visited to prevent going through loop_continue back
-                loop_visited = new_visited.copy()
-                loop_visited.add(start_id)  # Mark loop entry as visited
-                
-                path_entry = {
-                    "node": current_node,
-                    "edge": edge_info
-                }
-                
-                # Recursively find paths, but skip loop_continue edges when we encounter the loop again
-                neighbor_paths = _find_all_paths_dfs(
-                    neighbor_id, target_ids, graph, nodes, edge_map,
-                    loop_visited, current_path + [path_entry], max_depth
-                )
-                
-                paths.extend(neighbor_paths)
-            
-            # Path 2: Skip loop (use other edges like sequential/false branch)
-            for neighbor_id, edge_info in other_edges:
-                path_entry = {
-                    "node": current_node,
-                    "edge": edge_info
-                }
-                
-                neighbor_paths = _find_all_paths_dfs(
-                    neighbor_id, target_ids, graph, nodes, edge_map,
-                    new_visited, current_path + [path_entry], max_depth
-                )
-                
-                paths.extend(neighbor_paths)
-        
-        elif is_do_while:
-            # do-while: one path - enter loop body once (then skip loop_continue)
-            for neighbor_id, edge_info in loop_body_edges:
-                # Mark loop as visited to prevent going through loop_continue back
-                loop_visited = new_visited.copy()
-                loop_visited.add(start_id)  # Mark loop entry as visited
-                
-                path_entry = {
-                    "node": current_node,
-                    "edge": edge_info
-                }
-                
-                # Recursively find paths, but skip loop_continue edges when we encounter the loop again
-                neighbor_paths = _find_all_paths_dfs(
-                    neighbor_id, target_ids, graph, nodes, edge_map,
-                    loop_visited, current_path + [path_entry], max_depth
-                )
-                
-                paths.extend(neighbor_paths)
-        
-    else:
-        # Non-loop node: process all edges normally, but skip loop_continue if loop already visited
-        for neighbor_id in neighbors:
-            edge_info = edge_map.get((start_id, neighbor_id), {})
-            edge_type = edge_info.get("type", "unknown") if edge_info else "unknown"
-            
-            # Skip loop_continue edge if we've already visited the target loop node
-            if edge_type == "loop_continue":
-                # Check if target node (which should be a loop_entry) is already in visited
-                target_node = next((n for n in nodes if n["node_id"] == neighbor_id), None)
-                if target_node and target_node.get("type") == "loop_entry":
-                    if neighbor_id in visited:
-                        # Already visited this loop, skip the continue edge
-                        continue
-            
-            path_entry = {
-                "node": current_node,
-                "edge": edge_info if edge_info else None
-            }
-            
-            # Recursively find paths from neighbor
-            neighbor_paths = _find_all_paths_dfs(
-                neighbor_id, target_ids, graph, nodes, edge_map,
-                new_visited, current_path + [path_entry], max_depth
-            )
-            
-            paths.extend(neighbor_paths)
-    
-    return paths
-
-
-def _remove_duplicate_paths(paths: List[List[Dict[str, Any]]]) -> List[List[Dict[str, Any]]]:
-    """Removes duplicate paths based on node ID sequences.
-    
-    Args:
-        paths: List of paths
-        
-    Returns:
-        List of unique paths
-    """
-    seen = set()
-    unique_paths = []
-    
-    for path in paths:
-        # Create a signature from node IDs
-        node_ids = tuple(entry["node"]["node_id"] for entry in path if "node" in entry)
-        if node_ids not in seen:
-            seen.add(node_ids)
-            unique_paths.append(path)
-    
-    return unique_paths
-
-
-def find_all_paths_between_lines(function_name: str, start_location: str, target_location: str) -> Optional[List[List[Dict[str, Any]]]]:
-    """Finds all paths between two source locations in a function's CFG.
-    
-    Args:
-        function_name: Name of the function
-        start_location: Starting location in format 'filename:line_number' or just line number
-        target_location: Target location in format 'filename:line_number' or just line number
-        
-    Returns:
-        List of paths, where each path contains node and edge information.
-        Returns None if paths cannot be found.
-    """
-    # Extract line numbers from locations
-    def extract_line(location: str) -> Optional[int]:
-        if isinstance(location, int):
-            return location
-        if isinstance(location, str):
-            # Try format "filename:line"
-            if ":" in location:
-                try:
-                    return int(location.split(":")[-1])
-                except ValueError:
-                    pass
-            # Try direct integer
-            try:
-                return int(location)
-            except ValueError:
-                pass
-        return None
-    
-    start_line = extract_line(start_location)
-    target_line = extract_line(target_location)
-    
-    if start_line is None:
-        logging.error(f"Invalid start_location format: {start_location}")
-        return None
-    if target_line is None:
-        logging.error(f"Invalid target_location format: {target_location}")
-        return None
-    
-    return find_all_paths_in_cfg(function_name, start_line, target_line)
-
-
-def trace_paths_to_exit(location: str, eq_position: str) -> List[List[Dict[str, Any]]]:
-    """Generates filtered paths from a start location to the function exit.
-    
-    Args:
-        location: Start location 'filename:line'.
-        eq_position: Position of lvalue in the expression.
-        
-    Returns:
-        List of filtered paths, containing only key value operations, branches, and start/end nodes.
-    """
-    # 1. Identify current function
-    func_info = find_current_function(location)
-    if not func_info or "error" in func_info:
-        logging.error(f"Could not find function for location {location}")
-        return []
-    
-    function_name = func_info.get("function_name")
-    
-    # 2. Get target return locations
-    return_locs = find_return_locations(function_name)
-    if not return_locs:
-        logging.warning(f"No return locations found for {function_name}")
-        return []
-        
-    # 3. Get key value operations
-    key_ops = find_lvalue_key_svfgnode(location, eq_position)
-    # Create a set of key locations for fast lookup
-    key_locs = set()
-    for op in key_ops:
-        loc = op.get("location")
-        if loc:
-            key_locs.add(loc)
-    
-    print(f"DEBUG: Key locations: {key_locs}")
-            
-    # 4. Find all paths to each return location
-    all_raw_paths = []
-    for ret_loc in return_locs:
-        paths = find_all_paths_between_lines(function_name, location, ret_loc)
-        if paths:
-            all_raw_paths.extend(paths)
-            
-    if not all_raw_paths:
-        return []
-
-    # 5. Cluster paths by Key SVFG Node sequence (based on location)
-    # We also include the return location in the key to ensure paths in a cluster end at the same place
-    clusters = defaultdict(list)
-    
-    for path in all_raw_paths:
-        if not path:
-            continue
-            
-        # Extract sequence of key nodes (by location)
-        key_seq = []
-        for step in path:
-            node = step.get("node", {})
-            loc = node.get("location")
-            edge = step.get("edge")
-            
-            # Key ops from backend
-            if loc in key_locs:
-                key_seq.append(loc)
-            # Add goto statements as key nodes
-            elif edge and edge.get("type") == "goto":
-                key_seq.append(f"goto:{loc}")
-        
-        # Add return location to the key
-        end_node = path[-1].get("node", {})
-        ret_loc = end_node.get("location")
-        
-        # Create cluster key
-        cluster_key = tuple(key_seq) + (ret_loc,)
-        clusters[cluster_key].append(path)
-        
-    final_filtered_paths = []
-    
-    # 6. Process each cluster
-    for cluster_key, group in clusters.items():
-        if not group:
-            continue
-            
-        base_path = group[0]
-        consistent_branches = set()
-        
-        # Identify candidate branches from the base path
-        # A branch is a node where the edge type is one of the branch types
-        base_branches = [] 
-        for step in base_path:
-            edge = step.get("edge")
-            if edge and edge.get("type") in ["true_branch", "false_branch", "switch_case", "loop_body", "loop_continue"]:
-                base_branches.append(step)
-        
-        # Check consistency against all other paths in group
-        for branch_step in base_branches:
-            node_id = branch_step["node"]["node_id"]
-            edge_type = branch_step["edge"]["type"]
-            # For switch_case, also get the condition value to distinguish different cases
-            edge_condition = branch_step["edge"].get("condition") if edge_type == "switch_case" else None
-            
-            is_consistent = True
-            for other_path in group[1:]:
-                # Find this node in other_path
-                found = False
-                for other_step in other_path:
-                    if other_step["node"]["node_id"] == node_id:
-                        # Check edge type
-                        other_edge = other_step.get("edge")
-                        if other_edge and other_edge.get("type") == edge_type:
-                            # For switch_case, also check that the condition matches
-                            if edge_type == "switch_case":
-                                if other_edge.get("condition") == edge_condition:
-                                    found = True
-                            else:
-                                found = True
-                        break
-                if not found:
-                    is_consistent = False
-                    break
-            
-            if is_consistent:
-                consistent_branches.add(node_id)
-
-        # 7. Construct Representative Path from Base Path
-        filtered_path = []
-        start_node = base_path[0]["node"]
-        end_node = base_path[-1]["node"]
-
-        for step in base_path:
-            node = step["node"]
-            node_id = node["node_id"]
-            node_loc = node.get("location")
-            edge = step.get("edge")
-            
-            keep = False
-            
-            # Keep Start
-            if node == start_node:
-                keep = True
-            # Keep Return
-            elif node == end_node:
-                keep = True
-            # Keep Key Nodes
-            elif node_loc in key_locs:
-                keep = True
-            # Keep Goto Statements
-            elif edge and edge.get("type") == "goto":
-                keep = True
-            # Keep Consistent Branches
-            elif node_id in consistent_branches:
-                keep = True
-            
-            if keep:
-                filtered_path.append(step)
-        
-        if filtered_path:
-            final_filtered_paths.append(filtered_path)
-            
-    return final_filtered_paths
-
-
 if __name__ == '__main__':
     # # Test find_lvalue_key_svfgnode
     # print("\n" + "="*80)
@@ -2475,7 +2071,10 @@ if __name__ == '__main__':
     for location, eq_position in source_location_eq_position_list:
         print(f"Testing get_alias_set for {location} at eq_position {eq_position}")
         alias_set = get_alias_set(location, eq_position)
-        print(f"Alias set: {alias_set}")
+        print(f"Alias set ({len(alias_set)} items):")
+        for item in alias_set:
+            print(f"  - name: {item.get('name')}")
+            print(f"    gep_info: {item.get('gep_info')}")
     
     # location, eq_position = source_location_eq_position_list[16]
 
