@@ -1964,6 +1964,78 @@ def find_lvalue_key_svfgnode(location: str, eq_position: str) -> List[Dict[str, 
     return []
 
 
+def find_formal_arg_key_svfgnode(function_name: str, arg_index: str) -> List[Dict[str, Any]]:
+    """Finds key value flow operations for a specific formal argument using the backend graph-reader.
+    
+    Args:
+        function_name: The name of the function.
+        arg_index: The index of the formal argument.
+        
+    Returns:
+        A list of key SVFG nodes representing value flow operations.
+    """
+    command_caller = CommandCaller()
+    query = {
+        "command": "find-formal_arg-key_svfgnode",
+        "function_name": function_name,
+        "arg_index": str(arg_index)
+    }
+    
+    try:
+        res = command_caller.send_query(query)
+        if res:
+            res_json = json.loads(res)
+            # Check for error in response
+            if isinstance(res_json, dict) and "error" in res_json:
+                logging.error(f"Error in find_formal_arg_key_svfgnode: {res_json['error']}")
+                return []
+            
+            key_svfgs = res_json.get("key_svfgs", [])
+            return key_svfgs
+    except Exception as e:
+        logging.error(f"Exception in find_formal_arg_key_svfgnode: {e}")
+        return []
+    
+    return []
+
+
+def find_actual_arg_key_svfgnode(location: str, callee_function_name: str, arg_index: str) -> List[Dict[str, Any]]:
+    """Finds key value flow operations for a specific actual argument using the backend graph-reader.
+    
+    Args:
+        location: The source location of the call site, format "filename:line".
+        callee_function_name: The name of the called function.
+        arg_index: The index of the actual argument.
+        
+    Returns:
+        A list of key SVFG nodes representing value flow operations.
+    """
+    command_caller = CommandCaller()
+    query = {
+        "command": "find-actual_arg-key_svfgnode",
+        "location": location,
+        "callee_function_name": callee_function_name,
+        "arg_index": str(arg_index)
+    }
+    
+    try:
+        res = command_caller.send_query(query)
+        if res:
+            res_json = json.loads(res)
+            # Check for error in response
+            if isinstance(res_json, dict) and "error" in res_json:
+                logging.error(f"Error in find_actual_arg_key_svfgnode: {res_json['error']}")
+                return []
+            
+            key_svfgs = res_json.get("key_svfgs", [])
+            return key_svfgs
+    except Exception as e:
+        logging.error(f"Exception in find_actual_arg_key_svfgnode: {e}")
+        return []
+    
+    return []
+
+
 '''
 control flow graph (CFG)
 '''

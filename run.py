@@ -13,6 +13,7 @@ from command_caller import CommandCaller
 from analyzers.path_builder_agent import FunctionPathBuilderAgent, FunctionNodeBuilderAgent, FunctionPathCheckerAgent
 from analyzers.path_z3_checker import PathZ3CheckerAgent
 from analyzers.path_branch_extractor import PathBranchExtractorAgent
+from analyzers.cross_function_analyzer import CrossFunctionMemoryFlowAnalyzer
 import analysis_operators
 from openai import OpenAI
 
@@ -551,6 +552,194 @@ def test_path_branch_extractor_agent(test_data):
         except Exception:
             pass
 
+
+def test_cross_function_memory_flow_analyzer(test_data):
+    """测试CrossFunctionMemoryFlowAnalyzer类 - 跨函数内存流分析"""
+    
+    run_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "RES", "RUN")
+    os.makedirs(run_dir, exist_ok=True)
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    log_path = os.path.join(run_dir, f"cross-function-analyzer-{timestamp}.log")
+
+    logger = logging.getLogger(f"cross_function_analyzer_{timestamp}")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    handler = logging.FileHandler(log_path, encoding="utf-8")
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    
+    try:
+        # 创建OpenAI客户端（使用DeepSeek）
+        model_name = "deepseek-chat"
+        client = OpenAI(
+            api_key=os.environ.get("DEEPSEEK_API_KEY"),
+            base_url="https://api.deepseek.com",
+        )
+        
+        total_analyzed = 0
+        total_nodes = 0
+        total_paths = 0
+        
+        # 循环测试所有位置对
+        for idx, (source_location, eq_position) in enumerate(test_data, start=1):
+            logger.info(
+                "Start cross-function analysis for source_location=%s eq_position=%s",
+                source_location,
+                eq_position,
+            )
+            
+            print(f"\n{'='*80}")
+            print(f"[{idx}/{len(test_data)}] Testing CrossFunctionMemoryFlowAnalyzer: {source_location} eq_position={eq_position}")
+            print(f"{'='*80}")
+            
+            try:
+                # 1. 创建分析器
+                print("\n=== Creating CrossFunctionMemoryFlowAnalyzer ===")
+                analyzer = CrossFunctionMemoryFlowAnalyzer.from_location(
+                    location=source_location,
+                    eq_position=eq_position,
+                    client=client,
+                    model_name=model_name,
+                )
+                
+                print(f"Root node: {analyzer.root_node.function_name} at {analyzer.root_node.start_location}")
+                
+                # 2. 运行分析
+                print("\n=== Running cross-function analysis ===")
+                all_nodes = analyzer.analyze()
+                
+                print(f"\n=== Analysis Complete ===")
+                print(f"Total nodes analyzed: {len(all_nodes)}")
+                
+                # 3. 输出分析树结构
+                print("\n=== Analysis Tree Structure ===")
+                def print_tree(node, indent=0):
+                    """递归打印分析树"""
+                    prefix = "  " * indent
+                    status_icon = {
+                        "pending": "⏳",
+                        "analyzing": "🔄",
+                        "completed": "✅",
+                        "terminated": "❌"
+                    }.get(node.analysis_status, "?")
+                    
+                    print(f"{prefix}{status_icon} Node {node.node_id}: {node.function_name} ({node.analysis_status})")
+                    print(f"{prefix}   Location: {node.start_location}")
+                    print(f"{prefix}   Paths: {len(node.paths)}, Results: {len(node.path_analysis_results)}")
+                    
+                    if node.path_analysis_results:
+                        classifications = [r.get("classification") for r in node.path_analysis_results]
+                        print(f"{prefix}   Classifications: {', '.join(set(classifications))}")
+                    
+                    for child in node.children:
+                        print_tree(child, indent + 1)
+                
+                print_tree(analyzer.root_node)
+                
+                # 4. 输出详细结果
+                print("\n=== Detailed Results ===")
+                for node in all_nodes:
+                    print(f"\n--- Node {node.node_id}: {node.function_name} ---")
+                    print(f"Status: {node.analysis_status}")
+                    print(f"Location: {node.start_location}")
+                    print(f"Paths: {len(node.paths)}")
+                    print(f"Path Analysis Results: {len(node.path_analysis_results)}")
+                    
+                    if node.path_analysis_results:
+                        print("Path Classifications:")
+                        for result in node.path_analysis_results:
+                            path_id = result.get("path_id")
+                            classification = result.get("classification")
+                            reason = result.get("reason", "")
+                            key_operation = result.get("key_operation")
+                            
+                            print(f"  Path {path_id}: {classification}")
+                            if reason:
+                                print(f"    Reason: {reason[:100]}...")  # Truncate long reasons
+                            if key_operation:
+                                callee = key_operation.get("callee_function_name")
+                                if callee:
+                                    print(f"    Callee: {callee}")
+                    
+                    if node.children:
+                        print(f"Children: {len(node.children)}")
+                        for child in node.children:
+                            print(f"  -> {child.function_name} at {child.start_location}")
+                
+                # 5. 统计信息
+                node_count = len(all_nodes)
+                path_count = sum(len(node.path_analysis_results) for node in all_nodes)
+                
+                print(f"\n=== Summary for {source_location} ===")
+                print(f"Total nodes in analysis tree: {node_count}")
+                print(f"Total paths analyzed: {path_count}")
+                
+                total_analyzed += 1
+                total_nodes += node_count
+                total_paths += path_count
+                
+                # 6. 输出JSON格式的结果（可选）
+                result_summary = {
+                    "source_location": source_location,
+                    "eq_position": eq_position,
+                    "root_function": analyzer.root_node.function_name,
+                    "total_nodes": node_count,
+                    "total_paths": path_count,
+                    "nodes": [
+                        {
+                            "node_id": node.node_id,
+                            "function_name": node.function_name,
+                            "status": node.analysis_status,
+                            "path_count": len(node.path_analysis_results),
+                            "classifications": [r.get("classification") for r in node.path_analysis_results],
+                            "children_count": len(node.children)
+                        }
+                        for node in all_nodes
+                    ]
+                }
+                
+                result_json = json.dumps(result_summary, ensure_ascii=False, indent=2)
+                logger.info("Analysis result: %s", result_json)
+                
+            except Exception as e:
+                error_msg = f"Error processing {source_location}: {str(e)}"
+                print(f"\n!!! {error_msg}")
+                logger.error(error_msg, exc_info=True)
+                import traceback
+                traceback.print_exc()
+                continue
+        
+        # 输出总体统计
+        print(f"\n{'='*80}")
+        print(f"=== OVERALL SUMMARY ===")
+        print(f"{'='*80}")
+        print(f"Total locations analyzed: {total_analyzed}")
+        print(f"Total nodes created: {total_nodes}")
+        print(f"Total paths analyzed: {total_paths}")
+        if total_analyzed > 0:
+            print(f"Average nodes per location: {total_nodes / total_analyzed:.2f}")
+            print(f"Average paths per location: {total_paths / total_analyzed:.2f}")
+        
+        logger.info(
+            "Overall summary: total_locations=%d total_nodes=%d total_paths=%d",
+            total_analyzed,
+            total_nodes,
+            total_paths
+        )
+        
+    finally:
+        # 在所有迭代完成后关闭handler
+        handler.close()
+        logger.removeHandler(handler)
+
+        # 清理：请求graph-reader退出
+        try:
+            caller = CommandCaller()
+            caller.send_query({"command": "exit"})
+        except Exception:
+            pass
+
 if __name__ == "__main__":
     ensure_ctags_ready()
     # 测试FunctionPathBuilderAgent
@@ -558,7 +747,10 @@ if __name__ == "__main__":
     # exit(0)
     
     # 测试新版FunctionPathBuilderAgent（analyze_paths 流程）
-    test_new_function_path_builder_agent(source_location_eq_position_list)
+    # test_new_function_path_builder_agent(source_location_eq_position_list)
+    
+    # 测试CrossFunctionMemoryFlowAnalyzer
+    test_cross_function_memory_flow_analyzer(source_location_eq_position_list)
     
     # 测试FunctionPathCheckerAgent
     # test_function_path_checker_agent(checker_test_data)

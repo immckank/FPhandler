@@ -63,6 +63,7 @@ class FunctionPathBuilderAgent:
         self.model_name = model_name
         self.path_data: List[Dict[str, Any]] = []
         self.path_number: Optional[int] = None
+        self.svfg_nodes: List[Dict[str, Any]] = []  # Store SVFG nodes for path analysis
         if not self.init_function_raw_path(self.source_location, self.eq_position):
             raise ValueError(f"Failed to initialize raw path data for {self.source_location}")
         
@@ -113,6 +114,16 @@ class FunctionPathBuilderAgent:
             return False
 
         self.path_number = self._coerce_int(raw_path_json.get("path_number"))
+
+        # Get SVFG nodes for enhanced path analysis
+        try:
+            self.svfg_nodes = analysis_operators.find_lvalue_key_svfgnode(
+                source_location, str(eq_position)
+            )
+            logger.info(f"[FunctionPathBuilderAgent] Loaded {len(self.svfg_nodes)} SVFG nodes")
+        except Exception as e:
+            logger.warning(f"[FunctionPathBuilderAgent] Failed to fetch SVFG nodes: {e}")
+            self.svfg_nodes = []
 
         for idx, path in enumerate(paths, start=1):
             normalized_nodes = self._normalize_nodes(path["path"])
@@ -513,6 +524,193 @@ class FunctionPathBuilderAgent:
             "key_operation": path_entry["key_operation"]
         }
 
+    # Core SVFG node types we care about
+    _CORE_SVFG_TYPES = {
+        "StoreSVFGNode": ["StoreSVFGNode", "Store"],
+        "ActualParmVFGNode": ["ActualParmVFGNode", "ActualParm"],
+        "ActualINSVFGNode": ["ActualINSVFGNode", "ActualIN"],
+        "GepVFGNode": ["GepVFGNode", "Gep"]
+    }
+    
+    def _is_core_svfg_type(self, svfg_node_type: str) -> Optional[str]:
+        """
+        Check if the SVFG node type is one of the four core types we care about.
+        
+        Args:
+            svfg_node_type: The SVFG node type string
+            
+        Returns:
+            The core type name if matched, None otherwise
+        """
+        for core_type, patterns in self._CORE_SVFG_TYPES.items():
+            for pattern in patterns:
+                if pattern in svfg_node_type:
+                    return core_type
+        return None
+    
+    def _match_svfg_nodes_to_path(self, path_node_list: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Match SVFG nodes to path nodes based on location.
+        
+        Args:
+            path_node_list: List of nodes in the path
+            
+        Returns:
+            Dictionary mapping path node locations to matching SVFG nodes
+        """
+        location_to_svfg = {}
+        
+        # Build location set from path nodes
+        path_locations = set()
+        for node in path_node_list:
+            location = node.get("location", "")
+            if location:
+                path_locations.add(location)
+        
+        # Match SVFG nodes to path locations
+        for svfg_node in self.svfg_nodes:
+            svfg_location = svfg_node.get("location", "")
+            if not svfg_location:
+                continue
+            
+            # Direct match
+            if svfg_location in path_locations:
+                if svfg_location not in location_to_svfg:
+                    location_to_svfg[svfg_location] = []
+                location_to_svfg[svfg_location].append(svfg_node)
+            else:
+                # Try to match by file and line (ignore column)
+                svfg_file_line = svfg_location.split(":")[0] + ":" + svfg_location.split(":")[1] if ":" in svfg_location else ""
+                for path_loc in path_locations:
+                    path_file_line = path_loc.split(":")[0] + ":" + path_loc.split(":")[1] if ":" in path_loc else ""
+                    if svfg_file_line == path_file_line and svfg_file_line:
+                        if path_loc not in location_to_svfg:
+                            location_to_svfg[path_loc] = []
+                        location_to_svfg[path_loc].append(svfg_node)
+                        break
+        
+        return location_to_svfg
+    
+    def _analyze_path_with_svfg(self, path_node_list: List[Dict[str, Any]], location_to_svfg: Dict[str, List[Dict[str, Any]]]) -> Dict[str, Any]:
+        """
+        Analyze path using SVFG node information to detect memory operations more accurately.
+        
+        Args:
+            path_node_list: List of nodes in the path
+            location_to_svfg: Dictionary mapping locations to SVFG nodes
+            
+        Returns:
+            Dictionary with analysis results: has_store, has_actualparam, has_actualin, has_gep, svfg_details
+        """
+        has_store = False
+        has_actualparam = False
+        has_actualin = False
+        has_gep = False
+        svfg_details = []  # Store SVFG node details found in this path
+        
+        for node in path_node_list:
+            location = node.get("location", "")
+            node_type = node.get("node", "")
+            
+            # Check if this location has matching SVFG nodes
+            matching_svfgs = location_to_svfg.get(location, [])
+            
+            for svfg_node in matching_svfgs:
+                svfg_node_type = svfg_node.get("node_type", "")
+                node_desc = svfg_node.get("node_desc", "")
+                
+                # Analyze SVFG node types using unified method
+                core_type = self._is_core_svfg_type(svfg_node_type)
+                if core_type:
+                    # Update corresponding flag
+                    if core_type == "StoreSVFGNode":
+                        has_store = True
+                    elif core_type == "ActualParmVFGNode":
+                        has_actualparam = True
+                    elif core_type == "ActualINSVFGNode":
+                        has_actualin = True
+                    elif core_type == "GepVFGNode":
+                        has_gep = True
+                    
+                    # Add to details
+                    svfg_details.append({
+                        "location": location,
+                        "type": core_type,
+                        "description": node_desc
+                    })
+            
+            # Also check path node type as fallback (for nodes not in SVFG)
+            if not matching_svfgs:
+                if node_type == "store" or "Store" in node_type:
+                    has_store = True
+                elif "ActualParm" in node_type or "actualparam" in node_type.lower():
+                    has_actualparam = True
+                elif "ActualIN" in node_type or "actualin" in node_type.lower():
+                    has_actualin = True
+                elif "GEP" in node_type or "gep" in node_type.lower():
+                    has_gep = True
+        
+        return {
+            "has_store": has_store,
+            "has_actualparam": has_actualparam,
+            "has_actualin": has_actualin,
+            "has_gep": has_gep,
+            "svfg_details": svfg_details
+        }
+
+    def _get_svfg_description(self, svfg_node: Dict[str, Any], code_line: str) -> str:
+        """
+        Generate a detailed description based on SVFG node type.
+        
+        Args:
+            svfg_node: SVFG node dictionary
+            code_line: Source code line for context
+            
+        Returns:
+            Description string for the SVFG node
+        """
+        svfg_type = svfg_node.get("node_type", "")
+        node_desc = svfg_node.get("node_desc", "")
+        
+        # Generate descriptions based on SVFG node type
+        if "StoreSVFGNode" in svfg_type or "Store" in svfg_type:
+            # Try to extract more context from node_desc
+            if "RETMU" in node_desc or "return" in node_desc.lower():
+                return " (SVFG: StoreVFGNode - memory stored and may be returned via return value)"
+            elif "parameter" in node_desc.lower() or "param" in node_desc.lower():
+                return " (SVFG: StoreVFGNode - memory stored into function parameter)"
+            else:
+                return " (SVFG: StoreVFGNode - memory stored into variable/pointer)"
+        
+        elif "ActualParmVFGNode" in svfg_type or "ActualParm" in svfg_type:
+            if "free" in code_line.lower() or "dealloc" in code_line.lower():
+                return " (SVFG: ActualParmVFGNode - variable passed as argument to deallocation function)"
+            else:
+                # Try to extract function name from node_desc
+                if "CS[CallICFGNode" in node_desc:
+                    # Extract function name if possible
+                    return " (SVFG: ActualParmVFGNode - variable passed as actual parameter to function call)"
+                return " (SVFG: ActualParmVFGNode - variable passed as actual parameter)"
+        
+        elif "ActualINSVFGNode" in svfg_type or "ActualIN" in svfg_type:
+            if "free" in code_line.lower() or "dealloc" in code_line.lower():
+                return " (SVFG: ActualINSVFGNode - variable passed as input argument to deallocation function)"
+            else:
+                return " (SVFG: ActualINSVFGNode - variable passed as input argument to function call)"
+        
+        elif "GepVFGNode" in svfg_type or "Gep" in svfg_type:
+            return " (SVFG: GepVFGNode - getelementptr operation, accessing structure member or array element)"
+        
+        elif "AddrVFGNode" in svfg_type or "Addr" in svfg_type:
+            return " (SVFG: AddrVFGNode - address of variable is taken)"
+        
+        elif "FormalINSVFGNode" in svfg_type or "FormalIN" in svfg_type:
+            return " (SVFG: FormalINSVFGNode - variable received as formal input parameter)"
+        
+        else:
+            # Generic description
+            return f" (SVFG: {svfg_type})"
+
     def build_prompt(self) -> str:
         """
         Build an English prompt describing all pruned paths and memory events.
@@ -520,6 +718,7 @@ class FunctionPathBuilderAgent:
         var_name = self._infer_variable_name()
         path_count = self.path_number or len(self.path_data)
         current_function_info = self.find_current_function_Tool(self.source_location)
+        
         prompt_parts = [
             f"You are tracing the value flow of variable '{var_name}' to detect potential memory leaks. start from the location: {self.source_location} : {find_code_line(self.source_location)}",
             f"The static analysis engine pruned the control-flow in function {current_function_info['function_name']} and identified {path_count} candidate paths. Each path is described below."
@@ -529,9 +728,23 @@ class FunctionPathBuilderAgent:
             path_id = path_entry["path_id"]
             path_node_list = path_entry.get("path_node_list", [])
             
-            # Analyze path features
-            has_store = False
-            has_actualparam = False
+            # Match SVFG nodes to this path
+            location_to_svfg = self._match_svfg_nodes_to_path(path_node_list)
+            
+            # Analyze path features using SVFG information
+            path_analysis = self._analyze_path_with_svfg(path_node_list, location_to_svfg)
+            has_store = path_analysis["has_store"]
+            has_actualparam = path_analysis["has_actualparam"]
+            has_actualin = path_analysis["has_actualin"]
+            has_gep = path_analysis["has_gep"]
+            svfg_details = path_analysis["svfg_details"]
+            
+            # Create a mapping from location to core SVFG type for quick lookup
+            location_to_core_svfg_type = {}
+            for detail in svfg_details:
+                loc = detail["location"]
+                if loc not in location_to_core_svfg_type:
+                    location_to_core_svfg_type[loc] = detail["type"]
             
             path_observations = []
             path_details = []
@@ -545,6 +758,22 @@ class FunctionPathBuilderAgent:
                 if not code_line:
                     code_line = location  # Fallback
                 
+                # Get SVFG information for this location (already analyzed)
+                matching_svfgs = location_to_svfg.get(location, [])
+                core_svfg_type = location_to_core_svfg_type.get(location)
+                
+                # Get SVFG description if available
+                svfg_info = ""
+                if matching_svfgs and core_svfg_type:
+                    # Find the matching SVFG node of the core type
+                    for svfg in matching_svfgs:
+                        if self._is_core_svfg_type(svfg.get("node_type", "")) == core_svfg_type:
+                            svfg_info = self._get_svfg_description(svfg, code_line)
+                            break
+                elif matching_svfgs:
+                    # Use first matching SVFG node if no core type matched
+                    svfg_info = self._get_svfg_description(matching_svfgs[0], code_line)
+                
                 if node_type == "start":
                     path_details.append(f"  - Allocation start at {location} : {code_line}")
                 elif node_type == "branch":
@@ -555,37 +784,52 @@ class FunctionPathBuilderAgent:
                     else:
                         path_details.append(f"  - Node type branch {location} : {code_line} (condition evaluated to {cond_str})")
                 elif node_type == "store" or "Store" in node_type:
-                    has_store = True
-                    path_details.append(f"  - Node type {node_type} {location} : {code_line} (memory likely stored into parameters/return value)")
+                    base_desc = f"  - Node type {node_type} {location} : {code_line} (memory likely stored into parameters/return value)"
+                    path_details.append(base_desc + svfg_info)
                 elif "ActualParm" in node_type or "actualparam" in node_type.lower():
-                    has_actualparam = True
                     if "free" in code_line.lower() or "dealloc" in code_line.lower():
-                        path_details.append(
-                            f"  - Node type {node_type} {location} : {code_line} "
-                            f"(variable used as argument of a deallocation function)"
-                        )
+                        base_desc = f"  - Node type {node_type} {location} : {code_line} (variable used as argument of a deallocation function)"
                     else:
-                        path_details.append(
-                            f"  - Node type {node_type} {location} : {code_line} "
-                            f"(variable or alias used as call argument)"
-                        )
+                        base_desc = f"  - Node type {node_type} {location} : {code_line} (variable or alias used as call argument)"
+                    path_details.append(base_desc + svfg_info)
                 elif node_type == "return":
                     path_details.append(f"  - return statement {location} : {code_line}")
                 else:
-                    path_details.append(f"  - Node type {node_type} {location} : {code_line}")
+                    # For other node types, append SVFG info if available
+                    base_desc = f"  - Node type {node_type} {location} : {code_line}"
+                    path_details.append(base_desc + svfg_info)
             
-            # 构建路径观察描述
-            if not has_store and not has_actualparam:
-                path_observations.append("no memory transfer detected; potential leak at return")
+            # 构建路径观察描述 - 使用SVFG信息进行更准确的判断
             if has_store:
                 path_observations.append("store operations detected; ownership may be passed to parameters or return values")
             if has_actualparam:
                 path_observations.append("variable is used as a call argument; ownership may transfer to the callee or be freed there")
+            if has_actualin:
+                path_observations.append("variable passed as input argument; may be used by callee function")
+            if has_gep:
+                path_observations.append("pointer arithmetic/field access detected; memory may be accessed through structure or array")
+            
+            # Only add "no memory transfer" if none of the transfer operations were detected
+            if not (has_store or has_actualparam or has_actualin):
+                path_observations.append("no memory transfer detected; potential leak at return")
             
             observations_str = " ".join(path_observations) if path_observations else "no noteworthy memory events"
             
             prompt_parts.append(f"{idx}. path_id: {idx}: {observations_str}")
             prompt_parts.extend(path_details)
+            
+            # # Add detailed SVFG information if available for this path
+            # if svfg_details:
+            #     prompt_parts.append("    SVFG nodes in this path:")
+            #     for svfg_detail in svfg_details:
+            #         svfg_loc = svfg_detail["location"]
+            #         svfg_type = svfg_detail["type"]
+            #         svfg_desc = svfg_detail["description"]
+            #         # Clean up description
+            #         cleaned_desc = " ".join(svfg_desc.split())[:150] if svfg_desc else ""
+            #         if len(svfg_desc) > 150:
+            #             cleaned_desc += "..."
+            #         prompt_parts.append(f"      - {svfg_type} at {svfg_loc}: {cleaned_desc}")
 
         prompt_parts.extend([
             "",
@@ -596,7 +840,8 @@ class FunctionPathBuilderAgent:
             "- ReturnedAsPointerParameter: memory is returned through a pointer parameter.",
             "- Leak: memory is leaked at this return location.",
             "- NullPointer: the pointer remains NULL due to allocation failures.",
-            "- Unreachable: the path is infeasible due to control-flow constraints."
+            "- Unreachable: the path is infeasible due to control-flow constraints.",
+            "",
             "For each path, you must first check if the path is feasible. If the path is not feasible, you should classify it as Unreachable directly.",
         ])
 
