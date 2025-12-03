@@ -3,6 +3,7 @@ Cross-function memory flow analyzer that integrates CFG building, alias table co
 and path analysis across multiple functions.
 """
 
+import copy
 import logging
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -12,7 +13,7 @@ from dataclasses import dataclass, field
 import analysis_operators
 from function_ast_cfg import FunctionCFGAnalyzer
 from analyzers.path_builder_agent import FunctionPathBuilderAgent
-from utils import find_code_line, extract_lhs_variable
+from utils import find_code_line, extract_lhs_variable, parse_code_line
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +155,7 @@ class FunctionAnalysisNode:
     start_location: str
     eq_position: Optional[int] = None
     arg_index: Optional[int] = None
+    callee_function_name: Optional[str] = None  # For actual_arg mode: name of the called function
     cfg: Optional[Dict[str, Any]] = None
     alias_set: List[Dict[str, Any]] = field(default_factory=list)
     paths: List[List[Dict[str, Any]]] = field(default_factory=list)
@@ -162,6 +164,7 @@ class FunctionAnalysisNode:
     parent: Optional['FunctionAnalysisNode'] = None
     analysis_status: str = "pending"  # "pending", "analyzing", "completed", "terminated"
     metadata: Optional[Dict[str, Any]] = field(default_factory=dict)  # Additional metadata (e.g., source path IDs)
+    previous_analysis_paths: List[Dict[str, Any]] = field(default_factory=list)  # Previous analysis path chain (single path from root to current node)
     
     def add_child(self, child: 'FunctionAnalysisNode'):
         """Add a child node."""
@@ -286,12 +289,30 @@ class CrossFunctionMemoryFlowAnalyzer:
             
         Returns:
             The created root node for this function analysis
-            
-        Note:
-            Implementation is left empty as requested.
         """
-        # TODO: Implement this method
-        raise NotImplementedError("add_function_analysis_from_actual_arg is not yet implemented")
+        # Verify that the callee function exists
+        func_info = analysis_operators.find_function_body(callee_function_name)
+        if not func_info or func_info.get("error"):
+            raise ValueError(f"Could not find function body for {callee_function_name}")
+        
+        # Create root node for this function analysis
+        # Note: function_name is the callee function being analyzed
+        # start_location is the call location in the caller function
+        root = FunctionAnalysisNode(
+            node_id=self._generate_node_id(),
+            function_name=callee_function_name,
+            start_location=location,
+            arg_index=arg_index,
+            callee_function_name=callee_function_name
+        )
+        
+        # If this is the first node, set it as the main root
+        if self.root_node is None:
+            self.root_node = root
+        
+        self.all_nodes.append(root)
+        
+        return root
     
     @classmethod
     def from_location(cls, location: str, eq_position: int, client=None, model_name=None) -> 'CrossFunctionMemoryFlowAnalyzer':
@@ -372,6 +393,9 @@ class CrossFunctionMemoryFlowAnalyzer:
         # Analyze starting from target node
         self._analyze_node(target_node)
         
+        # Output analysis results including key_operation locations
+        self._output_analysis_results()
+        
         return self.all_nodes
     
     def analyze_function(self, node: FunctionAnalysisNode) -> FunctionAnalysisNode:
@@ -424,6 +448,12 @@ class CrossFunctionMemoryFlowAnalyzer:
             # 4. Convert paths format and run path analysis
             path_analysis_results = self._run_path_analysis(node)
             node.path_analysis_results = path_analysis_results
+            
+            # Output this node's results IMMEDIATELY after path analysis, before analyzing children
+            # This ensures the output is visible before child node analysis starts
+            print(f"\n[DEBUG] About to output results for node {node.node_id}: {node.function_name}", flush=True)
+            self._output_node_results(node)
+            print(f"[DEBUG] Finished outputting results for node {node.node_id}", flush=True)
             
             # 5. Extract next functions and create child nodes
             next_functions = self._extract_next_functions(node)
@@ -492,18 +522,19 @@ class CrossFunctionMemoryFlowAnalyzer:
                         next_functions.append(next_func)
             
             elif classification == "ReturnedAsPointerParameter":
-                next_func = self._handle_returned_as_pointer_parameter(result, node)
-                if next_func:
-                    func_key = (
-                        next_func.get("type"),
-                        next_func.get("function_name"),
-                        next_func.get("source_location"),
-                        next_func.get("arg_index")
-                    )
-                    if func_key not in seen_functions:
-                        seen_functions.add(func_key)
-                        next_func["source_path_id"] = path_id
-                        next_functions.append(next_func)
+                next_func_list = self._handle_returned_as_pointer_parameter(result, node)
+                for next_func in next_func_list:
+                    if next_func:
+                        func_key = (
+                            next_func.get("type"),
+                            next_func.get("function_name"),
+                            next_func.get("source_location"),
+                            next_func.get("arg_index")
+                        )
+                        if func_key not in seen_functions:
+                            seen_functions.add(func_key)
+                            next_func["source_path_id"] = path_id
+                            next_functions.append(next_func)
             
             # Leak, NullPointer, Unreachable are terminal - no next function
         
@@ -617,56 +648,115 @@ class CrossFunctionMemoryFlowAnalyzer:
             "is_return_value": True
         }
     
-    def _handle_returned_as_pointer_parameter(self, result: Dict[str, Any], node: FunctionAnalysisNode) -> Optional[Dict[str, Any]]:
+    def _handle_returned_as_pointer_parameter(self, result: Dict[str, Any], node: FunctionAnalysisNode) -> List[Dict[str, Any]]:
         """
         Handle ReturnedAsPointerParameter classification.
         
+        处理流程：
+        1. 从 key_operation 中提取 code_line（赋值语句）
+        2. 从 code_line 中提取左侧变量名（LHS variable），即接收指针的参数名
+        3. 在当前函数声明中查找该参数名对应的参数索引（param_index）
+        4. 查找所有调用当前函数的调用者位置（callers）
+        5. 为每个调用者创建一个 next_func 节点，类型为 "callee"
+           这些子节点将用于继续分析调用者函数中对应参数的内存流
+        
         Args:
-            result: Path analysis result
-            node: Current analysis node
+            result: Path analysis result，包含 classification 和 key_operation
+            node: Current analysis node，当前正在分析的函数节点
             
         Returns:
-            Next function information dict or None
+            List of next function information dicts (one for each caller location)
+            每个 dict 包含：
+            - type: "callee"
+            - function_name: 调用者函数名
+            - callee_function_name: 被调用函数名（即当前 node.function_name）
+            - source_location: 调用位置
+            - arg_index: 参数索引（在调用者函数中对应参数的位置）
+            - is_pointer_parameter: True
         """
-        # Similar to ReturnedAsReturnValue, but need to identify the parameter
+        logger.debug(f"[ReturnedAsPointerParameter] Starting processing for function: {node.function_name}")
+        
+        # 1. Extract left-hand side variable name from key_operation
+        key_operation = result.get("key_operation")
+        if not key_operation:
+            logger.warning(f"[ReturnedAsPointerParameter] No key_operation in result for {node.function_name}")
+            return []
+        
+        logger.debug(f"[ReturnedAsPointerParameter] Key operation: {key_operation}")
+        
+        code_line = key_operation.get("code_line", "")
+        if not code_line:
+            logger.warning(f"[ReturnedAsPointerParameter] No code_line in key_operation for {node.function_name}")
+            return []
+        
+        logger.debug(f"[ReturnedAsPointerParameter] Code line: {code_line}")
+        
+        # Extract left-hand side variable name from assignment statement
+        lhs_var_name = extract_lhs_variable(code_line)
+        if not lhs_var_name:
+            logger.warning(f"[ReturnedAsPointerParameter] Could not extract LHS variable from code_line: {code_line}")
+            return []
+        
+        logger.debug(f"[ReturnedAsPointerParameter] Extracted LHS variable name: '{lhs_var_name}'")
+        
+        # 2. Find parameter index by name in current function declaration
+        logger.debug(f"[ReturnedAsPointerParameter] Searching for parameter '{lhs_var_name}' in function '{node.function_name}' declaration")
+        param_index = analysis_operators._find_parameter_index_by_name(node.function_name, lhs_var_name)
+        if param_index is None:
+            logger.warning(f"[ReturnedAsPointerParameter] Could not find parameter index for '{lhs_var_name}' in function {node.function_name}")
+            return []
+        
+        logger.debug(f"[ReturnedAsPointerParameter] Found parameter index: {param_index} for parameter '{lhs_var_name}' in function '{node.function_name}'")
+        
+        # 3. Get all caller locations
+        logger.debug(f"[ReturnedAsPointerParameter] Finding all callers of function '{node.function_name}'")
         callers = analysis_operators.find_callers(node.function_name)
         if not callers:
-            return None
+            logger.debug(f"[ReturnedAsPointerParameter] No callers found for {node.function_name}")
+            return []
         
-        caller_location = callers[0].get("location")
-        if not caller_location:
-            return None
+        logger.debug(f"[ReturnedAsPointerParameter] Found {len(callers)} caller(s) for function '{node.function_name}'")
         
-        # Find the function that contains this caller location
-        caller_func_info = analysis_operators.find_current_function(caller_location)
-        if not caller_func_info or caller_func_info.get("error"):
-            return None
+        # 4. Create next_func dict for each caller location
+        next_functions = []
+        for idx, caller in enumerate(callers):
+            logger.debug(f"[ReturnedAsPointerParameter] Processing caller {idx + 1}/{len(callers)}: {caller}")
+            
+            caller_location = caller.get("location")
+            if not caller_location:
+                logger.debug(f"[ReturnedAsPointerParameter] Caller {idx + 1} has no location, skipping")
+                continue
+            
+            logger.debug(f"[ReturnedAsPointerParameter] Caller location: {caller_location}")
+            
+            # Find the function that contains this caller location
+            caller_func_info = analysis_operators.find_current_function(caller_location)
+            if not caller_func_info or caller_func_info.get("error"):
+                logger.debug(f"[ReturnedAsPointerParameter] Could not find function for caller location {caller_location}, skipping")
+                continue
+            
+            caller_function = caller_func_info.get("function_name")
+            if not caller_function:
+                logger.debug(f"[ReturnedAsPointerParameter] Caller function name is empty for location {caller_location}, skipping")
+                continue
+            
+            logger.debug(f"[ReturnedAsPointerParameter] Caller function: '{caller_function}' at location {caller_location}")
+            
+            # Create next_func dict with type "callee" (for actual_arg mode)
+            next_func = {
+                "type": "callee",
+                "function_name": caller_function,  # Caller function name
+                "callee_function_name": node.function_name,  # Called function name
+                "source_location": caller_location,
+                "arg_index": param_index,
+                "is_pointer_parameter": True
+            }
+            next_functions.append(next_func)
+            logger.debug(f"[ReturnedAsPointerParameter] Created next_func: type=callee, function_name={caller_function}, "
+                        f"callee_function_name={node.function_name}, source_location={caller_location}, arg_index={param_index}")
         
-        caller_function = caller_func_info.get("function_name")
-        if not caller_function:
-            return None
-        
-        # Extract parameter index from key_operation
-        key_operation = result.get("key_operation")
-        param_index = None
-        if key_operation:
-            # The key_operation should contain information about which parameter
-            # receives the pointer. This might be in the code_line or as a separate field
-            # TODO: Implement proper parameter index extraction
-            # For now, try to extract from code_line if available
-            code_line = key_operation.get("code_line", "")
-            if code_line:
-                # Try to parse the function call to find the parameter
-                # This is a placeholder - needs proper implementation
-                pass
-        
-        return {
-            "type": "caller",
-            "function_name": caller_function,
-            "source_location": caller_location,
-            "arg_index": param_index,
-            "is_pointer_parameter": True
-        }
+        logger.debug(f"[ReturnedAsPointerParameter] Completed processing. Created {len(next_functions)} next function node(s) for function '{node.function_name}'")
+        return next_functions
     
     def _create_child_nodes(self, parent: FunctionAnalysisNode, next_functions: List[Dict[str, Any]]) -> List[FunctionAnalysisNode]:
         """
@@ -696,22 +786,137 @@ class CrossFunctionMemoryFlowAnalyzer:
             if node_key in created_nodes:
                 # Node already created, just add path reference
                 existing_node = created_nodes[node_key]
-                if path_id:
-                    existing_node.source_path_ids.append(path_id)
+                if path_id and "source_path_ids" in existing_node.metadata:
+                    existing_node.metadata["source_path_ids"].append(path_id)
                 continue
             
+            # Build previous analysis path for this child node
+            # Find the specific path analysis result that triggered this child node
+            parent_path_result = None
+            if path_id and parent.path_analysis_results:
+                for result in parent.path_analysis_results:
+                    if str(result.get("path_id")) == str(path_id):
+                        parent_path_result = result
+                        break
+            
+            # Extract condition branches from the parent path
+            # The path data from trace_paths_to_exit already contains branch information in node and edge
+            path_conditions = []
+            if path_id and parent.paths:
+                try:
+                    # path_id is typically a string like "1", "2", etc., representing the index
+                    path_idx = int(str(path_id)) - 1  # Convert to 0-based index
+                    if 0 <= path_idx < len(parent.paths):
+                        parent_path = parent.paths[path_idx]
+                        # Extract branch conditions from the path - use existing data structure
+                        for step in parent_path:
+                            node_info = step.get("node", {})
+                            edge_info = step.get("edge")
+                            node_type = node_info.get("type", "")
+                            edge_type = edge_info.get("type", "") if edge_info else ""
+                            
+                            # Check if this step represents a branch (either node is branch type or edge is branch type)
+                            is_branch = (node_type == "branch") or (edge_type in ["true_branch", "false_branch", "switch_case", "loop_body"])
+                            
+                            if is_branch:
+                                # Get condition from node first, then from edge (edge may have more specific condition)
+                                condition = node_info.get("condition", "")
+                                if not condition and edge_info:
+                                    condition = edge_info.get("condition", "")
+                                
+                                location = node_info.get("location", "")
+                                condition_value = None
+                                
+                                # Determine condition value from edge type
+                                if edge_info:
+                                    if edge_type == "true_branch":
+                                        condition_value = "true"
+                                    elif edge_type == "false_branch":
+                                        condition_value = "false"
+                                    elif edge_type == "switch_case":
+                                        # For switch_case, the condition is the case value
+                                        case_value = edge_info.get("condition", "")
+                                        if case_value:
+                                            condition_value = case_value
+                                
+                                # Use condition as expression (it's already extracted from the code)
+                                expression = condition
+                                
+                                # Only extract from code line if condition is not available
+                                if not expression and location:
+                                    try:
+                                        code_line = find_code_line(location, strip_whitespace=False)
+                                        if code_line:
+                                            expression = code_line.strip()
+                                    except Exception as e:
+                                        logger.debug(f"Failed to extract branch expression from code line: {e}")
+                                
+                                if expression or condition:
+                                    path_conditions.append({
+                                        "location": location,
+                                        "expression": expression or condition,
+                                        "condition_value": condition_value,
+                                        "code_line": find_code_line(location) if location else ""
+                                    })
+                except (ValueError, IndexError) as e:
+                    logger.debug(f"Failed to extract path conditions for path_id {path_id}: {e}")
+            
+            # Build previous analysis path chain
+            previous_analysis_paths = []
+            if parent.previous_analysis_paths:
+                # Copy parent's previous paths
+                previous_analysis_paths = copy.deepcopy(parent.previous_analysis_paths)
+            
+            # Add parent node's current path analysis result to the chain
+            if parent_path_result:
+                # Build analysis path entry for parent node
+                parent_path_entry = {
+                    "function_name": parent.function_name,
+                    "start_location": parent.start_location,
+                    "path_id": parent_path_result.get("path_id"),
+                    "classification": parent_path_result.get("classification"),
+                    "key_operation": parent_path_result.get("key_operation"),
+                    "reason": parent_path_result.get("reason"),
+                    "eq_position": parent.eq_position,
+                    "arg_index": parent.arg_index,
+                    "callee_function_name": parent.callee_function_name,
+                    "conditions": path_conditions  # Add condition branches
+                }
+                previous_analysis_paths.append(parent_path_entry)
+            
             # Create new child node
-            child = FunctionAnalysisNode(
-                node_id=self._generate_node_id(),
-                function_name=function_name,
-                start_location=source_location,
-                arg_index=arg_index if func_type == "callee" else None,
-                eq_position=None,  # Will be determined from arg_index or source_location
-                parent=parent
-            )
+            # For callee type, this is an actual_arg mode analysis
+            # function_name should be the caller function, callee_function_name should be the called function
+            callee_function_name = next_func.get("callee_function_name")
+            if func_type == "callee":
+                # For actual_arg mode: function_name is the caller, callee_function_name is the called function
+                child = FunctionAnalysisNode(
+                    node_id=self._generate_node_id(),
+                    function_name=function_name,  # Caller function name
+                    start_location=source_location,
+                    arg_index=arg_index,
+                    callee_function_name=callee_function_name if callee_function_name else function_name,
+                    eq_position=None,  # Will be determined from arg_index or source_location
+                    parent=parent,
+                    previous_analysis_paths=previous_analysis_paths
+                )
+            else:
+                # For other types (caller), use original logic
+                child = FunctionAnalysisNode(
+                    node_id=self._generate_node_id(),
+                    function_name=function_name,
+                    start_location=source_location,
+                    arg_index=None,
+                    callee_function_name=None,
+                    eq_position=None,
+                    parent=parent,
+                    previous_analysis_paths=previous_analysis_paths
+                )
             
             if path_id:
-                child.source_path_ids = [path_id]
+                if "source_path_ids" not in child.metadata:
+                    child.metadata["source_path_ids"] = []
+                child.metadata["source_path_ids"].append(path_id)
             
             child_nodes.append(child)
             created_nodes[node_key] = child
@@ -742,8 +947,12 @@ class CrossFunctionMemoryFlowAnalyzer:
             return None, []
         
         # Generate paths using trace_paths_to_exit
+        # Determine mode based on node properties:
+        # - lvar mode: eq_position is not None
+        # - formal_arg mode: arg_index is not None and callee_function_name is None
+        # - actual_arg mode: arg_index is not None and callee_function_name is not None
         if node.eq_position is not None:
-            # Use location + eq_position
+            # lvar mode: Use location + eq_position
             location = node.start_location
             eq_position = str(node.eq_position)
             paths = FunctionCFGAnalyzer.trace_paths_to_exit(
@@ -751,21 +960,32 @@ class CrossFunctionMemoryFlowAnalyzer:
                 eq_position=eq_position
             )
         elif node.arg_index is not None:
-            # For formal parameters, we need to find the parameter location
-            # This is a simplified approach - may need refinement
-            func_info = analysis_operators.find_function_body(function_name)
-            if func_info:
-                start_line = func_info.get("start_line", 0)
-                filename = func_info.get("filename", "")
-                # Use function start as location, arg_index as eq_position (simplified)
-                location = f"{filename}:{start_line}"
-                eq_position = str(node.arg_index)
+            if node.callee_function_name is not None:
+                # actual_arg mode: Use location (call location), callee_function_name, and arg_index
+                location = node.start_location
+                callee_function_name = node.callee_function_name
+                arg_index = str(node.arg_index)
                 paths = FunctionCFGAnalyzer.trace_paths_to_exit(
                     location=location,
-                    eq_position=eq_position
+                    callee_function_name=callee_function_name,
+                    arg_index=arg_index
                 )
             else:
-                paths = []
+                # formal_arg mode: Use location (function start location) and arg_index
+                # The location should be the function start location
+                func_info = analysis_operators.find_function_body(function_name)
+                if func_info:
+                    start_line = func_info.get("start_line", 0)
+                    filename = func_info.get("filename", "")
+                    location = f"{filename}:{start_line}"
+                    arg_index = str(node.arg_index)
+                    paths = FunctionCFGAnalyzer.trace_paths_to_exit(
+                        location=location,
+                        arg_index=arg_index
+                    )
+                else:
+                    logger.error(f"Could not find function body for {function_name}")
+                    paths = []
         else:
             logger.warning(f"No eq_position or arg_index for node {node.node_id}")
             paths = []
@@ -776,6 +996,11 @@ class CrossFunctionMemoryFlowAnalyzer:
         """
         Build alias set for the node.
         
+        Supports three modes:
+        - lvar mode: Uses location and eq_position
+        - formal_arg mode: Uses function_name and arg_index
+        - actual_arg mode: Uses location, callee_function_name, and arg_index
+        
         Args:
             node: Analysis node
             
@@ -783,18 +1008,30 @@ class CrossFunctionMemoryFlowAnalyzer:
             List of alias entries
         """
         if node.eq_position is not None:
-            # Use get_alias_set
+            # lvar mode: Use get_alias_set
             alias_set = analysis_operators.get_alias_set(
                 node.start_location,
                 node.eq_position
             )
             return alias_set
         elif node.arg_index is not None:
-            # For formal parameters, we may need a different approach
-            # For now, return empty list - can be enhanced later
-            logger.warning(f"Alias set for formal parameter not yet implemented for {node.function_name}")
-            return []
+            if node.callee_function_name is not None:
+                # actual_arg mode: Use get_alias_set_for_actual_arg
+                alias_set = analysis_operators.get_alias_set_for_actual_arg(
+                    node.start_location,
+                    node.callee_function_name,
+                    node.arg_index
+                )
+                return alias_set
+            else:
+                # formal_arg mode: Use get_alias_set_for_formal_arg
+                alias_set = analysis_operators.get_alias_set_for_formal_arg(
+                    node.function_name,
+                    node.arg_index
+                )
+                return alias_set
         else:
+            logger.warning(f"No eq_position or arg_index for node {node.node_id}")
             return []
     
     def _update_global_alias_table(self, node: FunctionAnalysisNode):
@@ -930,7 +1167,24 @@ class CrossFunctionMemoryFlowAnalyzer:
         # We'll create a wrapper class that extends FunctionPathBuilderAgent
         try:
             start_location = node.start_location
-            eq_position = node.eq_position or 0
+            
+            # Determine parameters based on node's analysis mode
+            # - lvar mode: eq_position is not None
+            # - formal_arg mode: arg_index is not None and callee_function_name is None
+            # - actual_arg mode: arg_index is not None and callee_function_name is not None
+            eq_position = None
+            arg_index = None
+            callee_function_name = None
+            function_name = None
+            
+            if node.eq_position is not None:
+                # lvar mode
+                eq_position = node.eq_position
+            elif node.arg_index is not None:
+                # formal_arg or actual_arg mode
+                arg_index = node.arg_index
+                callee_function_name = node.callee_function_name
+                function_name = node.function_name
             
             # Create a custom agent instance
             agent = _CustomPathBuilderAgent(
@@ -938,7 +1192,11 @@ class CrossFunctionMemoryFlowAnalyzer:
                 eq_position=eq_position,
                 client=self.client,
                 model_name=self.model_name,
-                pre_converted_paths=converted_paths
+                pre_converted_paths=converted_paths,
+                arg_index=arg_index,
+                callee_function_name=callee_function_name,
+                function_name=function_name,
+                previous_analysis_paths=node.previous_analysis_paths
             )
             
             # Run analysis
@@ -960,15 +1218,207 @@ class CrossFunctionMemoryFlowAnalyzer:
         except Exception as e:
             logger.exception(f"Error running path analysis for {node.function_name}: {e}")
             return []
+    
+    def _output_analysis_results(self):
+        """
+        Output analysis results, especially key_operation locations for ReturnedAsPointerParameter.
+        This method prints a summary of all analysis nodes and their path classifications.
+        """
+        print("=" * 80)
+        print("Cross-Function Analysis Results Summary")
+        print("=" * 80)
+        logger.info("=" * 80)
+        logger.info("Cross-Function Analysis Results Summary")
+        logger.info("=" * 80)
+        
+        for node in self.all_nodes:
+            print(f"\n[Node {node.node_id}]")
+            print(f"  Function: {node.function_name}")
+            print(f"  Start Location: {node.start_location}")
+            print(f"  Analysis Status: {node.analysis_status}")
+            logger.info(f"\n[Node {node.node_id}]")
+            logger.info(f"  Function: {node.function_name}")
+            logger.info(f"  Start Location: {node.start_location}")
+            logger.info(f"  Analysis Status: {node.analysis_status}")
+            
+            if node.path_analysis_results:
+                print(f"  Path Analysis Results ({len(node.path_analysis_results)} path(s)):")
+                logger.info(f"  Path Analysis Results ({len(node.path_analysis_results)} path(s)):")
+                for idx, result in enumerate(node.path_analysis_results, 1):
+                    classification = result.get("classification")
+                    path_id = result.get("path_id")
+                    key_operation = result.get("key_operation")
+                    reason = result.get("reason")
+                    
+                    print(f"    Path {path_id} (Result #{idx}):")
+                    print(f"      Classification: {classification}")
+                    logger.info(f"    Path {path_id} (Result #{idx}):")
+                    logger.info(f"      Classification: {classification}")
+                    if reason:
+                        print(f"      Reason: {reason}")
+                        logger.info(f"      Reason: {reason}")
+                    
+                    # Special handling for ReturnedAsPointerParameter
+                    if classification == "ReturnedAsPointerParameter":
+                        if key_operation:
+                            source_location = key_operation.get("source_location", "N/A")
+                            code_line = key_operation.get("code_line", "N/A")
+                            print(f"      [ReturnedAsPointerParameter] Key Operation:")
+                            print(f"        Location: {source_location}")
+                            print(f"        Code Line: {code_line}")
+                            logger.info(f"      [ReturnedAsPointerParameter] Key Operation:")
+                            logger.info(f"        Location: {source_location}")
+                            logger.info(f"        Code Line: {code_line}")
+                            
+                            # Extract LHS variable if possible
+                            if code_line and code_line != "N/A":
+                                lhs_var = extract_lhs_variable(code_line)
+                                if lhs_var:
+                                    print(f"        LHS Variable: {lhs_var}")
+                                    logger.info(f"        LHS Variable: {lhs_var}")
+                            
+                            # Show next functions that will be analyzed
+                            if node.children:
+                                print(f"      Next Functions to Analyze ({len(node.children)}):")
+                                logger.info(f"      Next Functions to Analyze ({len(node.children)}):")
+                                for child_idx, child in enumerate(node.children, 1):
+                                    print(f"        {child_idx}. {child.function_name} at {child.start_location}")
+                                    logger.info(f"        {child_idx}. {child.function_name} at {child.start_location}")
+                        else:
+                            print(f"      [ReturnedAsPointerParameter] No key_operation found!")
+                            logger.warning(f"      [ReturnedAsPointerParameter] No key_operation found!")
+                    
+                    # Output key_operation for other classifications that have it
+                    elif key_operation and classification in ["HandledByCallee", "Deallocated", "ReturnedAsReturnValue"]:
+                        source_location = key_operation.get("source_location", "N/A")
+                        code_line = key_operation.get("code_line", "N/A")
+                        callee_function_name = key_operation.get("callee_function_name", "N/A")
+                        print(f"      Key Operation:")
+                        print(f"        Location: {source_location}")
+                        print(f"        Code Line: {code_line}")
+                        logger.info(f"      Key Operation:")
+                        logger.info(f"        Location: {source_location}")
+                        logger.info(f"        Code Line: {code_line}")
+                        if callee_function_name != "N/A":
+                            print(f"        Callee Function: {callee_function_name}")
+                            logger.info(f"        Callee Function: {callee_function_name}")
+            else:
+                print(f"  No path analysis results")
+                logger.info(f"  No path analysis results")
+            
+            if node.children:
+                print(f"  Child Nodes: {len(node.children)}")
+                logger.info(f"  Child Nodes: {len(node.children)}")
+        
+        print("\n" + "=" * 80)
+        print("Analysis Complete")
+        print("=" * 80)
+        logger.info("\n" + "=" * 80)
+        logger.info("Analysis Complete")
+        logger.info("=" * 80)
+    
+    def _output_node_results(self, node: FunctionAnalysisNode):
+        """
+        Output analysis results for a single node, especially key_operation locations for ReturnedAsPointerParameter.
+        This is called immediately after each node is analyzed.
+        """
+        import sys
+        sys.stdout.flush()  # Force flush before output
+        
+        print(f"\n{'='*80}", flush=True)
+        print(f"[Node {node.node_id}] Analysis Complete", flush=True)
+        print(f"{'='*80}", flush=True)
+        print(f"  Function: {node.function_name}", flush=True)
+        print(f"  Start Location: {node.start_location}", flush=True)
+        print(f"  Analysis Status: {node.analysis_status}", flush=True)
+        logger.info(f"\n[Node {node.node_id}] Analysis Complete")
+        logger.info(f"  Function: {node.function_name}")
+        logger.info(f"  Start Location: {node.start_location}")
+        logger.info(f"  Analysis Status: {node.analysis_status}")
+        
+        if node.path_analysis_results:
+            print(f"  Path Analysis Results ({len(node.path_analysis_results)} path(s)):", flush=True)
+            logger.info(f"  Path Analysis Results ({len(node.path_analysis_results)} path(s)):")
+            for idx, result in enumerate(node.path_analysis_results, 1):
+                classification = result.get("classification")
+                path_id = result.get("path_id")
+                key_operation = result.get("key_operation")
+                reason = result.get("reason")
+                
+                print(f"    Path {path_id} (Result #{idx}):", flush=True)
+                print(f"      Classification: {classification}", flush=True)
+                logger.info(f"    Path {path_id} (Result #{idx}):")
+                logger.info(f"      Classification: {classification}")
+                if reason:
+                    print(f"      Reason: {reason[:200]}...", flush=True)  # Truncate long reasons
+                    logger.info(f"      Reason: {reason}")
+                
+                # Special handling for ReturnedAsPointerParameter
+                if classification == "ReturnedAsPointerParameter":
+                    print(f"      *** [ReturnedAsPointerParameter] DETECTED ***", flush=True)
+                    if key_operation:
+                        source_location = key_operation.get("source_location", "N/A")
+                        code_line = key_operation.get("code_line", "N/A")
+                        print(f"      [ReturnedAsPointerParameter] Key Operation:", flush=True)
+                        print(f"        Location: {source_location}", flush=True)
+                        print(f"        Code Line: {code_line}", flush=True)
+                        logger.info(f"      [ReturnedAsPointerParameter] Key Operation:")
+                        logger.info(f"        Location: {source_location}")
+                        logger.info(f"        Code Line: {code_line}")
+                        
+                        # Extract LHS variable if possible
+                        if code_line and code_line != "N/A":
+                            lhs_var = extract_lhs_variable(code_line)
+                            if lhs_var:
+                                print(f"        LHS Variable: {lhs_var}", flush=True)
+                                logger.info(f"        LHS Variable: {lhs_var}")
+                        
+                        # Show next functions that will be analyzed
+                        if node.children:
+                            print(f"      Next Functions to Analyze ({len(node.children)}):", flush=True)
+                            logger.info(f"      Next Functions to Analyze ({len(node.children)}):")
+                            for child_idx, child in enumerate(node.children, 1):
+                                print(f"        {child_idx}. {child.function_name} at {child.start_location}", flush=True)
+                                logger.info(f"        {child_idx}. {child.function_name} at {child.start_location}")
+                    else:
+                        print(f"      [ReturnedAsPointerParameter] No key_operation found!", flush=True)
+                        logger.warning(f"      [ReturnedAsPointerParameter] No key_operation found!")
+                
+                # Output key_operation for other classifications that have it
+                elif key_operation and classification in ["HandledByCallee", "Deallocated", "ReturnedAsReturnValue"]:
+                    source_location = key_operation.get("source_location", "N/A")
+                    code_line = key_operation.get("code_line", "N/A")
+                    callee_function_name = key_operation.get("callee_function_name", "N/A")
+                    print(f"      Key Operation:", flush=True)
+                    print(f"        Location: {source_location}", flush=True)
+                    print(f"        Code Line: {code_line}", flush=True)
+                    logger.info(f"      Key Operation:")
+                    logger.info(f"        Location: {source_location}")
+                    logger.info(f"        Code Line: {code_line}")
+                    if callee_function_name != "N/A":
+                        print(f"        Callee Function: {callee_function_name}", flush=True)
+                        logger.info(f"        Callee Function: {callee_function_name}")
+        else:
+            print(f"  No path analysis results", flush=True)
+            logger.info(f"  No path analysis results")
+        
+        if node.children:
+            print(f"  Child Nodes: {len(node.children)}", flush=True)
+            logger.info(f"  Child Nodes: {len(node.children)}")
+        print(f"{'='*80}\n", flush=True)
+        logger.info(f"{'='*80}\n")
 
 
 class _CustomPathBuilderAgent(FunctionPathBuilderAgent):
     """
     Custom FunctionPathBuilderAgent that accepts pre-converted paths.
-    This bypasses the init_function_raw_path method.
+    Supports multiple analysis modes: lvar, formal_arg, and actual_arg.
     """
     
-    def __init__(self, source_location: str, eq_position: int, client=None, model_name=None, pre_converted_paths=None):
+    def __init__(self, source_location: str, eq_position: Optional[int] = None, client=None, model_name=None, 
+                 pre_converted_paths=None, arg_index: Optional[int] = None, 
+                 callee_function_name: Optional[str] = None, function_name: Optional[str] = None,
+                 previous_analysis_paths: Optional[List[Dict[str, Any]]] = None):
         self.source_location = source_location
         self.eq_position = eq_position
         self.client = client
@@ -977,11 +1427,44 @@ class _CustomPathBuilderAgent(FunctionPathBuilderAgent):
         self.path_number: Optional[int] = None
         self.svfg_nodes: List[Dict[str, Any]] = []  # Initialize SVFG nodes
         
-        # Get SVFG nodes for enhanced path analysis
+        # Analysis mode parameters
+        self.arg_index = arg_index
+        self.callee_function_name = callee_function_name
+        self.function_name = function_name  # For formal_arg mode
+        
+        # Previous analysis paths (single path chain from root to current node)
+        self.previous_analysis_paths = previous_analysis_paths or []
+        
+        # Determine analysis mode:
+        # - lvar mode: eq_position is not None
+        # - formal_arg mode: arg_index is not None and callee_function_name is None
+        # - actual_arg mode: arg_index is not None and callee_function_name is not None
+        if eq_position is not None:
+            self.analysis_mode = "lvar"
+        elif arg_index is not None:
+            if callee_function_name is not None:
+                self.analysis_mode = "actual_arg"
+            else:
+                self.analysis_mode = "formal_arg"
+        else:
+            self.analysis_mode = "lvar"  # Default fallback
+        
+        logger.info(f"[_CustomPathBuilderAgent] Analysis mode: {self.analysis_mode}")
+        
+        # Get SVFG nodes for enhanced path analysis based on mode
         try:
-            self.svfg_nodes = analysis_operators.find_lvalue_key_svfgnode(
-                source_location, str(eq_position)
-            )
+            if self.analysis_mode == "lvar":
+                self.svfg_nodes = analysis_operators.find_lvalue_key_svfgnode(
+                    source_location, str(eq_position)
+                )
+            elif self.analysis_mode == "formal_arg":
+                self.svfg_nodes = analysis_operators.find_formal_arg_key_svfgnode(
+                    function_name, str(arg_index)
+                )
+            elif self.analysis_mode == "actual_arg":
+                self.svfg_nodes = analysis_operators.find_actual_arg_key_svfgnode(
+                    source_location, callee_function_name, str(arg_index)
+                )
             logger.info(f"[_CustomPathBuilderAgent] Loaded {len(self.svfg_nodes)} SVFG nodes")
         except Exception as e:
             logger.warning(f"[_CustomPathBuilderAgent] Failed to fetch SVFG nodes: {e}")
@@ -1002,9 +1485,10 @@ class _CustomPathBuilderAgent(FunctionPathBuilderAgent):
                 self.path_data.append(normalized_path_entry)
             self.path_number = len(self.path_data)
         else:
-            # Fall back to normal initialization
-            if not self.init_function_raw_path(self.source_location, self.eq_position):
-                raise ValueError(f"Failed to initialize raw path data for {self.source_location}")
+            # Fall back to normal initialization (only for lvar mode)
+            if self.analysis_mode == "lvar" and eq_position is not None:
+                if not self.init_function_raw_path(self.source_location, self.eq_position):
+                    raise ValueError(f"Failed to initialize raw path data for {self.source_location}")
         
         # 工具方法映射
         self.tool_method_map = {
@@ -1017,6 +1501,594 @@ class _CustomPathBuilderAgent(FunctionPathBuilderAgent):
             "read_ctag_symbol": self.read_ctag_symbol_Tool,
         }
     
+    def _infer_variable_name(self) -> str:
+        """
+        Infer the tracked variable name based on analysis mode.
+        Supports lvar, formal_arg, and actual_arg modes.
+        """
+        if self.analysis_mode == "lvar":
+            # lvar mode: Extract from source location (traditional method)
+            try:
+                code_line = find_code_line(self.source_location)
+                if code_line:
+                    var_name = extract_lhs_variable(code_line)
+                    if var_name:
+                        return var_name
+            except Exception:
+                pass
+            return "unknown"
+        
+        elif self.analysis_mode == "formal_arg":
+            # formal_arg mode: Extract parameter name from function signature
+            if self.function_name and self.arg_index is not None:
+                try:
+                    func_info = analysis_operators.find_function_body(self.function_name)
+                    if func_info and not func_info.get("error"):
+                        # Try to extract parameter name using analysis_operators
+                        alias_set = analysis_operators.get_alias_set_for_formal_arg(
+                            self.function_name, self.arg_index
+                        )
+                        if alias_set:
+                            # Use the first alias entry as the variable name
+                            return alias_set[0].get("name", f"parameter_{self.arg_index}")
+                except Exception as e:
+                    logger.warning(f"Failed to extract formal arg name: {e}")
+            
+            # Fallback: use generic parameter name
+            return f"parameter_{self.arg_index}" if self.arg_index is not None else "unknown"
+        
+        elif self.analysis_mode == "actual_arg":
+            # actual_arg mode: Extract actual argument expression from function call
+            if self.source_location and self.callee_function_name and self.arg_index is not None:
+                try:
+                    # Extract the actual argument expression using helper method
+                    arg_expr = self._extract_actual_argument_expression(
+                        self.source_location, self.callee_function_name, self.arg_index
+                    )
+                    if arg_expr:
+                        # Normalize the expression (remove extra whitespace)
+                        arg_expr = re.sub(r"\s+", " ", arg_expr.strip())
+                        # Format as "callee_function_name call site's arg_index-th argument (arg_expr)"
+                        ord_str = self._get_ordinal_string(self.arg_index)
+                        
+                        code_line = find_code_line(self.source_location) or ""
+                        return f"{self.callee_function_name} call site's {ord_str} actual argument ({arg_expr})"
+                    else:
+                        # Fallback: use generic description
+                        ord_str = self._get_ordinal_string(self.arg_index)
+                        return f"{self.callee_function_name} call site's {ord_str} actual argument"
+                except Exception as e:
+                    logger.warning(f"Failed to extract actual arg expression: {e}")
+            
+            # Fallback: use generic description
+            if self.callee_function_name and self.arg_index is not None:
+                ord_str = self._get_ordinal_string(self.arg_index)
+                return f"{self.callee_function_name} call site's {ord_str} actual argument"
+            return "unknown"
+        
+        return "unknown"
+    
+    def _safe_find_code_line(self, location: str) -> str:
+        """Safely find code line for a location."""
+        if not location:
+            return ""
+        try:
+            return find_code_line(location)
+        except Exception:
+            return ""
+    
+    def _should_filter_node_description(self, node_type: str, location: str, 
+                                        is_start_node: bool = False,
+                                        core_svfg_type: Optional[str] = None,
+                                        matching_svfgs: Optional[List[Dict[str, Any]]] = None) -> bool:
+        """
+        Check if a node's description should be filtered (not shown in detail).
+        
+        Overrides parent method to add additional filtering logic for cross-function analysis.
+        
+        Filtering conditions:
+        1. Base condition: location matches key_svfg node (checked by parent)
+        2. Previous path was ReturnedAsPointerParameter and current analysis is actual_arg mode
+           with callee_function_name matching the function from previous analysis
+        3. SVFG type indicates actualparam/actualin (even if node_type is "normal")
+        
+        Args:
+            node_type: Type of the path node (e.g., "actualparam", "actualin", "start", "normal")
+            location: Location string of the node (e.g., "file.c:123")
+            is_start_node: Whether this is the start node of the path
+            core_svfg_type: Core SVFG type if available (e.g., "ActualINSVFGNode", "ActualParmVFGNode")
+            matching_svfgs: List of matching SVFG nodes for this location
+            
+        Returns:
+            True if the node description should be filtered, False otherwise
+        """
+        # Debug: Print key_svfg information when previous path was ReturnedAsPointerParameter
+        if self.previous_analysis_paths:
+            last_path = self.previous_analysis_paths[-1]
+            last_classification = last_path.get("classification", "")
+            
+            if last_classification == "ReturnedAsPointerParameter":
+                logger.debug(f"[FILTER_DEBUG] Previous classification: ReturnedAsPointerParameter")
+                logger.debug(f"[FILTER_DEBUG] Current analysis mode: {self.analysis_mode}")
+                logger.debug(f"[FILTER_DEBUG] Callee function name: {self.callee_function_name}")
+                logger.debug(f"[FILTER_DEBUG] Previous function name: {last_path.get('function_name', '')}")
+                logger.debug(f"[FILTER_DEBUG] Source location: {self.source_location}")
+                logger.debug(f"[FILTER_DEBUG] Current node location: {location}")
+                logger.debug(f"[FILTER_DEBUG] Current node type: {node_type}")
+                logger.debug(f"[FILTER_DEBUG] Core SVFG type: {core_svfg_type}")
+                
+                # Print all key_svfg nodes
+                if self.svfg_nodes:
+                    logger.debug(f"[FILTER_DEBUG] Total key_svfg nodes: {len(self.svfg_nodes)}")
+                    actual_param_nodes = []
+                    for svfg_node in self.svfg_nodes:
+                        svfg_node_type = svfg_node.get("node_type", "")
+                        svfg_location = svfg_node.get("location", "")
+                        svfg_desc = svfg_node.get("node_desc", "")
+                        core_type = self._is_core_svfg_type(svfg_node_type)
+                        
+                        # Extract function name from node_desc if possible
+                        function_name = "unknown"
+                        if svfg_desc:
+                            # Try to extract function name from patterns like "CS[CallICFGNode@123: TIFFReadDirEntrySbyteArray]"
+                            import re
+                            match = re.search(r'CS\[CallICFGNode[^:]*:\s*([A-Za-z_][A-Za-z0-9_]*)', svfg_desc)
+                            if match:
+                                function_name = match.group(1)
+                        
+                        logger.debug(f"[FILTER_DEBUG]   SVFG node: type={svfg_node_type}, core_type={core_type}, location={svfg_location}, function={function_name}")
+                        
+                        if core_type in ("ActualParmVFGNode", "ActualINSVFGNode"):
+                            actual_param_nodes.append({
+                                "type": core_type,
+                                "location": svfg_location,
+                                "function": function_name,
+                                "node_desc": svfg_desc[:100]  # Truncate for readability
+                            })
+                    
+                    if actual_param_nodes:
+                        logger.debug(f"[FILTER_DEBUG] ActualParam/ActualIN nodes in key_svfg:")
+                        for node_info in actual_param_nodes:
+                            logger.debug(f"[FILTER_DEBUG]   - {node_info['type']} at {node_info['location']} (function: {node_info['function']})")
+                    else:
+                        logger.debug(f"[FILTER_DEBUG] No ActualParam/ActualIN nodes found in key_svfg")
+        
+        # Check if SVFG type indicates actualparam/actualin (even if node_type is "normal")
+        is_svfg_actual_param = (core_svfg_type in ("ActualParmVFGNode", "ActualINSVFGNode"))
+        
+        # Check if this is an actualparam/actualin type node
+        is_actual_param_type = ("ActualParm" in node_type or "actualparam" in node_type.lower() or
+                               "ActualIN" in node_type or "actualin" in node_type.lower())
+        
+        # Combine both checks: either node type or SVFG type indicates actualparam/actualin
+        should_check_filter = is_actual_param_type or is_svfg_actual_param
+        
+        # First check base class filtering (location matches key_svfg)
+        if super()._should_filter_node_description(node_type, location, is_start_node):
+            logger.debug(f"[FILTER_DEBUG] Filtered by base class (location matches key_svfg)")
+            return True
+        
+        if not should_check_filter:
+            return False
+        
+        # Additional condition: Check if previous path was ReturnedAsPointerParameter
+        # and current analysis is actual_arg mode with matching callee function
+        if self.previous_analysis_paths:
+            last_path = self.previous_analysis_paths[-1]
+            last_classification = last_path.get("classification", "")
+            
+            if last_classification == "ReturnedAsPointerParameter":
+                # Check if we're in actual_arg mode
+                if self.analysis_mode == "actual_arg" and self.callee_function_name:
+                    # Get the function name from the previous path
+                    prev_function_name = last_path.get("function_name", "")
+                    
+                    # Filter if callee_function_name matches the function from previous analysis
+                    if self.callee_function_name == prev_function_name:
+                        # Filter actualparam/actualin nodes at the start location
+                        # Also check if location matches source_location (start position)
+                        if location == self.source_location or self._locations_match(location, self.source_location):
+                            logger.debug(f"[FILTER_DEBUG] Filtered: ReturnedAsPointerParameter + actual_arg mode + matching callee + location match")
+                            return True
+                        else:
+                            logger.debug(f"[FILTER_DEBUG] Not filtered: location mismatch (source={self.source_location}, node={location})")
+                    else:
+                        logger.debug(f"[FILTER_DEBUG] Not filtered: callee function mismatch (callee={self.callee_function_name}, prev={prev_function_name})")
+                else:
+                    logger.debug(f"[FILTER_DEBUG] Not filtered: not in actual_arg mode or no callee_function_name")
+        
+        return False
+    
+    def _locations_match(self, loc1: str, loc2: str) -> bool:
+        """Check if two location strings match (by file:line, ignoring column)."""
+        if not loc1 or not loc2:
+            return False
+        if loc1 == loc2:
+            return True
+        
+        # Try matching by file:line
+        try:
+            loc1_parts = loc1.split(":")
+            loc2_parts = loc2.split(":")
+            if len(loc1_parts) >= 2 and len(loc2_parts) >= 2:
+                return loc1_parts[0] == loc2_parts[0] and loc1_parts[1] == loc2_parts[1]
+        except Exception:
+            pass
+        
+        return False
+    
+    def _format_previous_analysis_paths(self) -> str:
+        """
+        Format previous analysis paths into a prompt string.
+        Returns empty string if no previous paths.
+        Includes condition branch information for cross-function context consistency.
+        """
+        if not self.previous_analysis_paths:
+            return ""
+        
+        prompt_lines = ["Here is the analysis path leading to the current function:"]
+        prompt_lines.append("The following conditions should be satisfied:")
+        
+        for idx, path_entry in enumerate(self.previous_analysis_paths):
+            function_name = path_entry.get("function_name", "unknown function")
+            start_location = path_entry.get("start_location", "")
+            classification = path_entry.get("classification", "unknown state")
+            key_operation = path_entry.get("key_operation")
+            reason = path_entry.get("reason", "")
+            conditions = path_entry.get("conditions", [])  # Condition branches
+            
+            start_line_code = self._safe_find_code_line(start_location)
+            
+            # Build description for this path entry
+            path_desc = f"- In function {function_name} at {start_location}"
+            if start_line_code:
+                path_desc += f" : {start_line_code}"
+            path_desc += f", the memory flow was classified as {classification}"
+            
+            if key_operation:
+                key_op_location = key_operation.get("source_location", "")
+                key_op_code = self._safe_find_code_line(key_op_location)
+                if key_op_location:
+                    path_desc += f" with key operation at {key_op_location}"
+                    if key_op_code:
+                        path_desc += f" : {key_op_code}"
+            
+            if reason:
+                # Truncate long reasons
+                reason_short = reason[:200] + "..." if len(reason) > 200 else reason
+                path_desc += f" (reason: {reason_short})"
+            
+            prompt_lines.append(path_desc)
+            
+            # Add condition branch information
+            if conditions:
+                prompt_lines.append(f"  The following condition branches were taken in function {function_name}:")
+                for cond_idx, cond in enumerate(conditions, 1):
+                    cond_location = cond.get("location", "")
+                    cond_expression = cond.get("expression", "")
+                    cond_value = cond.get("condition_value", "")
+                    cond_code = cond.get("code_line", "")
+                    
+                    if cond_expression:
+                        cond_desc = f"    {cond_idx}. At {cond_location}"
+                        if cond_code:
+                            cond_desc += f" : {cond_code}"
+                        cond_desc += f", condition \"{cond_expression}\""
+                        if cond_value:
+                            cond_desc += f" evaluated to {cond_value}"
+                        else:
+                            cond_desc += " was evaluated"
+                        prompt_lines.append(cond_desc)
+                    elif cond_location:
+                        # Fallback: just show location if no expression
+                        cond_desc = f"    {cond_idx}. Branch at {cond_location}"
+                        if cond_code:
+                            cond_desc += f" : {cond_code}"
+                        if cond_value:
+                            cond_desc += f" (taken: {cond_value})"
+                        prompt_lines.append(cond_desc)
+        
+        prompt_lines.append("")
+        prompt_lines.append("IMPORTANT: These condition branches from previous functions constrain the feasible execution paths in the current function. Any path in the current function that contradicts these conditions should be classified as Unreachable.")
+        prompt_lines.append("Please continue the analysis from this path context, ensuring consistency with the above conditions.")
+        return "\n".join(prompt_lines) + "\n\n"
+    
+    def build_prompt(self) -> str:
+        """
+        Build an English prompt describing all pruned paths and memory events.
+        Overrides parent method to support multiple analysis modes.
+        """
+        var_name = self._infer_variable_name()
+        path_count = self.path_number or len(self.path_data)
+        
+        # Get current function info based on mode
+        if self.analysis_mode == "formal_arg" and self.function_name:
+            current_function_name = self.function_name
+            # Try to get function location
+            try:
+                func_info = analysis_operators.find_function_body(self.function_name)
+                if func_info and not func_info.get("error"):
+                    start_line = func_info.get("start_line", 0)
+                    filename = func_info.get("filename", "")
+                    function_location = f"{filename}:{start_line}" if filename else self.source_location
+                else:
+                    function_location = self.source_location
+            except Exception:
+                function_location = self.source_location
+        else:
+            current_function_info = self.find_current_function_Tool(self.source_location)
+            current_function_name = current_function_info.get('function_name', 'unknown')
+            function_location = self.source_location
+        
+        # Start building prompt parts - first add previous analysis paths if any
+        prompt_parts = []
+        previous_paths_prompt = self._format_previous_analysis_paths()
+        if previous_paths_prompt:
+            prompt_parts.append(previous_paths_prompt)
+        
+        # Build prompt introduction based on mode
+        if self.analysis_mode == "actual_arg":
+            intro_lines = [
+                f"You are tracing the value flow of the {self._get_ordinal_string(self.arg_index)} actual argument at the call site: {self.source_location} : {find_code_line(self.source_location) or ''}",
+                f"The variable being traced is: {var_name}"
+            ]
+            # Add explanation if this is a continuation from previous analysis
+            if self.previous_analysis_paths:
+                intro_lines.append("This analysis continues from the previous function call, tracing the memory flow after the function returned.")
+            intro_lines.append(f"The static analysis engine pruned the control-flow in function {current_function_name} and identified {path_count} candidate paths. Each path is described below.")
+            prompt_parts.extend(intro_lines)
+        elif self.analysis_mode == "formal_arg":
+            prompt_parts.extend([
+                f"You are tracing the value flow of the {self._get_ordinal_string(self.arg_index)} formal parameter of function {current_function_name} (starting at {function_location}) to detect potential memory leaks.",
+                f"The variable being traced is: {var_name}",
+                f"The static analysis engine pruned the control-flow in function {current_function_name} and identified {path_count} candidate paths. Each path is described below."
+            ])
+        else:
+            # lvar mode: use original format
+            prompt_parts.extend([
+                f"You are tracing the value flow of variable '{var_name}' to detect potential memory leaks. start from the location: {self.source_location} : {find_code_line(self.source_location)}",
+                f"The static analysis engine pruned the control-flow in function {current_function_name} and identified {path_count} candidate paths. Each path is described below."
+            ])
+        
+        # Build path descriptions (same as parent method)
+        for idx, path_entry in enumerate(self.path_data, start=1):
+            path_id = path_entry["path_id"]
+            path_node_list = path_entry.get("path_node_list", [])
+            
+            # Match SVFG nodes to this path
+            location_to_svfg = self._match_svfg_nodes_to_path(path_node_list)
+            
+            # Analyze path features using SVFG information
+            path_analysis = self._analyze_path_with_svfg(path_node_list, location_to_svfg)
+            has_store = path_analysis["has_store"]
+            has_actualparam = path_analysis["has_actualparam"]
+            has_actualin = path_analysis["has_actualin"]
+            has_gep = path_analysis["has_gep"]
+            svfg_details = path_analysis["svfg_details"]
+            
+            # Create a mapping from location to core SVFG type for quick lookup
+            location_to_core_svfg_type = {}
+            for detail in svfg_details:
+                loc = detail["location"]
+                if loc not in location_to_core_svfg_type:
+                    location_to_core_svfg_type[loc] = detail["type"]
+            
+            path_observations = []
+            path_details = []
+            
+            for node in path_node_list:
+                node_type = node.get("node", "")
+                location = node.get("location", "")
+                condition_value = node.get("condition_value")
+                
+                code_line = find_code_line(location) if location else ""
+                if not code_line:
+                    code_line = location  # Fallback
+                
+                # Get SVFG information for this location (already analyzed)
+                matching_svfgs = location_to_svfg.get(location, [])
+                core_svfg_type = location_to_core_svfg_type.get(location)
+                
+                # Get SVFG description if available
+                svfg_info = ""
+                if matching_svfgs and core_svfg_type:
+                    # Find the matching SVFG node of the core type
+                    for svfg in matching_svfgs:
+                        if self._is_core_svfg_type(svfg.get("node_type", "")) == core_svfg_type:
+                            svfg_info = self._get_svfg_description(svfg, code_line)
+                            break
+                elif matching_svfgs:
+                    # Use first matching SVFG node if no core type matched
+                    svfg_info = self._get_svfg_description(matching_svfgs[0], code_line)
+                
+                # Check if this node description should be filtered
+                # Pass SVFG information to help with filtering
+                should_filter = self._should_filter_node_description(
+                    node_type, location, 
+                    is_start_node=(node_type == "start"),
+                    core_svfg_type=core_svfg_type,
+                    matching_svfgs=matching_svfgs
+                )
+                
+                if node_type == "start":
+                    if self.analysis_mode == "actual_arg" or self.analysis_mode == "formal_arg":
+                        path_details.append(f"  - Variable entry at {location} : {code_line}")
+                    else:
+                        path_details.append(f"  - Allocation start at {location} : {code_line}")
+                elif node_type == "branch":
+                    cond_str = condition_value if condition_value not in (None, "") else "unknown"
+                    expression = node.get("expression")
+                    if expression:
+                        path_details.append(f"  - Node type branch {location} : condition \"{expression}\" evaluated to {cond_str}")
+                    else:
+                        path_details.append(f"  - Node type branch {location} : {code_line} (condition evaluated to {cond_str})")
+                elif node_type == "store" or "Store" in node_type:
+                    base_desc = f"  - Node type {node_type} {location} : {code_line} (memory likely stored into parameters/return value)"
+                    # Only append svfg_info if not filtered
+                    path_details.append(base_desc + (svfg_info if not should_filter else ""))
+                elif "ActualParm" in node_type or "actualparam" in node_type.lower():
+                    if "free" in code_line.lower() or "dealloc" in code_line.lower():
+                        base_desc = f"  - Node type {node_type} {location} : {code_line} (variable used as argument of a deallocation function)"
+                    else:
+                        base_desc = f"  - Node type {node_type} {location} : {code_line}"
+                        # Only append detailed SVFG description if not filtered
+                        if not should_filter:
+                            base_desc += " (SVFG: ActualParmVFGNode - variable passed as actual parameter to function call)"
+                    path_details.append(base_desc + (svfg_info if not should_filter else ""))
+                elif "ActualIN" in node_type or "actualin" in node_type.lower():
+                    base_desc = f"  - Node type {node_type} {location} : {code_line}"
+                    path_details.append(base_desc + (svfg_info if not should_filter else ""))
+                elif node_type == "return":
+                    path_details.append(f"  - return statement {location} : {code_line}")
+                else:
+                    # For other node types (including "normal"), always show the basic description
+                    # but only append SVFG info if not filtered
+                    base_desc = f"  - Node type {node_type} {location} : {code_line}"
+                    path_details.append(base_desc + (svfg_info if not should_filter else ""))
+            
+            # 构建路径观察描述 - 使用SVFG信息进行更准确的判断
+            if has_store:
+                path_observations.append("store operations detected; ownership may be passed to parameters or return values")
+            if has_actualparam:
+                path_observations.append("variable is used as a call argument; ownership may transfer to the callee or be freed there")
+            if has_actualin:
+                path_observations.append("variable passed as input argument; may be used by callee function")
+            if has_gep:
+                path_observations.append("pointer arithmetic/field access detected; memory may be accessed through structure or array")
+            
+            # Only add "no memory transfer" if none of the transfer operations were detected
+            if not (has_store or has_actualparam or has_actualin):
+                path_observations.append("no memory transfer detected; potential leak at return")
+            
+            observations_str = " ".join(path_observations) if path_observations else "no noteworthy memory events"
+            
+            prompt_parts.append(f"{idx}. path_id: {idx}: {observations_str}")
+            prompt_parts.extend(path_details)
+        
+        prompt_parts.extend([
+            "",
+            " Your task is to classify each path into one of the following memory states:",
+            "- HandledByCallee: memory will be handled by a callee function.",
+            "- Deallocated: memory is explicitly freed (e.g., free or custom free).",
+            "- ReturnedAsReturnValue: memory is returned via the function's return value.",
+            "- ReturnedAsPointerParameter: memory is returned through a pointer parameter.",
+            "- Leak: memory is leaked at this return location.",
+            "- NullPointer: the pointer remains NULL due to allocation failures.",
+            "- Unreachable: the path is infeasible due to control-flow constraints.",
+            "",
+            "For each path, you must first check if the path is feasible. If the path is not feasible, you should classify it as Unreachable directly.",
+        ])
+        
+        return "\n".join(prompt_parts)
+    
+    def _get_ordinal_string(self, index: Optional[int]) -> str:
+        """Convert 0-based index to ordinal string (first, second, third, etc.)"""
+        if index is None:
+            return "unknown"
+        
+        ordinals = ["first", "second", "third", "fourth", "fifth", 
+                   "sixth", "seventh", "eighth", "ninth", "tenth"]
+        if index < len(ordinals):
+            return ordinals[index]
+        else:
+            return f"{index + 1}-th"
+    
+    def _extract_actual_argument_expression(self, location: str, callee_function_name: str, arg_index: int) -> Optional[str]:
+        """
+        Extract the expression for an actual argument from a function call by index.
+        
+        Args:
+            location: Source location of the call site in 'file:line' format
+            callee_function_name: Name of the called function
+            arg_index: Index of the argument (0-based)
+            
+        Returns:
+            Argument expression text if found, None otherwise
+        """
+        code_line = find_code_line(location, strip_whitespace=False)
+        if not code_line:
+            return None
+        
+        # Parse the code line to find the function call
+        root = parse_code_line(code_line)
+        if root is None:
+            return None
+        
+        code_bytes = bytes(code_line, 'utf8')
+        
+        # Find call expressions
+        def find_call_expressions(node):
+            calls = []
+            if node.type == "call_expression":
+                calls.append(node)
+            for child in node.children:
+                calls.extend(find_call_expressions(child))
+            return calls
+        
+        call_nodes = find_call_expressions(root)
+        
+        # Find the call to callee_function_name
+        target_call = None
+        for call_node in call_nodes:
+            function_node = call_node.child_by_field_name("function")
+            if function_node is None:
+                continue
+            
+            func_name = None
+            if function_node.type == "identifier":
+                func_name = code_bytes[function_node.start_byte:function_node.end_byte].decode("utf8")
+            else:
+                # Try to extract identifier from complex expression
+                # Use a simple approach - look for identifier in children
+                for child in function_node.children:
+                    if child.type == "identifier":
+                        func_name = code_bytes[child.start_byte:child.end_byte].decode("utf8")
+                        break
+            
+            if func_name and func_name == callee_function_name:
+                target_call = call_node
+                break
+        
+        if target_call is None:
+            return None
+        
+        # Extract arguments
+        arguments_node = target_call.child_by_field_name("arguments")
+        if arguments_node is None:
+            return None
+        
+        # Parse argument list
+        arguments = []
+        for child in arguments_node.children:
+            if child.type == "argument_list":
+                for arg_child in child.children:
+                    if arg_child.type == ",":
+                        continue
+                    arguments.append(arg_child)
+            elif child.type != ",":
+                arguments.append(child)
+        
+        # Get the argument at arg_index
+        if arg_index < 0 or arg_index >= len(arguments):
+            return None
+        
+        arg_node = arguments[arg_index]
+        arg_text = code_bytes[arg_node.start_byte:arg_node.end_byte].decode("utf8")
+        return re.sub(r"\s+", " ", arg_text.strip())
+
+
+# 注意：_CustomPathBuilderAgent 类在这里结束
+# 以下方法原本错误地放在了 _CustomPathBuilderAgent 类中
+# 它们实际上应该属于 CrossFunctionMemoryFlowAnalyzer 类
+# 但由于历史原因，它们被放在了这里
+# 这些方法不应该在这里，应该被删除或移到正确的位置
+# 为了保持代码运行，暂时保留它们，但需要修复缩进问题
+# TODO: 将这些方法移到 CrossFunctionMemoryFlowAnalyzer 类中，或删除重复的方法
+
+# 这些方法需要访问 CrossFunctionMemoryFlowAnalyzer 的实例属性
+# 所以它们应该被移到 CrossFunctionMemoryFlowAnalyzer 类中
+# 但由于代码结构问题，暂时保留在这里
+
     def _extract_next_functions(self, node: FunctionAnalysisNode) -> List[Dict[str, Any]]:
         """
         Extract all possible next functions from path analysis results.
@@ -1261,6 +2333,7 @@ class _CustomPathBuilderAgent(FunctionPathBuilderAgent):
             function_name = next_func_info.get("function_name")
             source_location = next_func_info.get("source_location")
             arg_index = next_func_info.get("arg_index")
+            func_type = next_func_info.get("type")
             
             if not function_name:
                 continue
@@ -1278,11 +2351,14 @@ class _CustomPathBuilderAgent(FunctionPathBuilderAgent):
                 continue
             
             # Create child node
+            # For callee type, this is an actual_arg mode analysis
+            # Set callee_function_name to function_name for actual_arg mode
             child = FunctionAnalysisNode(
                 node_id=self._generate_node_id(),
                 function_name=function_name,
                 start_location=source_location or "",
-                arg_index=arg_index
+                arg_index=arg_index,
+                callee_function_name=function_name if func_type == "callee" else None
             )
             
             # Store metadata about which path(s) led to this child
@@ -1338,4 +2414,10 @@ class _CustomPathBuilderAgent(FunctionPathBuilderAgent):
         # or parameter in the caller matches our aliases
         # For now, basic validation
         return len(parent_aliases) > 0
+
+# 注意：以下方法已经在 CrossFunctionMemoryFlowAnalyzer 类中定义
+# 这里删除重复的定义以避免混淆
+# 如果需要，可以在这里添加其他 _CustomPathBuilderAgent 特定的方法
+
+# 已删除重复的 _output_analysis_results 和 _output_node_results 方法定义
 

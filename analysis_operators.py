@@ -1857,6 +1857,589 @@ def get_alias_set(location: str, eq_position: int) -> List[Dict[str, Any]]:
     
     return result
 
+def _extract_formal_parameter_name(function_name: str, arg_index: int) -> Optional[str]:
+    """
+    Extract the name of a formal parameter from a function definition by index.
+    
+    Args:
+        function_name: Name of the function
+        arg_index: Index of the parameter (0-based)
+        
+    Returns:
+        Parameter name if found, None otherwise
+    """
+    func_meta = find_function_body(function_name)
+    if not func_meta or func_meta.get("error"):
+        logging.warning(f"_extract_formal_parameter_name failed to locate function for {function_name}")
+        return None
+    
+    function_source = func_meta.get("function_body")
+    if not isinstance(function_source, str) or not function_source.strip():
+        logging.warning(f"_extract_formal_parameter_name received empty function body for {function_name}")
+        return None
+    
+    tree, code_bytes = _parse_function_ast(function_source)
+    if tree is None or code_bytes is None:
+        logging.warning("tree-sitter parser unavailable; cannot extract parameter name.")
+        return None
+    
+    def _find_function_definition(node):
+        if node.type == "function_definition":
+            return node
+        for child in node.children:
+            result = _find_function_definition(child)
+            if result:
+                return result
+        return None
+    
+    function_node = _find_function_definition(tree.root_node)
+    if function_node is None:
+        logging.warning(f"_extract_formal_parameter_name could not find function definition for {function_name}")
+        return None
+    
+    # Get parameter list
+    declarator = function_node.child_by_field_name("declarator")
+    if declarator is None:
+        return None
+    
+    parameter_list = declarator.child_by_field_name("parameters")
+    if parameter_list is None:
+        return None
+    
+    # Extract parameters
+    parameters = []
+    for child in parameter_list.children:
+        if child.type == "parameter_declaration":
+            parameters.append(child)
+        elif child.type == ",":
+            continue
+    
+    # Get the parameter at arg_index
+    if arg_index < 0 or arg_index >= len(parameters):
+        logging.warning(f"_extract_formal_parameter_name: arg_index {arg_index} out of range for function {function_name}")
+        return None
+    
+    param_node = parameters[arg_index]
+    identifier_node = _find_identifier_node(param_node)
+    if identifier_node is None:
+        # Parameter might be unnamed (e.g., void) or have complex type
+        logging.debug(f"_extract_formal_parameter_name: parameter {arg_index} in {function_name} has no identifier")
+        return None
+    
+    param_name = code_bytes[identifier_node.start_byte:identifier_node.end_byte].decode("utf8")
+    return param_name.strip()
+
+def _find_parameter_index_by_name(function_name: str, param_name: str) -> Optional[int]:
+    """
+    Find the index (0-based) of a formal parameter by its name in a function definition.
+    
+    Args:
+        function_name: Name of the function
+        param_name: Name of the parameter to find
+        
+    Returns:
+        Parameter index (0-based) if found, None otherwise
+    """
+    func_meta = find_function_body(function_name)
+    if not func_meta or func_meta.get("error"):
+        logging.warning(f"_find_parameter_index_by_name failed to locate function for {function_name}")
+        return None
+    
+    function_source = func_meta.get("function_body")
+    if not isinstance(function_source, str) or not function_source.strip():
+        logging.warning(f"_find_parameter_index_by_name received empty function body for {function_name}")
+        return None
+    
+    tree, code_bytes = _parse_function_ast(function_source)
+    if tree is None or code_bytes is None:
+        logging.warning("tree-sitter parser unavailable; cannot find parameter index.")
+        return None
+    
+    def _find_function_definition(node):
+        if node.type == "function_definition":
+            return node
+        for child in node.children:
+            result = _find_function_definition(child)
+            if result:
+                return result
+        return None
+    
+    function_node = _find_function_definition(tree.root_node)
+    if function_node is None:
+        logging.warning(f"_find_parameter_index_by_name could not find function definition for {function_name}")
+        return None
+    
+    # Get parameter list
+    declarator = function_node.child_by_field_name("declarator")
+    if declarator is None:
+        return None
+    
+    parameter_list = declarator.child_by_field_name("parameters")
+    if parameter_list is None:
+        return None
+    
+    # Extract parameters and find matching parameter name
+    param_index = 0
+    for child in parameter_list.children:
+        if child.type == "parameter_declaration":
+            identifier_node = _find_identifier_node(child)
+            if identifier_node is not None:
+                current_param_name = code_bytes[identifier_node.start_byte:identifier_node.end_byte].decode("utf8").strip()
+                # Normalize parameter names (remove leading &* for comparison)
+                normalized_current = current_param_name.lstrip('&*')
+                normalized_target = param_name.lstrip('&*')
+                if normalized_current == normalized_target or current_param_name == param_name:
+                    return param_index
+            param_index += 1
+        elif child.type == ",":
+            continue
+    
+    logging.debug(f"_find_parameter_index_by_name: parameter '{param_name}' not found in function {function_name}")
+    return None
+
+def _extract_actual_argument_expression(location: str, callee_function_name: str, arg_index: int) -> Optional[str]:
+    """
+    Extract the expression for an actual argument from a function call by index.
+    
+    Args:
+        location: Source location of the call site in 'file:line' format
+        callee_function_name: Name of the called function
+        arg_index: Index of the argument (0-based)
+        
+    Returns:
+        Argument expression text if found, None otherwise
+    """
+    code_line = find_code_line(location, strip_whitespace=False)
+    if not code_line:
+        logging.warning(f"_extract_actual_argument_expression failed to find code line at {location}")
+        return None
+    
+    # DEBUG: 添加调试信息
+    print(f"[DEBUG] Code line at {location}: {repr(code_line)}")
+    
+    # Parse the code line to find the function call
+    root = parse_code_line(code_line)
+    if root is None:
+        logging.warning("tree-sitter parser unavailable; cannot extract argument expression.")
+        return None
+    
+    # DEBUG: 添加调试信息
+    print(f"[DEBUG] Root node type: {root.type}")
+    
+    # 如果根节点是 translation_unit，需要包装代码在函数体中重新解析
+    code_to_parse = code_line.strip()
+    code_bytes = bytes(code_line, 'utf8')
+    byte_offset = 0  # 原始代码在包装代码中的字节偏移
+    
+    if root.type == "translation_unit":
+        # 包装代码在函数体中
+        wrapper_prefix = "void _wrapper() { "
+        wrapper_suffix = " }"
+        wrapped_code = wrapper_prefix + code_to_parse + wrapper_suffix
+        byte_offset = len(wrapper_prefix.encode('utf8'))
+        
+        from utils import _c_parser
+        if _c_parser:
+            wrapped_tree = _c_parser.parse(bytes(wrapped_code, 'utf8'))
+            wrapped_root = wrapped_tree.root_node
+            
+            # 从包装后的 AST 中提取函数体内的语句
+            if wrapped_root.type == "translation_unit":
+                for child in wrapped_root.children:
+                    if child.type == "function_definition":
+                        body = child.child_by_field_name("body")
+                        if body and body.type == "compound_statement":
+                            for stmt in body.children:
+                                if stmt.type in ("expression_statement", "declaration", "return_statement"):
+                                    root = stmt
+                                    code_bytes = bytes(wrapped_code, 'utf8')
+                                    break
+                                elif stmt.type not in ("{", "}"):
+                                    root = stmt
+                                    code_bytes = bytes(wrapped_code, 'utf8')
+                                    break
+                        break
+    
+    print(f"[DEBUG] Root node type after processing: {root.type}")
+    if hasattr(root, 'start_byte'):
+        node_text = code_bytes[root.start_byte:root.end_byte].decode('utf8')
+        print(f"[DEBUG] Root node text: {repr(node_text)}")
+        print(f"[DEBUG] Byte offset: {byte_offset}")
+    
+    # Find call expressions
+    def find_call_expressions(node):
+        calls = []
+        if node.type == "call_expression":
+            calls.append(node)
+        for child in node.children:
+            calls.extend(find_call_expressions(child))
+        return calls
+    
+    call_nodes = find_call_expressions(root)
+    
+    # DEBUG: 添加调试信息
+    print(f"[DEBUG] Found {len(call_nodes)} call expression(s)")
+    for i, call_node in enumerate(call_nodes):
+        function_node = call_node.child_by_field_name("function")
+        if function_node:
+            func_text = code_bytes[function_node.start_byte:function_node.end_byte].decode("utf8")
+            print(f"[DEBUG] Call {i}: function_node type={function_node.type}, text={repr(func_text)}")
+    
+    # Find the call to callee_function_name
+    target_call = None
+    for call_node in call_nodes:
+        function_node = call_node.child_by_field_name("function")
+        if function_node is None:
+            continue
+        
+        if function_node.type == "identifier":
+            func_name = code_bytes[function_node.start_byte:function_node.end_byte].decode("utf8")
+        else:
+            # Try to extract identifier from complex expression
+            ident_node = _find_identifier_node(function_node)
+            if ident_node:
+                func_name = code_bytes[ident_node.start_byte:ident_node.end_byte].decode("utf8")
+            else:
+                # DEBUG: 添加调试信息
+                print(f"[DEBUG] Could not extract identifier from function_node type={function_node.type}")
+                continue
+        
+        # DEBUG: 添加调试信息
+        print(f"[DEBUG] Comparing func_name={repr(func_name)} with callee_function_name={repr(callee_function_name)}")
+        
+        if func_name == callee_function_name:
+            target_call = call_node
+            break
+    
+    if target_call is None:
+        logging.warning(f"_extract_actual_argument_expression: could not find call to {callee_function_name} at {location}")
+        return None
+    
+    # Extract arguments
+    arguments_node = target_call.child_by_field_name("arguments")
+    if arguments_node is None:
+        return None
+    
+    # DEBUG: 添加调试信息
+    print(f"[DEBUG] Arguments node type: {arguments_node.type}")
+    print(f"[DEBUG] Arguments node children count: {len(arguments_node.children)}")
+    for i, child in enumerate(arguments_node.children):
+        child_text = code_bytes[child.start_byte:child.end_byte].decode("utf8") if hasattr(child, 'start_byte') else 'N/A'
+        print(f"[DEBUG] Arguments child {i}: type={child.type}, text={repr(child_text)}")
+    
+    # Parse argument list
+    arguments = []
+    for child in arguments_node.children:
+        if child.type == "argument_list":
+            # DEBUG: 添加调试信息
+            print(f"[DEBUG] Found argument_list with {len(child.children)} children")
+            for arg_child in child.children:
+                # Skip commas and parentheses
+                if arg_child.type in (",", "(", ")"):
+                    continue
+                arg_text = code_bytes[arg_child.start_byte:arg_child.end_byte].decode("utf8") if hasattr(arg_child, 'start_byte') else 'N/A'
+                print(f"[DEBUG] Adding argument from argument_list: type={arg_child.type}, text={repr(arg_text)}")
+                arguments.append(arg_child)
+        elif child.type not in (",", "(", ")"):
+            # Skip commas and parentheses
+            arg_text = code_bytes[child.start_byte:child.end_byte].decode("utf8") if hasattr(child, 'start_byte') else 'N/A'
+            print(f"[DEBUG] Adding argument directly: type={child.type}, text={repr(arg_text)}")
+            arguments.append(child)
+    
+    # DEBUG: 添加调试信息
+    print(f"[DEBUG] Total arguments found: {len(arguments)}")
+    for i, arg in enumerate(arguments):
+        arg_text = code_bytes[arg.start_byte:arg.end_byte].decode("utf8") if hasattr(arg, 'start_byte') else 'N/A'
+        print(f"[DEBUG] Argument {i}: {repr(arg_text)}")
+    
+    # Get the argument at arg_index
+    if arg_index < 0 or arg_index >= len(arguments):
+        logging.warning(f"_extract_actual_argument_expression: arg_index {arg_index} out of range for call to {callee_function_name} at {location}")
+        return None
+    
+    arg_node = arguments[arg_index]
+    arg_text = code_bytes[arg_node.start_byte:arg_node.end_byte].decode("utf8")
+    
+    # DEBUG: 添加调试信息
+    print(f"[DEBUG] Extracted argument {arg_index}: {repr(arg_text)}")
+    
+    # 如果使用了包装代码，提取的文本应该只包含原始代码部分
+    # 包装代码格式: "void _wrapper() { original_code }"
+    # 如果 arg_text 包含包装代码的部分，需要提取原始部分
+    result = re.sub(r"\s+", " ", arg_text.strip())
+    print(f"[DEBUG] Final argument expression: {repr(result)}")
+    return result
+
+def get_alias_set_for_formal_arg(function_name: str, arg_index: int) -> List[Dict[str, Any]]:
+    """
+    Collect alias variables for a formal parameter of a function.
+    
+    This function extracts the parameter name and then builds aliases within the function body
+    by analyzing assignment relations, similar to get_alias_set but starting from a parameter.
+    
+    Args:
+        function_name: Name of the function
+        arg_index: Index of the formal parameter (0-based)
+        
+    Returns:
+        List of dictionaries, each containing:
+        - "name": variable name or expression
+        - "gep_info": dictionary with type information
+    """
+    # Extract parameter name
+    param_name = _extract_formal_parameter_name(function_name, arg_index)
+    if not param_name:
+        logging.warning(f"get_alias_set_for_formal_arg: could not extract parameter name for {function_name}[{arg_index}]")
+        return []
+    
+    # Get function metadata
+    func_meta = find_function_body(function_name)
+    if not func_meta or func_meta.get("error"):
+        logging.warning(f"get_alias_set_for_formal_arg failed to locate function for {function_name}")
+        return []
+    
+    function_source = func_meta.get("function_body")
+    if not isinstance(function_source, str) or not function_source.strip():
+        logging.warning(f"get_alias_set_for_formal_arg received empty function body for {function_name}")
+        return []
+    
+    function_start_line = func_meta.get("start_line") or 0
+    try:
+        function_start_line = int(function_start_line)
+    except (ValueError, TypeError):
+        function_start_line = 0
+    
+    tree, code_bytes = _parse_function_ast(function_source)
+    if tree is None or code_bytes is None:
+        logging.warning("tree-sitter parser unavailable; cannot compute alias set.")
+        return []
+    
+    relations = _build_assignment_relations(tree.root_node, code_bytes, function_start_line)
+    if not relations:
+        return []
+    
+    # Use parameter name as seed
+    seed_expr = param_name
+    seed_base = normalize_identifier(seed_expr)
+    plain_aliases: Set[str] = set()
+    if seed_base:
+        plain_aliases.add(seed_base)
+    else:
+        plain_aliases.add(seed_expr)
+    
+    # Build alias set by analyzing assignment relations
+    changed = True
+    while changed and plain_aliases:
+        changed = False
+        for relation in relations:
+            if not relation.get("lhs_is_identifier"):
+                continue
+            lhs_base = relation.get("lhs_base")
+            if not lhs_base or lhs_base in plain_aliases:
+                continue
+            rhs_refs = relation.get("rhs") or []
+            for ref in rhs_refs:
+                if ref.get("context") != "plain":
+                    continue
+                if ref.get("name") in plain_aliases:
+                    plain_aliases.add(lhs_base)
+                    changed = True
+                    break
+    
+    # Collect all alias expressions
+    alias_expressions: Set[str] = set()
+    if seed_expr:
+        alias_expressions.add(seed_expr)
+    
+    # Add member access expressions derived from base aliases
+    if seed_expr and seed_base:
+        for alias_name in plain_aliases:
+            substituted = _replace_expression_base(seed_expr, seed_base, alias_name)
+            if substituted:
+                alias_expressions.add(re.sub(r"\s+", " ", substituted.strip()))
+    
+    # Build result list with structured format
+    result: List[Dict[str, Any]] = []
+    seen_names: Set[str] = set()
+    
+    # Add seed expression first
+    if seed_expr:
+        seed_normalized = re.sub(r"\s+", " ", seed_expr.strip())
+        if seed_normalized not in seen_names:
+            result.append({
+                "name": seed_normalized,
+                "gep_info": _build_gep_info(seed_normalized)
+            })
+            seen_names.add(seed_normalized)
+    
+    # Add member access expressions
+    for expr in sorted(alias_expressions):
+        expr_normalized = re.sub(r"\s+", " ", expr.strip())
+        if expr_normalized not in seen_names and expr_normalized != seed_expr:
+            result.append({
+                "name": expr_normalized,
+                "gep_info": _build_gep_info(expr_normalized)
+            })
+            seen_names.add(expr_normalized)
+    
+    return result
+
+def get_alias_set_for_actual_arg(location: str, callee_function_name: str, arg_index: int) -> List[Dict[str, Any]]:
+    """
+    Collect alias variables for an actual argument in a function call.
+    
+    This function extracts the argument expression from the call site, then analyzes it
+    to find base variable names, and finally builds aliases in the callee function
+    starting from the corresponding formal parameter.
+    
+    Args:
+        location: Source location of the call site in 'file:line' format
+        callee_function_name: Name of the called function
+        arg_index: Index of the actual argument (0-based)
+        
+    Returns:
+        List of dictionaries, each containing:
+        - "name": variable name or expression
+        - "gep_info": dictionary with type information
+    """
+    # Extract actual argument expression
+    arg_expr = _extract_actual_argument_expression(location, callee_function_name, arg_index)
+    if not arg_expr:
+        logging.warning(f"get_alias_set_for_actual_arg: could not extract argument expression for {callee_function_name}[{arg_index}] at {location}")
+        return []
+    
+    # Extract base variable from the argument expression
+    # The argument might be a simple variable or a complex expression
+    # For now, we try to extract identifiers from the expression
+    arg_expr_normalized = re.sub(r"\s+", " ", arg_expr.strip())
+    
+    # Parse the argument expression to extract identifiers
+    root = parse_code_line(arg_expr)
+    if root is None:
+        # Fallback: use the expression as-is
+        seed_expr = arg_expr_normalized
+    else:
+        code_bytes = bytes(arg_expr, 'utf8')
+        # Find the main identifier (for simple cases like "var", "&var", "*var")
+        # For member access like "var->field", we want the base "var"
+        identifier_node = _find_identifier_node(root)
+        if identifier_node:
+            # Get the first identifier as base
+            base_name = code_bytes[identifier_node.start_byte:identifier_node.end_byte].decode("utf8")
+            seed_expr = base_name
+        else:
+            # Complex expression, use as-is
+            seed_expr = arg_expr_normalized
+    
+    # Now build alias set in the callee function starting from the corresponding formal parameter
+    # The formal parameter should correspond to the same arg_index
+    callee_param_name = _extract_formal_parameter_name(callee_function_name, arg_index)
+    if not callee_param_name:
+        logging.warning(f"get_alias_set_for_actual_arg: could not extract parameter name for {callee_function_name}[{arg_index}]")
+        # Fallback: use the seed expression directly
+        return [{
+            "name": seed_expr,
+            "gep_info": _build_gep_info(seed_expr)
+        }]
+    
+    # Get callee function metadata
+    func_meta = find_function_body(callee_function_name)
+    if not func_meta or func_meta.get("error"):
+        logging.warning(f"get_alias_set_for_actual_arg failed to locate function for {callee_function_name}")
+        return [{
+            "name": seed_expr,
+            "gep_info": _build_gep_info(seed_expr)
+        }]
+    
+    function_source = func_meta.get("function_body")
+    if not isinstance(function_source, str) or not function_source.strip():
+        logging.warning(f"get_alias_set_for_actual_arg received empty function body for {callee_function_name}")
+        return [{
+            "name": seed_expr,
+            "gep_info": _build_gep_info(seed_expr)
+        }]
+    
+    function_start_line = func_meta.get("start_line") or 0
+    try:
+        function_start_line = int(function_start_line)
+    except (ValueError, TypeError):
+        function_start_line = 0
+    
+    tree, code_bytes = _parse_function_ast(function_source)
+    if tree is None or code_bytes is None:
+        logging.warning("tree-sitter parser unavailable; cannot compute alias set.")
+        return [{
+            "name": seed_expr,
+            "gep_info": _build_gep_info(seed_expr)
+        }]
+    
+    relations = _build_assignment_relations(tree.root_node, code_bytes, function_start_line)
+    
+    # Use callee parameter name as seed (it corresponds to the actual argument)
+    seed_base = normalize_identifier(callee_param_name)
+    plain_aliases: Set[str] = set()
+    if seed_base:
+        plain_aliases.add(seed_base)
+    else:
+        plain_aliases.add(callee_param_name)
+    
+    # Also include the actual argument's base variable if it's different
+    actual_arg_base = normalize_identifier(seed_expr)
+    if actual_arg_base and actual_arg_base not in plain_aliases:
+        plain_aliases.add(actual_arg_base)
+    
+    # Build alias set by analyzing assignment relations
+    if relations:
+        changed = True
+        while changed and plain_aliases:
+            changed = False
+            for relation in relations:
+                if not relation.get("lhs_is_identifier"):
+                    continue
+                lhs_base = relation.get("lhs_base")
+                if not lhs_base or lhs_base in plain_aliases:
+                    continue
+                rhs_refs = relation.get("rhs") or []
+                for ref in rhs_refs:
+                    if ref.get("context") != "plain":
+                        continue
+                    if ref.get("name") in plain_aliases:
+                        plain_aliases.add(lhs_base)
+                        changed = True
+                        break
+    
+    # Collect all alias expressions
+    alias_expressions: Set[str] = set()
+    # Add the callee parameter name
+    if callee_param_name:
+        alias_expressions.add(callee_param_name)
+    # Add the actual argument expression if it's a simple identifier
+    if seed_expr and (seed_expr == actual_arg_base or not actual_arg_base):
+        alias_expressions.add(seed_expr)
+    
+    # Add member access expressions derived from base aliases
+    if callee_param_name and seed_base:
+        for alias_name in plain_aliases:
+            substituted = _replace_expression_base(callee_param_name, seed_base, alias_name)
+            if substituted:
+                alias_expressions.add(re.sub(r"\s+", " ", substituted.strip()))
+    
+    # Build result list with structured format
+    result: List[Dict[str, Any]] = []
+    seen_names: Set[str] = set()
+    
+    # Add expressions
+    for expr in sorted(alias_expressions):
+        expr_normalized = re.sub(r"\s+", " ", expr.strip())
+        if expr_normalized not in seen_names:
+            result.append({
+                "name": expr_normalized,
+                "gep_info": _build_gep_info(expr_normalized)
+            })
+            seen_names.add(expr_normalized)
+    
+    return result
+
 def get_gep_position_list(source_location: str) -> Optional[List[int]]:
     
     return None
@@ -2046,6 +2629,8 @@ configure_function_cfg_dependencies(
 )
 
 if __name__ == '__main__':
+    print(f"{find_actual_arg_key_svfgnode("tif_dirread.c:5432", "TIFFReadDirEntrySbyteArray", "2")}")
+    
     # # Test find_lvalue_key_svfgnode
     # print("\n" + "="*80)
     # print("Testing find_lvalue_key_svfgnode")

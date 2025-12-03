@@ -750,7 +750,7 @@ if __name__ == "__main__":
     # test_new_function_path_builder_agent(source_location_eq_position_list)
     
     # 测试CrossFunctionMemoryFlowAnalyzer
-    test_cross_function_memory_flow_analyzer(source_location_eq_position_list)
+    test_cross_function_memory_flow_analyzer([source_location_eq_position_list[0]])
     
     # 测试FunctionPathCheckerAgent
     # test_function_path_checker_agent(checker_test_data)

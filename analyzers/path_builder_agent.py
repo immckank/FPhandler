@@ -710,6 +710,68 @@ class FunctionPathBuilderAgent:
         else:
             # Generic description
             return f" (SVFG: {svfg_type})"
+    
+    def _should_filter_node_description(self, node_type: str, location: str, 
+                                        is_start_node: bool = False,
+                                        core_svfg_type: Optional[str] = None,
+                                        matching_svfgs: Optional[List[Dict[str, Any]]] = None) -> bool:
+        """
+        Check if a node's description should be filtered (not shown in detail).
+        
+        Base class implementation: checks if location matches key_svfg nodes.
+        Subclasses can override to add additional filtering logic.
+        
+        Args:
+            node_type: Type of the path node (e.g., "actualparam", "actualin", "start")
+            location: Location string of the node (e.g., "file.c:123")
+            is_start_node: Whether this is the start node of the path
+            core_svfg_type: Core SVFG type if available (e.g., "ActualINSVFGNode", "ActualParmVFGNode")
+            matching_svfgs: List of matching SVFG nodes for this location
+            
+        Returns:
+            True if the node description should be filtered, False otherwise
+        """
+        # Check if this is an actualparam/actualin type node or a start node
+        is_actual_param_type = ("ActualParm" in node_type or "actualparam" in node_type.lower() or
+                               "ActualIN" in node_type or "actualin" in node_type.lower())
+        
+        # Also check SVFG type if available
+        is_svfg_actual_param = (core_svfg_type in ("ActualParmVFGNode", "ActualINSVFGNode"))
+        
+        if not is_actual_param_type and not is_start_node and not is_svfg_actual_param:
+            return False
+        
+        # Check if this location matches any key_svfg node
+        if hasattr(self, 'svfg_nodes') and self.svfg_nodes:
+            for svfg_node in self.svfg_nodes:
+                svfg_location = svfg_node.get("location", "")
+                if not svfg_location:
+                    continue
+                
+                # Check if locations match (exact match or file:line match)
+                location_matches = False
+                if svfg_location == location:
+                    location_matches = True
+                else:
+                    # Try matching by file:line (ignoring column)
+                    try:
+                        svfg_file_line = svfg_location.split(":")[0] + ":" + svfg_location.split(":")[1] if ":" in svfg_location else ""
+                        node_file_line = location.split(":")[0] + ":" + location.split(":")[1] if ":" in location else ""
+                        if svfg_file_line and svfg_file_line == node_file_line:
+                            location_matches = True
+                    except Exception:
+                        pass
+                
+                if location_matches:
+                    # Check if SVFG node type matches actualparam/actualin
+                    svfg_node_type = svfg_node.get("node_type", "")
+                    core_type = self._is_core_svfg_type(svfg_node_type)
+                    if core_type in ("ActualParmVFGNode", "ActualINSVFGNode"):
+                        # If this is a start node or actualparam/actualin type, filter it
+                        if is_actual_param_type or is_svfg_actual_param or (is_start_node and core_type in ("ActualParmVFGNode", "ActualINSVFGNode")):
+                            return True
+        
+        return False
 
     def build_prompt(self) -> str:
         """
@@ -774,6 +836,15 @@ class FunctionPathBuilderAgent:
                     # Use first matching SVFG node if no core type matched
                     svfg_info = self._get_svfg_description(matching_svfgs[0], code_line)
                 
+                # Check if this node description should be filtered
+                # Pass SVFG information to help with filtering
+                should_filter = self._should_filter_node_description(
+                    node_type, location, 
+                    is_start_node=(node_type == "start"),
+                    core_svfg_type=core_svfg_type,
+                    matching_svfgs=matching_svfgs
+                )
+                
                 if node_type == "start":
                     path_details.append(f"  - Allocation start at {location} : {code_line}")
                 elif node_type == "branch":
@@ -785,19 +856,26 @@ class FunctionPathBuilderAgent:
                         path_details.append(f"  - Node type branch {location} : {code_line} (condition evaluated to {cond_str})")
                 elif node_type == "store" or "Store" in node_type:
                     base_desc = f"  - Node type {node_type} {location} : {code_line} (memory likely stored into parameters/return value)"
-                    path_details.append(base_desc + svfg_info)
+                    # Only append svfg_info if not filtered
+                    path_details.append(base_desc + (svfg_info if not should_filter else ""))
                 elif "ActualParm" in node_type or "actualparam" in node_type.lower():
                     if "free" in code_line.lower() or "dealloc" in code_line.lower():
                         base_desc = f"  - Node type {node_type} {location} : {code_line} (variable used as argument of a deallocation function)"
                     else:
                         base_desc = f"  - Node type {node_type} {location} : {code_line} (variable or alias used as call argument)"
-                    path_details.append(base_desc + svfg_info)
+                    # Only append svfg_info if not filtered
+                    path_details.append(base_desc + (svfg_info if not should_filter else ""))
+                elif "ActualIN" in node_type or "actualin" in node_type.lower():
+                    base_desc = f"  - Node type {node_type} {location} : {code_line}"
+                    # Only append svfg_info if not filtered
+                    path_details.append(base_desc + (svfg_info if not should_filter else ""))
                 elif node_type == "return":
                     path_details.append(f"  - return statement {location} : {code_line}")
                 else:
-                    # For other node types, append SVFG info if available
+                    # For other node types (including "normal"), always show the basic description
+                    # but only append SVFG info if not filtered
                     base_desc = f"  - Node type {node_type} {location} : {code_line}"
-                    path_details.append(base_desc + svfg_info)
+                    path_details.append(base_desc + (svfg_info if not should_filter else ""))
             
             # 构建路径观察描述 - 使用SVFG信息进行更准确的判断
             if has_store:

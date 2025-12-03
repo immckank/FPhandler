@@ -1704,29 +1704,62 @@ class FunctionCFGAnalyzer:
     def trace_paths_to_exit(
         cls,
         location: str,
-        eq_position: str,
+        eq_position: Optional[str] = None,
         *,
+        arg_index: Optional[str] = None,
+        callee_function_name: Optional[str] = None,
         find_current_function: Optional[Callable[[str], Optional[Dict[str, Any]]]] = None,
         find_return_locations: Optional[Callable[[str], List[str]]] = None,
         find_lvalue_key_svfgnode: Optional[Callable[[str, str], List[Dict[str, Any]]]] = None,
+        find_formal_arg_key_svfgnode: Optional[Callable[[str, str], List[Dict[str, Any]]]] = None,
+        find_actual_arg_key_svfgnode: Optional[Callable[[str, str, str], List[Dict[str, Any]]]] = None,
     ) -> List[List[Dict[str, Any]]]:
         """Generates filtered paths from a start location to the function exit.
         
+        Supports three analysis modes:
+        - lvar: Local variable analysis (uses location and eq_position)
+        - formal_arg: Formal argument analysis (uses function_name and arg_index)
+        - actual_arg: Actual argument analysis (uses location, callee_function_name, and arg_index)
+        
         Args:
-            location: Start location 'filename:line'.
-            eq_position: Position of lvalue in the expression.
+            location: Start location 'filename:line'. For formal_arg mode, this is used to find the function.
+            eq_position: Position of lvalue in the expression (for lvar mode).
+            arg_index: Parameter index (for formal_arg and actual_arg modes).
+            callee_function_name: Called function name (for actual_arg mode).
             find_current_function: Optional function to find current function by location.
                 If None, will attempt to import from analysis_operators.
             find_return_locations: Optional function to find return locations by function name.
                 If None, will attempt to import from analysis_operators.
-            find_lvalue_key_svfgnode: Optional function to find key SVFG nodes.
+            find_lvalue_key_svfgnode: Optional function to find key SVFG nodes for lvar mode.
+                If None, will attempt to import from analysis_operators.
+            find_formal_arg_key_svfgnode: Optional function to find key SVFG nodes for formal_arg mode.
+                If None, will attempt to import from analysis_operators.
+            find_actual_arg_key_svfgnode: Optional function to find key SVFG nodes for actual_arg mode.
                 If None, will attempt to import from analysis_operators.
         
         Returns:
             List of filtered paths, containing only key value operations, branches, and start/end nodes.
         """
+        # Determine analysis mode based on provided parameters
+        if arg_index is not None and callee_function_name is not None:
+            mode = "actual_arg"
+        elif arg_index is not None:
+            mode = "formal_arg"
+        elif eq_position is not None:
+            mode = "lvar"
+        else:
+            logging.error("Cannot determine analysis mode: must provide either eq_position (lvar) or arg_index (formal_arg/actual_arg)")
+            return []
+        
+        logging.debug(f"Analysis mode: {mode}")
+        
         # Resolve external dependencies
-        if find_current_function is None or find_return_locations is None or find_lvalue_key_svfgnode is None:
+        # Determine which functions are needed based on mode
+        need_lvalue = (mode == "lvar" and find_lvalue_key_svfgnode is None)
+        need_formal_arg = (mode == "formal_arg" and find_formal_arg_key_svfgnode is None)
+        need_actual_arg = (mode == "actual_arg" and find_actual_arg_key_svfgnode is None)
+        
+        if find_current_function is None or find_return_locations is None or need_lvalue or need_formal_arg or need_actual_arg:
             try:
                 # Lazy import to avoid circular dependencies
                 import sys
@@ -1734,28 +1767,56 @@ class FunctionCFGAnalyzer:
                     from analysis_operators import (
                         find_current_function as _find_current_function,
                         find_return_locations as _find_return_locations,
-                        find_lvalue_key_svfgnode as _find_lvalue_key_svfgnode,
                     )
                     if find_current_function is None:
                         find_current_function = _find_current_function
                     if find_return_locations is None:
                         find_return_locations = _find_return_locations
-                    if find_lvalue_key_svfgnode is None:
+                    
+                    # Import mode-specific functions
+                    if need_lvalue:
+                        from analysis_operators import (
+                            find_lvalue_key_svfgnode as _find_lvalue_key_svfgnode,
+                        )
                         find_lvalue_key_svfgnode = _find_lvalue_key_svfgnode
+                    if need_formal_arg:
+                        from analysis_operators import (
+                            find_formal_arg_key_svfgnode as _find_formal_arg_key_svfgnode,
+                        )
+                        find_formal_arg_key_svfgnode = _find_formal_arg_key_svfgnode
+                    if need_actual_arg:
+                        from analysis_operators import (
+                            find_actual_arg_key_svfgnode as _find_actual_arg_key_svfgnode,
+                        )
+                        find_actual_arg_key_svfgnode = _find_actual_arg_key_svfgnode
                 else:
                     # Try importing directly
                     try:
                         from analysis_operators import (
                             find_current_function as _find_current_function,
                             find_return_locations as _find_return_locations,
-                            find_lvalue_key_svfgnode as _find_lvalue_key_svfgnode,
                         )
                         if find_current_function is None:
                             find_current_function = _find_current_function
                         if find_return_locations is None:
                             find_return_locations = _find_return_locations
-                        if find_lvalue_key_svfgnode is None:
+                        
+                        # Import mode-specific functions
+                        if need_lvalue:
+                            from analysis_operators import (
+                                find_lvalue_key_svfgnode as _find_lvalue_key_svfgnode,
+                            )
                             find_lvalue_key_svfgnode = _find_lvalue_key_svfgnode
+                        if need_formal_arg:
+                            from analysis_operators import (
+                                find_formal_arg_key_svfgnode as _find_formal_arg_key_svfgnode,
+                            )
+                            find_formal_arg_key_svfgnode = _find_formal_arg_key_svfgnode
+                        if need_actual_arg:
+                            from analysis_operators import (
+                                find_actual_arg_key_svfgnode as _find_actual_arg_key_svfgnode,
+                            )
+                            find_actual_arg_key_svfgnode = _find_actual_arg_key_svfgnode
                     except ImportError:
                         logging.error("Cannot import required functions from analysis_operators. Please provide them as arguments.")
                         return []
@@ -1763,17 +1824,57 @@ class FunctionCFGAnalyzer:
                 logging.error(f"Error resolving dependencies: {e}")
                 return []
         
-        if find_current_function is None or find_return_locations is None or find_lvalue_key_svfgnode is None:
-            logging.error("Required dependency functions are not available")
+        if find_current_function is None or find_return_locations is None:
+            logging.error("Required dependency functions (find_current_function, find_return_locations) are not available")
             return []
         
-        # 1. Identify current function
-        func_info = find_current_function(location)
-        if not func_info or "error" in func_info:
-            logging.error(f"Could not find function for location {location}")
+        # Check mode-specific function availability
+        if mode == "lvar" and find_lvalue_key_svfgnode is None:
+            logging.error("Required function find_lvalue_key_svfgnode is not available for lvar mode")
+            return []
+        if mode == "formal_arg" and find_formal_arg_key_svfgnode is None:
+            logging.error("Required function find_formal_arg_key_svfgnode is not available for formal_arg mode")
+            return []
+        if mode == "actual_arg" and find_actual_arg_key_svfgnode is None:
+            logging.error("Required function find_actual_arg_key_svfgnode is not available for actual_arg mode")
             return []
         
-        function_name = func_info.get("function_name")
+        # 1. Identify current function and determine start location
+        if mode == "formal_arg":
+            # For formal_arg mode, we need to find function by name
+            # First, try to get function info from location to get function name
+            temp_func_info = find_current_function(location)
+            if not temp_func_info or "error" in temp_func_info:
+                logging.error(f"Could not find function for location {location}")
+                return []
+            function_name = temp_func_info.get("function_name")
+            
+            # Get full function info to get start location
+            try:
+                from analysis_operators import find_function_body
+                func_info = find_function_body(function_name)
+            except ImportError:
+                func_info = temp_func_info
+            
+            if not func_info or "error" in func_info:
+                logging.error(f"Could not find function body for {function_name}")
+                return []
+            
+            # Use function start line as start location for formal_arg mode
+            start_line = func_info.get("start_line")
+            filename = func_info.get("filename")
+            if not start_line or not filename:
+                logging.error(f"Could not get start_line or filename for function {function_name}")
+                return []
+            start_location = f"{filename}:{start_line}"
+        else:
+            # For lvar and actual_arg modes, use the provided location
+            func_info = find_current_function(location)
+            if not func_info or "error" in func_info:
+                logging.error(f"Could not find function for location {location}")
+                return []
+            function_name = func_info.get("function_name")
+            start_location = location
         
         # 2. Get target return locations
         return_locs = find_return_locations(function_name)
@@ -1781,8 +1882,17 @@ class FunctionCFGAnalyzer:
             logging.warning(f"No return locations found for {function_name}")
             return []
         
-        # 3. Get key value operations
-        key_ops = find_lvalue_key_svfgnode(location, eq_position)
+        # 3. Get key value operations based on mode
+        if mode == "lvar":
+            key_ops = find_lvalue_key_svfgnode(location, eq_position)
+        elif mode == "formal_arg":
+            key_ops = find_formal_arg_key_svfgnode(function_name, arg_index)
+        elif mode == "actual_arg":
+            key_ops = find_actual_arg_key_svfgnode(location, callee_function_name, arg_index)
+        else:
+            logging.error(f"Unknown mode: {mode}")
+            return []
+        
         # Create a set of key locations for fast lookup
         key_locs = set()
         for op in key_ops:
@@ -1795,7 +1905,7 @@ class FunctionCFGAnalyzer:
         # 4. Find all paths to each return location
         all_raw_paths = []
         for ret_loc in return_locs:
-            paths = cls.find_all_paths_between_lines(function_name, location, ret_loc)
+            paths = cls.find_all_paths_between_lines(function_name, start_location, ret_loc)
             if paths:
                 all_raw_paths.extend(paths)
         
