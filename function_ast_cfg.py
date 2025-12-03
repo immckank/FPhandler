@@ -1713,7 +1713,7 @@ class FunctionCFGAnalyzer:
         find_lvalue_key_svfgnode: Optional[Callable[[str, str], List[Dict[str, Any]]]] = None,
         find_formal_arg_key_svfgnode: Optional[Callable[[str, str], List[Dict[str, Any]]]] = None,
         find_actual_arg_key_svfgnode: Optional[Callable[[str, str, str], List[Dict[str, Any]]]] = None,
-    ) -> List[List[Dict[str, Any]]]:
+    ) -> List[Dict[str, Any]]:
         """Generates filtered paths from a start location to the function exit.
         
         Supports three analysis modes:
@@ -1910,7 +1910,7 @@ class FunctionCFGAnalyzer:
                 all_raw_paths.extend(paths)
         
         if not all_raw_paths:
-            return []
+            return []  # Returns empty list (already correct format)
 
         # 5. Cluster paths by Key SVFG Node sequence (based on location)
         # We also include the return location in the key to ensure paths in a cluster end at the same place
@@ -2025,5 +2025,95 @@ class FunctionCFGAnalyzer:
             if filtered_path:
                 final_filtered_paths.append(filtered_path)
         
-        return final_filtered_paths
+        # 8. Build enriched path data structure with SVFG bindings and conditions
+        enriched_paths = []
+        
+        # Build location to SVFG mapping for fast lookup
+        location_to_svfg = {}
+        for svfg_node in key_ops:
+            svfg_loc = svfg_node.get("location", "")
+            if svfg_loc:
+                if svfg_loc not in location_to_svfg:
+                    location_to_svfg[svfg_loc] = []
+                location_to_svfg[svfg_loc].append(svfg_node)
+        
+        for path_idx, filtered_path in enumerate(final_filtered_paths, start=1):
+            if not filtered_path:
+                continue
+            
+            # Extract return location
+            end_node = filtered_path[-1].get("node", {})
+            return_location = end_node.get("location", "")
+            
+            # Build enriched steps with SVFG bindings
+            enriched_steps = []
+            conditions = []
+            
+            for step in filtered_path:
+                node = step.get("node", {})
+                edge = step.get("edge")
+                node_loc = node.get("location", "")
+                
+                # Match SVFG nodes to this location
+                svfg_nodes = []
+                if node_loc in location_to_svfg:
+                    svfg_nodes = location_to_svfg[node_loc]
+                else:
+                    # Try to match by file:line (ignoring column)
+                    for svfg_loc, svfg_list in location_to_svfg.items():
+                        if ":" in node_loc and ":" in svfg_loc:
+                            node_file_line = ":".join(node_loc.split(":")[:2])
+                            svfg_file_line = ":".join(svfg_loc.split(":")[:2])
+                            if node_file_line == svfg_file_line:
+                                svfg_nodes.extend(svfg_list)
+                                break
+                
+                # Determine if this is a key location
+                is_key_location = node_loc in key_locs or (
+                    edge and edge.get("type") == "goto"
+                )
+                
+                # Extract branch condition information
+                if edge and edge.get("type") in ["true_branch", "false_branch", "switch_case"]:
+                    condition_info = {
+                        "location": node_loc,
+                        "condition": node.get("condition", ""),
+                        "condition_value": None,
+                        "code_line": None
+                    }
+                    
+                    # Determine condition value from edge type
+                    edge_type = edge.get("type", "")
+                    if edge_type == "true_branch":
+                        condition_info["condition_value"] = "true"
+                    elif edge_type == "false_branch":
+                        condition_info["condition_value"] = "false"
+                    elif edge_type == "switch_case":
+                        condition_info["condition_value"] = edge.get("condition", "")
+                    
+                    # Try to get code line (will be populated later if needed)
+                    # code_line can be retrieved when needed using utils.find_code_line
+                    condition_info["code_line"] = None
+                    
+                    conditions.append(condition_info)
+                
+                # Build enriched step
+                enriched_step = {
+                    "node": node,
+                    "edge": edge,
+                    "svfg_nodes": svfg_nodes,
+                    "is_key_location": is_key_location
+                }
+                enriched_steps.append(enriched_step)
+            
+            # Build enriched path entry
+            enriched_path = {
+                "path_id": str(path_idx),
+                "steps": enriched_steps,
+                "return_location": return_location,
+                "conditions": conditions
+            }
+            enriched_paths.append(enriched_path)
+        
+        return enriched_paths
 
