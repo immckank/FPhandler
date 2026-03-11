@@ -46,8 +46,8 @@ class CommandCaller:
         if CommandCaller._process is not None and CommandCaller._process.poll() is None:
             return
 
-        from config import PUT_ROOT_PATH, PUT_NAME
-        bitcode_path = os.path.join(PUT_ROOT_PATH, f"{PUT_NAME}.bc")
+        from config import BITCODE_PATH
+        bitcode_path = BITCODE_PATH
 
         command = ['graph-reader', '-stat=false', bitcode_path]
         # command = ['graph-reader', bitcode_path]
@@ -132,7 +132,7 @@ if __name__ == '__main__':
 
     tests = [
         {"command": "find-function-body-by-name", "name": "X509V3_EXT_add_alias"},
-        {"command": "find-function-body-by-location", "location": "bf_enc.c:30"},
+        {"command": "find-function-body-by-location", "fl": "bf_enc.c", "ln": 30},
         {"command": "find-all-function-call-sites", "name": "TIFFCreateDirectory"},
         {"command": "find-all-function-callees", "name": "ssl_module_init"},
     ]
@@ -153,7 +153,7 @@ if __name__ == '__main__':
 #     res_json = json.loads(res)
 #     print(res_json["function_name"])
 #     # Example usage:
-#     # Ensure config.py is set up correctly for PUT_ROOT_PATH and PUT_NAME
+#     # Ensure config.py BITCODE_PATH points to the correct .bc
 #     # And your C++ graph-reader executable is compiled and in PATH
     
 #     # First call initializes the singleton and starts the C++ process

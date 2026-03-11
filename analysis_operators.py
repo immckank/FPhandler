@@ -7,50 +7,48 @@ import re
 from utils import *
 from typing import List, Dict, Any, Optional, Set
 
-def _configure_libclang():
-    """Finds and configures the path to libclang."""
-    # Option 1: From environment variable
-    libclang_path = os.environ.get('LIBCLANG_PATH')
-    if libclang_path and os.path.exists(libclang_path):
-        cindex.Config.set_library_file(libclang_path)
-        return True
-
-    # Option 2: Look in a project-specific path
-    # Assuming SVFmemplus is a sibling directory to the project root
-    project_root = os.path.dirname(os.path.abspath(__file__))
-    svf_lib_path = os.path.abspath(os.path.join(project_root, '..', 'SVFmemplus', 'build', 'lib', 'libclang.so'))
-    if os.path.exists(svf_lib_path):
-        cindex.Config.set_library_file(svf_lib_path)
-        return True
-
-    return False
-
-try:
-    from clang import cindex
-    from clang.cindex import CursorKind
-    libclang_available = _configure_libclang()
-    if not _configure_libclang():
-        # Python 包已找到，但底层的共享库未配置成功
-        logging.warning("libclang Python bindings found, but the libclang shared library could not be configured. "
-                        "Please ensure LLVM/Clang is installed and LIBCLANG_PATH is set correctly. "
-                        "Features requiring libclang will be disabled.")
-        libclang_available = False
-    else:
-        libclang_available = True
-except ImportError:
-    libclang_available = False
-    logging.warning("libclang not available. Some features will be disabled.")
-    # Python包本身未找到
-    logging.warning("Python package for libclang not found. Please run 'pip install libclang'. "
-                    "Features requiring libclang will be disabled.")
-
 from command_caller import CommandCaller
 
 import config
 
-PUT_ROOT_PATH = config.PUT_ROOT_PATH
-PROJECT_NAME = config.PROJECT_NAME
-PUT_NAME = config.PUT_NAME
+PROJECT_ROOT = os.path.abspath(config.PROJECT_ROOT)
+BITCODE_PATH = config.BITCODE_PATH
+
+# source_location 格式校验：支持相对路径（如 ../../../dir/file.c:755），后端允许此类输入；
+# 规则：冒号仅用于分隔行号；路径任意非空且以 .c / .h / .cpp 结尾
+SOURCE_LOCATION_PATTERN = re.compile(r'^[^:]+\.(c|h|cpp):\d+$')
+
+
+def _strip_error_false(res_json: dict) -> None:
+    """Remove error key when false or absent; avoid KeyError on del."""
+    if res_json.get("error") is False:
+        res_json.pop("error", None)
+    elif res_json.get("error"):
+        pass  # keep for caller to check
+    else:
+        res_json.pop("error", None)
+
+
+def _query_find_function_body_by_location(source_loc) -> Optional[dict]:
+    """Build find-function-body-by-location query with fl/ln/cl only."""
+    d = normalize_source_loc(source_loc)
+    if not d:
+        return None
+    q = {"command": "find-function-body-by-location", "fl": d["fl"], "ln": int(d["ln"])}
+    if d.get("cl") is not None:
+        q["cl"] = int(d["cl"])
+    return q
+
+
+def _location_query_payload(source_loc) -> Optional[dict]:
+    """fl/ln/cl dict for any command that used to take location string."""
+    d = normalize_source_loc(source_loc)
+    if not d:
+        return None
+    out = {"fl": d["fl"], "ln": int(d["ln"])}
+    if d.get("cl") is not None:
+        out["cl"] = int(d["cl"])
+    return out
 
 '''
 system function
@@ -107,22 +105,25 @@ def find_callers(function_name: str) -> List[Dict[str, Any]]:
     call_sites_list = []
     if res:
         res_json = json.loads(res)
-        error = res_json.get("error", None)
+        error = res_json.get("error")
         if error:
             return [{"error": f"error in finding call sites for function {function_name}, plesse check if the name is right. {error}"}]
-        else:
-            # 删除error属性
-            del res_json["error"]
-            # {'call_sites': [{'location': 'proto_text.c:581'}, {'location': 'proto_bin.c:602'}]}
-            # 为每个call_site添加code属性
-            for call_site in res_json.get("call_sites", []):
-                call_site["code"] = dump_source_line(call_site["location"].split(":")[0], call_site["location"].split(":")[1])
-                call_sites_list.append(call_site)
-            return call_sites_list
+        _strip_error_false(res_json)
+        for call_site in res_json.get("call_sites", []):
+            ensure_location_string(call_site)
+            loc = call_site.get("location")
+            if loc and ":" in loc:
+                fl, ln_str = loc.rsplit(":", 1)
+                if ln_str.isdigit():
+                    call_site["code"] = dump_source_line(fl, int(ln_str))
+            elif call_site.get("fl") is not None and call_site.get("ln") is not None:
+                call_site["code"] = dump_source_line(call_site["fl"], int(call_site["ln"]))
+            call_sites_list.append(call_site)
+        return call_sites_list
     return []
 
 # # 暂时不用了
-def find_callee(source_location: str) -> Optional[List[Dict[str, Any]]]:
+def find_callee(source_location) -> Optional[List[Dict[str, Any]]]:
     """Finds the function body of functions called at a specific source location.
 
     Args:
@@ -137,22 +138,22 @@ def find_callee(source_location: str) -> Optional[List[Dict[str, Any]]]:
         [{'function_name': 'callee_func', 'filename': 'a.c', 'start_line': 10,
           'end_line': 20, 'function_body': '...'}]
     """
-    # 基于LLVM来实现不要使用基于文本的查找
-    # 检查source_location是否合法
-    if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', source_location):
-        logging.error(f"Invalid source location format: {source_location}")
-        return None
+    if isinstance(source_location, str) and not SOURCE_LOCATION_PATTERN.match(source_location):
+        d = parse_source_location_to_fl_ln(source_location)
+        if not d:
+            logging.error(f"Invalid source location format: {source_location}")
+            return None
     command_caller = CommandCaller()
-    query = {
-        "command": "find-function-body-by-location",
-        "location": source_location
-    }
+    query = _query_find_function_body_by_location(source_location)
+    if not query:
+        logging.error(f"Invalid source location: {source_location}")
+        return None
     res = command_caller.send_query(query)
     if res:
         res_json = json.loads(res)
         error = res_json.get("error", None)
         if error:
-            return {"error": f"Error finding callee for {source_location}: {error} {res_json}"}
+            return {"error": f"Error finding callee for {source_location!s}: {error} {res_json}"}
         function_body = dump_source_snippet(res_json["filename"], res_json['start_line'], res_json['end_line'])
         res_json["function_body"] = function_body
         return res_json
@@ -187,7 +188,7 @@ def find_function_body(function_name: str) -> Optional[Dict[str, Any]]:
         return res_json
     return None
 
-def find_current_function(source_location: str) -> Optional[Dict[str, Any]]:
+def find_current_function(source_location) -> Optional[Dict[str, Any]]:
     """Finds the function in which the given source location exists.
 
     Args:
@@ -201,28 +202,23 @@ def find_current_function(source_location: str) -> Optional[Dict[str, Any]]:
         {'function_name': 'current_func', 'filename': 'a.c', 'start_line': 5,
          'end_line': 25, 'function_body': '...'}
     """
-    # 基于LLVM来实现不要使用基于文本的查找
-    # 检查source_location是否合法
-    if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', source_location):
-        return {"error": "Invalid source location format, source_location should be in the format 'filename.c:line_number'."}
+    if isinstance(source_location, str) and not SOURCE_LOCATION_PATTERN.match(source_location):
+        if not parse_source_location_to_fl_ln(source_location):
+            return {"error": "Invalid source location format, source_location should be in the format 'filename.c:line_number'."}
     command_caller = CommandCaller()
-    query = {
-        "command": "find-function-body-by-location",
-        "location": source_location
-    }
+    query = _query_find_function_body_by_location(source_location)
+    if not query:
+        return {"error": "Invalid source location."}
     res = command_caller.send_query(query)
     if res:
         res_json = json.loads(res)
-        error = res_json.get("error", None)
+        error = res_json.get("error")
         if error:
-            return {"error": f"Error finding current function for {source_location}, check if the location is right."}
-        else:
-            # 删除error属性
-            del res_json["error"]
-            func_body = dump_source_snippet(res_json["filename"], res_json['start_line'], res_json['end_line'])
-            # 为func添加func_body属性
-            res_json["function_body"] = func_body
-            return res_json
+            return {"error": f"Error finding current function for {source_location!s}, check if the location is right."}
+        _strip_error_false(res_json)
+        func_body = dump_source_snippet(res_json["filename"], res_json['start_line'], res_json['end_line'])
+        res_json["function_body"] = func_body
+        return res_json
     return {"error": "Unknown error"}
 
 def find_all_callees(function_name: str) -> List[Dict[str, Any]]:
@@ -237,31 +233,31 @@ def find_all_callees(function_name: str) -> List[Dict[str, Any]]:
         error = res_json.get("error", None)
         if error:
             return [{"error": f"error in finding all callees"}]
-        else:
-            # 删除error属性
-            del res_json["error"]
-            return res_json.get("callees", [])
+        _strip_error_false(res_json)
+        return res_json.get("callees", [])
     return []
 
-# 这个函数暂时不用了
-def find_return_locations(function_name: str, source_location: str) -> List[Dict[str, Any]]:
-    # { "command" : "find-return-locations", "name" : "TIFFFetchNormalTag",  "location" : "tif_dirread.c:4981"}
+# 这个函数暂时不用了；后端主流程为 show-return-locations，仅 name
+def find_return_locations(function_name: str, source_location: str = None) -> List[Dict[str, Any]]:
     command_caller = CommandCaller()
-    query = {
-        "command": "find-return-locations",
-        "name": function_name,
-        "location": source_location
-    }
+    query = {"command": "show-return-locations", "name": function_name}
     res = command_caller.send_query(query)
     if res:
         res_json = json.loads(res)
-        error = res_json.get("error", None)
+        error = res_json.get("error")
         if error:
-            return [{"error": f"error in finding return locations for function {function_name} at {source_location}, check if the name and location are right. {error}"}]
-        else:
-            # 删除error属性
-            del res_json["error"]
-            return res_json.get("return_locations", [])
+            return [{"error": f"error in finding return locations for function {function_name}: {error}"}]
+        _strip_error_false(res_json)
+        locs = res_json.get("return_locations", [])
+        # 若调用方仍传入 source_location，可在 Python 侧过滤（可选）
+        if source_location and locs:
+            d = normalize_source_loc(source_location)
+            if d:
+                locs = [
+                    x for x in locs
+                    if (x.get("fl") or x.get("filename")) == d["fl"] and int(x.get("ln") or x.get("line") or 0) == d["ln"]
+                ] or locs
+        return locs
     return []
 
 def check_return_pointer(return_location: str) -> Optional[Dict[str, Any]]:
@@ -307,7 +303,8 @@ def ctags_readtags(source_location: str, id_name: str) -> List[str]:
         A list of source locations in 'filename:line_number' format.
     """
     # ctags实现
-    project_path = os.path.join(PUT_ROOT_PATH, source_location.split(":")[0].split("/")[0])
+    # 在 PROJECT_ROOT 下生成/使用 tags
+    project_path = PROJECT_ROOT
     tag_file_path = os.path.join(project_path, "tags")
     if not os.path.exists(tag_file_path):
         # 在项目根目录运行命令生成ctags文件
@@ -356,11 +353,10 @@ structure variable
 # trace lvar base object
 def find_base_lvar_def(source_location: str, eq_position: int) -> Optional[Dict[str, Any]]:
     command_caller = CommandCaller()
-    query = {
-        "command": "find-base-lvar-def",
-        "location": source_location,
-        "eq_position": str(eq_position)
-    }
+    payload = _location_query_payload(source_location)
+    if not payload:
+        return {"error": f"Invalid source_location: {source_location}"}
+    query = {"command": "find-base-lvar-def", "eq_position": str(eq_position), **payload}
     res = command_caller.send_query(query)
     if res:
         res_json = json.loads(res)
@@ -370,247 +366,6 @@ def find_base_lvar_def(source_location: str, eq_position: int) -> Optional[Dict[
             return {"error": f"error in finding base lvar def for {source_location}, check if the location and eq_position are right. {error}"}
         return res_json
     return None
-
-# find_var_definitions
-# 找到指定变量所有被定义的位置
-# return: list < str >
-def find_var_definitions(source_location: str, var_name: str) -> List[Dict[str, str]]:
-    """Finds all definitions of a given variable across the project.
-
-    This function searches for variable definitions, which are locations where
-    memory is actually allocated for the variable (i.e., not 'extern' declarations).
-    The search starts from the given source location and expands to the entire project
-    if necessary.
-
-    Args:
-        source_location: The source location to provide context, in the format 'filename.c:line_number'.
-        var_name: The name of the variable to find definitions for.
-
-    Returns:
-        A list of dictionaries, where each dictionary represents a definition
-        site and contains its location and source code. Returns an empty list
-        if no definitions are found.
-        Example: [{'location': 'items.c:100', 'code': 'item *it = item_alloc(...);'}]
-    """
-    # 检查source_location是否合法
-    if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', source_location):
-        return []
-    if not libclang_available:
-        return []
-    
-    try:
-        file_name = source_location.split(":")[0]
-        file_path = find_file_path(file_name)
-        full_file_path = os.path.join(PUT_ROOT_PATH, file_path)
-        
-        # 检查文件是否存在
-        if not os.path.exists(full_file_path):
-            # logging.error(f"文件不存在: {full_file_path}")
-            return []
-        
-        # 使用libclang解析文件，它会自动处理包含的头文件
-        index = cindex.Index.create()
-        # 传递适当的解析选项，确保包含的文件也被解析
-        args = ['-I' + PUT_ROOT_PATH]
-        translation_unit = index.parse(full_file_path, args=args)
-        
-        if not translation_unit:
-            # logging.error("无法创建 translation unit")
-            return []
-            
-        # 检查诊断信息
-        diagnostics = list(translation_unit.diagnostics)
-        error_count = 0
-        for diag in diagnostics:
-            if diag.severity >= cindex.Diagnostic.Error:  # Error or fatal
-                error_count += 1
-                # logging.warning(f"解析警告/错误: {diag.spelling} (级别: {diag.severity})")
-        
-        # if error_count > 0:
-            # logging.warning(f"存在 {error_count} 个严重错误，可能影响分析结果")
-            
-        # 在整个翻译单元中查找变量定义
-        definitions = []
-        processed_locations: Set[str] = set()
-
-        def _add_definition(cursor):
-            location = cursor.location
-            if not location.file:
-                return
-
-            file_name = location.file.name
-            if file_name.startswith(os.path.abspath(PUT_ROOT_PATH)):
-                file_name = os.path.relpath(file_name, PUT_ROOT_PATH)
-            if file_name.startswith(PROJECT_NAME + "/"):
-                file_name = file_name[len(PROJECT_NAME) + 1:]
-            
-            location_str = f"{file_name}:{location.line}"
-            if location_str not in processed_locations:
-                code = dump_source_line(file_name, location.line)
-                definitions.append({"location": location_str, "code": code})
-                processed_locations.add(location_str)
-        
-        def find_variable_definitions(cursor, var_name):
-            # 检查是否为变量声明
-            if cursor.kind == CursorKind.VAR_DECL and cursor.spelling == var_name:
-                # is_definition() 检查这是否是一个定义而不是一个前向声明
-                # 对于变量，如果它不是 extern 并且有存储空间，它就是定义。
-                if cursor.is_definition():
-                    _add_definition(cursor)
-            
-            # 递归遍历子节点
-            for child in cursor.get_children():
-                find_variable_definitions(child, var_name)
-        
-        find_variable_definitions(translation_unit.cursor, var_name)
-        
-        # 总是遍历整个项目以查找所有可能的定义，而不仅仅是在找不到时才查找
-        if True: # Kept for logical structure, can be removed.
-            # 遍历整个PUT目录寻找.c文件
-            put_path = os.path.abspath(PUT_ROOT_PATH)
-            put_path = os.path.join(put_path, PROJECT_NAME)
-            for root, dirs, files in os.walk(put_path):
-                # 排除一些不必要的目录
-                dirs[:] = [d for d in dirs if d not in ['.git', '.github', 't', 'scripts', 'doc', 'devtools', 'm4', 'vendor']
-                            and not os.path.abspath(os.path.join(root, d)).startswith('/usr/include')
-                            and not os.path.abspath(os.path.join(root, d)).startswith('/usr/local/include')]
-                
-                for file in files:
-                    if file.endswith('.c'):
-                        full_path = os.path.join(root, file)
-                        # 避免重复解析原始文件
-                        if os.path.abspath(full_path) == os.path.abspath(full_file_path):
-                            continue
-                        
-                        try:
-                            tu = index.parse(full_path, args=['-I' + PUT_ROOT_PATH, '-std=c99'])
-                            find_variable_definitions(tu.cursor, var_name)
-                        except Exception as e:
-                            # 如果解析某个文件失败，继续尝试其他文件
-                            # logging.warning(f"解析文件 {full_path} 时出错: {e}")
-                            continue
-        
-        return definitions
-    except Exception as e:
-        # logging.error(f"Error in find_var_definitions: {e}")
-        # import traceback
-        # logging.error(traceback.format_exc())
-        return []
-
-# find_var_decl
-# 找到变量声明的位置
-# return: str: 'slab_automove.c:37'
-def find_var_decl(source_location: str, var_name: str) -> List[Dict[str, str]]:
-    """Finds all declarations of a given identifier across the project.
-
-    This function searches for all declaration sites of an identifier, which can
-    include variables, functions, structs, typedefs, enums, and macros.
-    The search starts from the given source location and expands to the entire project.
-
-    Args:
-        source_location: A source location within the project to provide
-                         context, in format 'filename.c:line_number'.
-        var_name: The name of the identifier to find declarations for.
-
-    Returns:
-        A list of dictionaries, where each dictionary represents a declaration
-        site and contains its location and source code. Returns an empty list
-        if no declarations are found.
-        Example: [{'location': 'items.h:50', 'code': 'extern unsigned int total_items;'}]
-    """
-    # 检查source_location是否合法
-    if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', source_location):
-        return []
-    if not libclang_available:
-        return []
-    try:
-        file_name = source_location.split(":")[0]
-        file_path = find_file_path(file_name)
-        full_file_path = os.path.join(PUT_ROOT_PATH, file_path)
-        
-        # 检查文件是否真的存在
-        if not os.path.exists(full_file_path):
-            # logging.error(f"File does not exist: {full_file_path}")
-            return []
-        
-        # 使用libclang解析文件，它会自动处理包含的头文件
-        index = cindex.Index.create()
-        
-        # 尝试添加更多编译参数以提高解析成功率
-        args = ['-I' + PUT_ROOT_PATH]
-        translation_unit = index.parse(full_file_path, args=args)
-        
-        if not translation_unit:
-            # logging.error("Failed to create translation unit")
-            return []
-            
-        declarations: List[Dict[str, str]] = []
-        processed_locations: Set[str] = set()
-
-        # 在整个翻译单元中查找变量声明（包括包含的头文件）
-        def find_declarations_in_cursor(cursor, var_name):
-            # 支持多种声明类型
-            supported_kinds = [
-                CursorKind.VAR_DECL,        # 变量声明
-                CursorKind.STRUCT_DECL,     # 结构体声明
-                CursorKind.TYPEDEF_DECL,    # typedef声明
-                CursorKind.FUNCTION_DECL,   # 函数声明
-                CursorKind.ENUM_DECL,       # 枚举声明
-                CursorKind.ENUM_CONSTANT_DECL,  # 枚举常量声明
-                CursorKind.MACRO_DEFINITION     # 宏定义
-            ]
-            
-            if cursor.kind in supported_kinds and cursor.spelling == var_name:
-                location = cursor.location
-                if location.file:
-                    # 返回格式: 'filename:line_number'
-                    # 使用实际的文件名而不是原始的file_path
-                    file_name = location.file.name
-                    # 移除PUT_ROOT_PATH前缀以保持一致性
-                    if file_name.startswith(os.path.abspath(PUT_ROOT_PATH)):
-                        file_name = os.path.relpath(file_name, PUT_ROOT_PATH)
-                    # 如果以project name开头删掉project name
-                    if file_name.startswith(PROJECT_NAME + "/"):
-                        file_name = file_name[len(PROJECT_NAME) + 1:]
-                    location_str = f"{file_name}:{location.line}"
-                    if location_str not in processed_locations:
-                        code = dump_source_line(file_name, location.line)
-                        declarations.append({"location": location_str, "code": code})
-                        processed_locations.add(location_str)
-            
-            # 递归遍历子节点
-            for child in cursor.get_children():
-                find_declarations_in_cursor(child, var_name)
-        
-        find_declarations_in_cursor(translation_unit.cursor, var_name)
-        
-        # 在整个项目中查找
-        put_path = os.path.abspath(PUT_ROOT_PATH)
-        put_path = os.path.join(put_path, PROJECT_NAME)
-        processed_files: Set[str] = {os.path.abspath(full_file_path)}
-
-        for root, dirs, files in os.walk(put_path):
-            # 排除一些不必要的目录
-            dirs[:] = [d for d in dirs if d not in ['.git', '.github', 't', 'scripts', 'doc', 'devtools', 'm4', 'vendor']]
-            
-            for file in files:
-                if file.endswith(('.c', '.cpp', '.h')):
-                    current_file_path = os.path.join(root, file)
-                    abs_current_path = os.path.abspath(current_file_path)
-                    # 避免重复解析原始文件
-                    if abs_current_path in processed_files:
-                        continue
-                    
-                    processed_files.add(abs_current_path)
-                    try:
-                        tu = index.parse(current_file_path, args=args)
-                        find_declarations_in_cursor(tu.cursor, var_name)
-                    except Exception:
-                        continue
-        return declarations
-    except Exception as e:
-        # logging.error(f"Error in find_var_decl: {e}", exc_info=True)
-        return []
 
 
 # analysis lvar
@@ -637,11 +392,11 @@ def analysis_lvar(source_location: str, eq_position: int) -> Optional[List[Dict[
     }
     '''
     command_caller = CommandCaller()
-    query = {
-        "command" : "analysis-lvar",
-        "location" : source_location,
-        "eq_position" : str(eq_position)
-    }
+    payload = _location_query_payload(source_location)
+    if not payload:
+        logging.error(f"Invalid source location: {source_location}")
+        return None
+    query = {"command": "analysis-lvar", "eq_position": str(eq_position), **payload}
     res = command_caller.send_query(query)
     if res:
         res_json = json.loads(res)
@@ -658,15 +413,14 @@ path condition
 '''
 
 def get_value_sensitive_lvar_icfg_return_path(start_location: str, eq_position: int) -> Optional[List[Dict[str, Any]]]:
-    if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', start_location):
+    if not SOURCE_LOCATION_PATTERN.match(start_location) and not parse_source_location_to_fl_ln(start_location):
         logging.error(f"Invalid source location format: {start_location}")
         return None
     command_caller = CommandCaller()
-    query = {
-        "command" : "find-lvalue-path-inside",
-        "location" : start_location,
-        "eq_position" : str(eq_position)
-    }
+    payload = _location_query_payload(start_location)
+    if not payload:
+        return None
+    query = {"command": "find-lvalue-path-inside", "eq_position": str(eq_position), **payload}
     res = command_caller.send_query(query)
     if res:
         res_json = json.loads(res)
@@ -674,10 +428,8 @@ def get_value_sensitive_lvar_icfg_return_path(start_location: str, eq_position: 
         if error:
             logging.error(f"Error finding value sensitive icfg return path for {start_location} with eq_position {eq_position}: {error}")
             return None
-        else:
-            del res_json["error"]
-            return_locations = res_json.get("return_locations", [])
-            return return_locations
+        _strip_error_false(res_json)
+        return res_json.get("return_locations", [])
     return None
 
 def get_value_sensitive_arg_icfg_return_path(function_name: str, index: int) -> Optional[List[Dict[str, Any]]]:
@@ -694,20 +446,21 @@ def get_value_sensitive_arg_icfg_return_path(function_name: str, index: int) -> 
         if error:
             logging.error(f"Error finding value sensitive arg icfg return path for {function_name} with index {index}: {error}")
             return None
-        else:
-            del res_json["error"]
-            return_locations = res_json.get("return_locations", [])
-            return return_locations
+        _strip_error_false(res_json)
+        return res_json.get("return_locations", [])
     return None
 
 def get_value_sensitive_call_arg_icfg_return_path(location: str, arg_index: int, callee_function_name: str = "") -> Optional[List[Dict[str, Any]]]:
     command_caller = CommandCaller()
-    # {"command": "find-call-arg-value-path-inside", "location": "tif_dirread.c:5500", "arg_index": "2", "callee_function_name" : "TIFFReadDirEntrySlongArray"}
+    payload = _location_query_payload(location)
+    if not payload:
+        logging.error(f"Invalid location: {location}")
+        return None
     query = {
-        "command" : "find-call-arg-value-path-inside",
-        "location" : location,
-        "arg_index" : str(arg_index),
-        "callee_function_name" : callee_function_name
+        "command": "find-call-arg-value-path-inside",
+        "arg_index": str(arg_index),
+        "callee_function_name": callee_function_name,
+        **payload,
     }
     res = command_caller.send_query(query)
     if res:
@@ -718,57 +471,50 @@ def get_value_sensitive_call_arg_icfg_return_path(location: str, arg_index: int,
             logging.error(f"query: {query}")
             logging.error(f"res: {res}")
             return None
-        else:
-            del res_json["error"]
-            return_locations = res_json.get("return_locations", [])
-            return return_locations
+        _strip_error_false(res_json)
+        return res_json.get("return_locations", [])
     return None
 
-# TODO: 注释说明
 def get_shortest_path_cond(start_location: str, target_location: str):
-    if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', start_location):
+    """path-cond-func via send_query only (no subprocess CLI args)."""
+    if not SOURCE_LOCATION_PATTERN.match(start_location) and not parse_source_location_to_fl_ln(start_location):
         logging.error(f"Invalid source location format: {start_location}")
         return None
-    if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', target_location):
+    if not SOURCE_LOCATION_PATTERN.match(target_location) and not parse_source_location_to_fl_ln(target_location):
         logging.error(f"Invalid source location format: {target_location}")
         return None
     command_caller = CommandCaller()
-    res = command_caller.call_graph_reader_with_args(
-        f"-path-cond-func-start={start_location}",
-        f"-path-cond-func-end={target_location}",
-        os.path.join(PUT_ROOT_PATH, f"{PUT_NAME}.bc")
-    )
     query = {
-        "command": "path-cond-func", # Assuming this is the command name in C++
+        "command": "path-cond-func",
         "start_location": start_location,
-        "target_location": target_location
+        "target_location": target_location,
     }
+    res = command_caller.send_query(query)
     if res:
         res_json = json.loads(res)
         error = res_json.get("error", None)
         if error:
             logging.error(f"Error finding shortest path condition for {start_location} to {target_location}: {error}")
             return None
-        else:
-            del res_json["error"]
-            paths = res_json.get("paths", [])
-            # 找到最短的路径
-            shortest_path = None
-            min_length = float('inf')
-            for path in paths:
-                events = path.get("events", [])
-                if len(events) < min_length:
-                    min_length = len(events)
-                    shortest_path = path
-            
-            if shortest_path:
-                events = shortest_path.get("events", [])
-                for event in events:
-                    location = event.get("location", None)
-                    if location:
-                        event["code"] = dump_source_line(location.split(":")[0], location.split(":")[1])
-                return shortest_path.get("events", [])
-                
+        _strip_error_false(res_json)
+        paths = res_json.get("paths", [])
+        shortest_path = None
+        min_length = float("inf")
+        for path in paths:
+            events = path.get("events", [])
+            if len(events) < min_length:
+                min_length = len(events)
+                shortest_path = path
+        if shortest_path:
+            events = shortest_path.get("events", [])
+            for event in events:
+                ensure_location_string(event)
+                loc = event.get("location")
+                if loc and ":" in loc:
+                    fl, ln_str = loc.rsplit(":", 1)
+                    if ln_str.isdigit():
+                        event["code"] = dump_source_line(fl, int(ln_str))
+            return shortest_path.get("events", [])
     return None
     
 # get_path_cond_func
@@ -798,9 +544,9 @@ def get_path_cond_func_(start_location: str, start_code: str, target_location: s
             }
         ]
     """
-    if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', start_location):
+    if not SOURCE_LOCATION_PATTERN.match(start_location):
         return {"error": "Invalid source location format, source_location should be in the format 'filename.c:line_number'."}
-    if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', target_location):
+    if not SOURCE_LOCATION_PATTERN.match(target_location):
         return {"error": "Invalid source location format, source_location should be in the format 'filename.c:line_number'."}
     # 检索start_location处的代码
     found = True
@@ -837,15 +583,10 @@ def get_path_cond_func_(start_location: str, start_code: str, target_location: s
         return {"error": "wrong line number for target_location, please check line number or start code."}
     print(f"start loc : {start_location}")
     command_caller = CommandCaller()
-    res = command_caller.call_graph_reader_with_args(
-        f"-path-cond-func-start={start_location}",
-        f"-path-cond-func-end={target_location}",
-        os.path.join(PUT_ROOT_PATH, f"{PROJECT_NAME}.bc")
-    )
     query = {
         "command": "path-cond-func",
         "start_location": start_location,
-        "target_location": target_location
+        "target_location": target_location,
     }
     res = command_caller.send_query(query)
     if res:
@@ -854,16 +595,16 @@ def get_path_cond_func_(start_location: str, start_code: str, target_location: s
         if error:
             print(res)
             return {"error" : f"Error finding path condition function for {start_location} to {target_location}, check if the location is right."}
-        else:
-            del res_json["error"]
-            paths = res_json.get("paths", [])
-            for path in paths:
-                events = path.get("events", [])
-                for event in events:
-                    location = event.get("location", None)
-                    if location:
-                        event["code"] = find_code_line(location)
-            return res_json.get("paths", [])
+        _strip_error_false(res_json)
+        paths = res_json.get("paths", [])
+        for path in paths:
+            events = path.get("events", [])
+            for event in events:
+                ensure_location_string(event)
+                loc = event.get("location")
+                if loc:
+                    event["code"] = find_code_line(loc)
+        return res_json.get("paths", [])
     return None
 
 # get_path_cond_func
@@ -891,40 +632,37 @@ def get_path_cond_func(start_location: str, target_location: str) -> Optional[Li
             }
         ]
     """
-    if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', start_location):
+    if not SOURCE_LOCATION_PATTERN.match(start_location):
         logging.error(f"Invalid source location format: {start_location}")
         return None
-    if not re.match(r'^[\w/]+\.(c|h|cpp):\d+$', target_location):
+    if not SOURCE_LOCATION_PATTERN.match(target_location):
         logging.error(f"Invalid source location format: {target_location}")
         return None
     command_caller = CommandCaller()
-    res = command_caller.call_graph_reader_with_args(
-        f"-path-cond-func-start={start_location}",
-        f"-path-cond-func-end={target_location}",
-        os.path.join(PUT_ROOT_PATH, f"{PROJECT_NAME}.bc")
-    )
     query = {
         "command": "path-cond-func",
         "start_location": start_location,
-        "target_location": target_location
+        "target_location": target_location,
     }
     res = command_caller.send_query(query)
     if res:
         res_json = json.loads(res)
-        error = res_json.get("error", None)
+        error = res_json.get("error")
         if error:
             logging.error(f"Error finding path condition function for {start_location} to {target_location}: {error}")
             return None
-        else:
-            del res_json["error"]
-            paths = res_json.get("paths", [])
-            for path in paths:
-                events = path.get("events", [])
-                for event in events:
-                    location = event.get("location", None)
-                    if location:
-                        event["code"] = dump_source_line(location.split(":")[0], location.split(":")[1])
-            return res_json.get("paths", [])
+        _strip_error_false(res_json)
+        paths = res_json.get("paths", [])
+        for path in paths:
+            events = path.get("events", [])
+            for event in events:
+                ensure_location_string(event)
+                loc = event.get("location")
+                if loc and ":" in loc:
+                    fl, ln_str = loc.rsplit(":", 1)
+                    if ln_str.isdigit():
+                        event["code"] = dump_source_line(fl, int(ln_str))
+        return res_json.get("paths", [])
     return None
 
 # check_always_implying、
@@ -969,7 +707,7 @@ def dump_source_snippet(file_name: str, start_line: int, end_line: int) -> Optio
     file_path = find_file_path(file_name) 
     if not file_path: return "No such file, please check filename."
     try:
-        file_path = os.path.join(PUT_ROOT_PATH, file_path)
+        file_path = os.path.join(PROJECT_ROOT, file_path)
         with open(file_path, "r") as f:
             lines = f.readlines()
             return "".join(lines[int(start_line) - 1:int(end_line)])
@@ -990,17 +728,16 @@ def dump_source_line(file_name: str, line_number: int) -> Optional[str]:
     """
     file_path = find_file_path(file_name)
     if not file_path: return "No such file, please check filename."
-    file_path = os.path.join(PUT_ROOT_PATH, file_path)
+    file_path = os.path.join(PROJECT_ROOT, file_path)
     snippet = dump_source_snippet(file_name, line_number, line_number)
     return snippet.strip() if snippet else "The line number is invalid or out of range for the file."
 
 def get_eq_position_list(source_location: str) -> Optional[List[int]]:
-    # find-store-cl
     command_caller = CommandCaller()
-    query = {
-        "command" : "find-store-cl",
-        "location" : source_location
-    }
+    payload = _location_query_payload(source_location)
+    if not payload:
+        return None
+    query = {"command": "find-store-cl", **payload}
     res = command_caller.send_query(query)
     if res:
         res_json = json.loads(res)
@@ -1056,9 +793,5 @@ if __name__ == '__main__':
     # # printFunctionBodyByLocation(icfg, "stats_prefix.c:118");
     # print(find_current_function("tiff_jpeg.c:798"))
     # print(get_shortest_path_cond("restart.c:76", "restart.c:121"))
-    # print(find_var_definitions("items.c:1573", "do_run_lru_maintainer_thread"))
-    # print(find_var_decl("items.c:1573", "do_run_lru_maintainer_thread"))
-    # print(libclang_available)
-    # print(find_var_definitions("tiffinfo.c:303", "TIFFTAG_IMAGEWIDTH"))
     # print(dump_source_snippet("tif_dirread.c", 2310, 2330))
     # print(find_callers("EVP_CIPHER_CTX_free"))

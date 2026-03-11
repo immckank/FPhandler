@@ -41,8 +41,6 @@ class FreeAnalysisModel(ABC):
             "find_callers": find_callers,
             "find_function_body": find_function_body,
             "get_path_cond_func_": get_path_cond_func_,
-            "find_var_definitions": find_var_definitions,
-            "find_var_decl": find_var_decl,
         }   
         pass
     
@@ -64,7 +62,7 @@ class FreeAnalysisModel(ABC):
             set_conclusion_desc_free, dump_source_snippet_desc_free, dump_source_line_desc_free, 
             find_current_function_desc_free, find_function_body_desc_free, find_callers_desc_free
         ]
-        project_prompt = f"You are now working for project {PROJECT_NAME}. "
+        project_prompt = f"You are now working for project {PROJECT_LABEL}. "
         project_prompt += PROJECT_DESC + "\n"        
         self.analysis_logger.info(f"Prompt: {alter.to_prompt()}")
         self.result_logger.info(f"\nPrompt: {alter.to_prompt()}\n")
@@ -72,7 +70,16 @@ class FreeAnalysisModel(ABC):
             {"role": "system", "content": SYS_PROMPT + ASSUMPTION_PROMPT},
             {"role": "user", "content": alter.to_prompt() + "\n" + project_prompt}
         ]
-        alter_function_name = find_current_function(alter.source_location)["function_name"]
+        # find_current_function 在失败时返回 {"error": ...}；优先用结构化 fl/ln 发后端
+        func_info = find_current_function(
+            alter.get_source_loc() if hasattr(alter, "get_source_loc") and alter.get_source_loc() else alter.source_location
+        )
+        if isinstance(func_info, dict) and func_info.get("error"):
+            alter_function_name = "unknown"
+        else:
+            alter_function_name = (
+                func_info.get("function_name") if isinstance(func_info, dict) else None
+            ) or "unknown"
         response = self.send_message(messages, allowed_tools)
         if not response.content: response.content = ""
         self.analysis_logger.info(f"Model response: {response.content}")
@@ -209,3 +216,14 @@ class QwenFreeAnalyzer(FreeAnalysisModel):
     
     def responseForAlter(self, alter:memory_defect.MemoryLeak):
         super().responseForAlter(alter)
+
+
+def create_analyzer():
+    """Create the free-form analyzer for the configured LLM_TYPE."""
+    if LLM_TYPE == "Gemini":
+        return GeminiFreeAnalyzer()
+    if LLM_TYPE == "DeepSeek":
+        return DeepSeekFreeAnalyzer()
+    if LLM_TYPE == "Qwen":
+        return QwenFreeAnalyzer()
+    raise ValueError(f"Unknown LLM type: {LLM_TYPE}")

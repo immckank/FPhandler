@@ -5,14 +5,18 @@ import datetime
 import json
 import re
 
+def _sar_basename_stem():
+    """SAR_PATH 去扩展名，用于日志文件名前缀。"""
+    return os.path.splitext(os.path.basename(SAR_PATH))[0]
+
 # 设置日志
 def setup_logger(log_type):
     main_formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     llm_formatter = logging.Formatter("%(message)s")
     time_str = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    sar_stem = _sar_basename_stem()
     if log_type == "main":
-        sar = SAR_ROOT_PATH if sar_name is None else sar_name.split('.')[0]
-        log_file_name = f"{sar}-{time_str}.log"
+        log_file_name = f"{sar_stem}-{time_str}.log"
         # 如果不存在os.path.join(RES_ROOT_PATH, "RUN")创建一个
         if not os.path.exists(os.path.join(RES_ROOT_PATH, "RUN")):
             os.makedirs(os.path.join(RES_ROOT_PATH, "RUN"))
@@ -24,22 +28,22 @@ def setup_logger(log_type):
         logger.addHandler(file_handler)
         return logger
     elif log_type == "result":
-        log_file_name = f"result_{sar_name.split('.')[0]}_{LLM_TYPE}-{ANALYZER_TYPE}-{time_str}.log"
+        log_file_name = f"result_{sar_stem}_{LLM_TYPE}-free-{time_str}.log"
         if not os.path.exists(os.path.join(RES_ROOT_PATH, "RESULT")):
             os.makedirs(os.path.join(RES_ROOT_PATH, "RESULT"))
         log_file_path = os.path.join(RES_ROOT_PATH, "RESULT", log_file_name)
-        logger = logging.getLogger(f"result_{sar_name.split('.')[0]}_{LLM_TYPE}")
+        logger = logging.getLogger(f"result_{sar_stem}_{LLM_TYPE}")
         logger.setLevel(logging.INFO)
         file_handler = logging.FileHandler(log_file_path, mode="a")
         file_handler.setFormatter(llm_formatter)
         logger.addHandler(file_handler)
         return logger
     elif log_type == "analysis":
-        log_file_name = f"analysis_{sar_name.split('.')[0]}_{LLM_TYPE}-{ANALYZER_TYPE}-{time_str}.log"
+        log_file_name = f"analysis_{sar_stem}_{LLM_TYPE}-free-{time_str}.log"
         if not os.path.exists(os.path.join(RES_ROOT_PATH, "TRACE")):
             os.makedirs(os.path.join(RES_ROOT_PATH, "TRACE"))
         log_file_path = os.path.join(RES_ROOT_PATH, "TRACE", log_file_name)
-        logger = logging.getLogger(f"analysis_{sar_name.split('.')[0]}_{LLM_TYPE}")
+        logger = logging.getLogger(f"analysis_{sar_stem}_{LLM_TYPE}")
         logger.setLevel(logging.INFO)
         file_handler = logging.FileHandler(log_file_path, mode="a")
         file_handler.setFormatter(llm_formatter)
@@ -50,11 +54,10 @@ def setup_logger(log_type):
 
 # 找到指定项目中指定文件名的路径
 # def find_file_path(file_name):
-#     for root, dirs, files in os.walk(os.path.join(PUT_ROOT_PATH, PROJECT_NAME)):
+#     for root, dirs, files in os.walk(PROJECT_ROOT):
 #         if file_name in files:
-#             # 路径中不包含PUT_ROOT_PATH
 #             full_path = os.path.join(root, file_name)
-#             return os.path.relpath(full_path, PUT_ROOT_PATH)
+#             return os.path.relpath(full_path, PROJECT_ROOT)
 #     return None
 
 def find_file_path(file_name):
@@ -75,16 +78,20 @@ def find_file_path(file_name):
     # 标准化路径分隔符
     input_dir = input_dir.replace('\\', '/').replace(os.sep, '/')
     
-    # 移除 PROJECT_NAME 前缀（如果存在）
-    if input_dir.startswith(PROJECT_NAME + '/'):
-        input_dir = input_dir[len(PROJECT_NAME) + 1:]
+    # 兼容旧 SAR：路径可能带源码树根目录名前缀，去掉后与 PROJECT_ROOT 下相对路径一致
+    _legacy_prefix = os.path.basename(PROJECT_ROOT) + '/'
+    if input_dir.startswith(_legacy_prefix):
+        input_dir = input_dir[len(_legacy_prefix):]
     
-    # 搜索所有匹配的文件路径
+    # 搜索所有匹配的文件路径（相对 PROJECT_ROOT）
     matching_paths = []
-    for root, dirs, files in os.walk(os.path.join(PUT_ROOT_PATH, PROJECT_NAME)):
+    project_root = os.path.abspath(PROJECT_ROOT)
+    if not os.path.isdir(project_root):
+        return None
+    for root, dirs, files in os.walk(project_root):
         if base_name in files:
             full_path = os.path.join(root, base_name)
-            rel_path = os.path.relpath(full_path, PUT_ROOT_PATH)
+            rel_path = os.path.relpath(full_path, project_root)
             matching_paths.append(rel_path)
     
     # 如果没找到任何匹配
@@ -99,23 +106,97 @@ def find_file_path(file_name):
     # print(f"matching_paths: {matching_paths}")
     if input_dir:
         # 收集所有包含 input_dir 的匹配路径
-        for path in matching_paths:
-            # 标准化路径用于比较
+        for path in list(matching_paths):  # 遍历副本，避免迭代中 remove 漏项
             normalized_path = path.replace('\\', '/').replace(os.sep, '/')
-            
-            # 必须路径结尾能够匹配
             if not normalized_path.endswith(input_dir + '/' + base_name):
-                # 在当前path list中删除这个path
                 matching_paths.remove(path)
-                continue
+        if not matching_paths:
+            return None
     
     return min(matching_paths, key=len)
+
+
+# --- Location protocol: fl / ln / cl (structured) vs location string (LLM tool / legacy) ---
+
+def parse_source_location_to_fl_ln(source_location):
+    """
+    Parse 'path/to/file.c:755' into {"fl", "ln"}; optional cl not in string form.
+    Returns None if invalid. Used at LLM tool entry before send_query.
+    """
+    if not source_location or not isinstance(source_location, str):
+        return None
+    if ":" not in source_location:
+        return None
+    fl, ln_str = source_location.rsplit(":", 1)
+    if not fl or not ln_str.isdigit():
+        return None
+    return {"fl": fl, "ln": int(ln_str)}
+
+
+def source_loc_to_string(fl, ln):
+    """fl + ln -> location string for find_code_line / dump_source_line."""
+    return f"{fl}:{ln}"
+
+
+def normalize_source_loc(source_loc):
+    """
+    Accept dict {"fl", "ln", "cl"?} or string; return dict with fl, ln, cl (cl may be None).
+    """
+    if source_loc is None:
+        return None
+    if isinstance(source_loc, dict):
+        fl = source_loc.get("fl")
+        ln = source_loc.get("ln")
+        if fl is None or ln is None:
+            return None
+        cl = source_loc.get("cl")
+        return {"fl": fl, "ln": int(ln), "cl": int(cl) if cl is not None else None}
+    if isinstance(source_loc, str):
+        d = parse_source_location_to_fl_ln(source_loc)
+        if d:
+            d["cl"] = None
+        return d
+    return None
+
+
+def location_string_from_source_loc(source_loc):
+    """Dict or str -> 'fl:ln' for APIs that still need a string."""
+    d = normalize_source_loc(source_loc)
+    if not d:
+        return None
+    return source_loc_to_string(d["fl"], d["ln"])
+
+
+def find_code_line_fl_ln(fl, ln, strip_whitespace=True):
+    """Read source line using structured fl/ln."""
+    return find_code_line(source_loc_to_string(fl, ln), strip_whitespace)
+
+
+def ensure_location_string(node):
+    """
+    If node has fl+ln but no location string, set node['location'] = 'fl:ln'.
+    Mutates node in place; returns node.
+    """
+    if not isinstance(node, dict):
+        return node
+    if node.get("location"):
+        return node
+    fl = node.get("fl") or node.get("filename")
+    ln = node.get("ln")
+    if ln is None:
+        ln = node.get("line")
+    if fl is not None and ln is not None:
+        node["location"] = source_loc_to_string(fl, int(ln))
+    return node
+
 
 # 根据指定scource_location找到对应的代码行
 def find_code_line(source_location, strip_whitespace=True):
     file_name = source_location.split(":")[0]
     file_path = find_file_path(file_name)
-    file_path = os.path.join(PUT_ROOT_PATH, file_path)
+    if file_path is None:
+        return None
+    file_path = os.path.join(os.path.abspath(PROJECT_ROOT), file_path)
     if not file_path:
         return None
     with open(file_path, 'r') as f:
@@ -143,6 +224,8 @@ def extract_lhs_variable(assignment):
     Returns:
         str: 变量名，如果不是赋值表达式则返回 None
     """
+    if assignment is None or not isinstance(assignment, str):
+        return None
     assignment = assignment.strip()
     
     # 检查是否是return语句（不是赋值）

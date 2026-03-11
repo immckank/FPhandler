@@ -19,32 +19,35 @@ class AlterAnalyzer():
         self.USE_RE = re.compile(
             r"^\s*Use at :\s*\(\s*({.*?})\)"
         )
+        self.ANSI_ESCAPE = re.compile(r'\x1b\[[0-9;]*m')
 
     def get_alter_list(self):
         return self.alter_list
 
     def _parse_location(self, node_detail_str):
-        """Parses location details from a JSON-like string and returns a formatted location string."""
+        """
+        Parses CallICFGNode JSON to structured location {"fl", "ln", "cl"?}.
+        Keeps fl as given (may be relative path); cl optional from SAR.
+        """
         try:
-            # The detail string is not a valid JSON object, needs enclosing braces.
             details = json.loads(node_detail_str)
-            file_name = details.get("fl")
-            # 如果是形如dir/file.c的 取最后文件名
-            # 给定什么形式就先保存什么形式 不要修改
-            # if file_name:
-            #     file_name = file_name.split('/')[-1]
-            line_number = details.get("ln")
-            if not file_name or line_number is None:
+            fl = details.get("fl")
+            ln = details.get("ln")
+            if not fl or ln is None:
                 return None
-            return f"{file_name}:{line_number}"
-        except (json.JSONDecodeError, AttributeError):
-            # Log error or handle cases where parsing fails.
+            out = {"fl": fl, "ln": int(ln)}
+            cl = details.get("cl")
+            if cl is not None:
+                out["cl"] = int(cl)
+            return out
+        except (json.JSONDecodeError, AttributeError, TypeError, ValueError):
             return None
 
-    def read_alter_file(self, alter_file_path, alter_file_name):
+    def read_alter_file(self, sar_path):
+        """sar_path: SAR 文件完整路径（与 config.SAR_PATH 一致）。"""
         self.alter_list = []
-        self.alter_file_name = alter_file_name
-        full_path = os.path.join(alter_file_path, alter_file_name)
+        self.alter_file_name = os.path.basename(sar_path)
+        full_path = sar_path
 
         if not os.path.exists(full_path):
             return 
@@ -53,18 +56,18 @@ class AlterAnalyzer():
             lines = iter(f)
             for line in lines:
                 line = line.strip()
+                line = self.ANSI_ESCAPE.sub('', line).strip()
                 leak_match = self.LEAK_RE.match(line)
                 if not leak_match:
                     continue
 
                 leak_type, node_detail_str = leak_match.groups()
-                # print(leak_type, node_detail_str)
-                location = self._parse_location(node_detail_str)
-                if not location:
+                source_loc = self._parse_location(node_detail_str)
+                if not source_loc:
                     continue
 
                 if leak_type == "NeverFree":
-                    self.alter_list.append(NeverFree(location))
+                    self.alter_list.append(NeverFree(source_loc))
                 elif leak_type == "PartialLeak":
                     try:
                         # Skip the hint line
@@ -82,13 +85,13 @@ class AlterAnalyzer():
                             cond_match = self.COND_PATH_RE.match(free_line)
                             if cond_match:
                                 cond_node_detail_str, cond = cond_match.groups()
-                                cond_location = self._parse_location(cond_node_detail_str)
-                                if cond_location:
-                                    conditional_path = PartialLeak.conditional_path(cond, cond_location)
+                                cond_loc = self._parse_location(cond_node_detail_str)
+                                if cond_loc:
+                                    conditional_path = PartialLeak.conditional_path(cond, cond_loc)
                                     conditional_free_paths.append(conditional_path)
                         except StopIteration:
                             break # End of file
-                    self.alter_list.append(PartialLeak(location, conditional_free_paths))
+                    self.alter_list.append(PartialLeak(source_loc, conditional_free_paths))
                 elif leak_type=="Double Free":
                     double_free_paths = []
                     while True:
@@ -100,13 +103,13 @@ class AlterAnalyzer():
                             cond_match = self.COND_PATH_RE.match(free_line)
                             if cond_match:
                                 cond_node_detail_str, cond = cond_match.groups()
-                                cond_location = self._parse_location(cond_node_detail_str)
-                                if cond_location:
-                                    double_free_path = DoubleFree.double_path(cond, cond_location)
+                                cond_loc = self._parse_location(cond_node_detail_str)
+                                if cond_loc:
+                                    double_free_path = DoubleFree.double_path(cond, cond_loc)
                                     double_free_paths.append(double_free_path)
                         except StopIteration:
                             break
-                    self.alter_list.append(DoubleFree(location, double_free_paths))
+                    self.alter_list.append(DoubleFree(source_loc, double_free_paths))
                 elif leak_type == "Use After Free":
                     nodes_pairs = []
 
@@ -133,7 +136,7 @@ class AlterAnalyzer():
                                 break
 
                             free_node_detail_str = free_match.group(1)
-                            free_location = self._parse_location(free_node_detail_str)
+                            free_loc = self._parse_location(free_node_detail_str)
 
                             try:
                                 free_path_line = next(lines).strip()
@@ -156,7 +159,7 @@ class AlterAnalyzer():
                                         break
 
                                     use_node_detail_str = use_match.group(1)
-                                    use_location = self._parse_location(use_node_detail_str)
+                                    use_loc = self._parse_location(use_node_detail_str)
 
                                     try:
                                         use_path_line = next(lines).strip()
@@ -170,40 +173,39 @@ class AlterAnalyzer():
                                             cond_match = self.COND_PATH_RE.match(cond_line)
                                             if cond_match:
                                                 cond_node_detail_str, cond = cond_match.groups()
-                                                condition_location = self._parse_location(cond_node_detail_str)
+                                                condition_loc = self._parse_location(cond_node_detail_str)
                                                 condition = cond
                                         except StopIteration:
                                             pass
                                     except StopIteration:
                                         break
 
-                                    if use_location:
-                                        # 创建UseNode对象而不是元组
+                                    if use_loc:
                                         use_node = UseAfterFree.UseNode(
-                                            use_location=use_location,
+                                            use_loc=use_loc,
                                             condition=condition,
-                                            condition_location=condition_location
+                                            condition_loc=condition_loc,
                                         )
                                         use_nodes.append(use_node)
 
                                 except StopIteration:
                                     break
 
-                            if free_location and use_nodes:
-                                node_pair = UseAfterFree.NodePair(free_location, use_nodes)
+                            if free_loc and use_nodes:
+                                node_pair = UseAfterFree.NodePair(free_loc, use_nodes)
                                 nodes_pairs.append(node_pair)
 
                         except StopIteration:
                             break
 
                     if nodes_pairs:
-                        self.alter_list.append(UseAfterFree(location, nodes_pairs))
+                        self.alter_list.append(UseAfterFree(source_loc, nodes_pairs))
 
         return self.alter_list
 
 
 if __name__ == "__main__":
     analyzer = AlterAnalyzer()
-    alter_list = analyzer.read_alter_file("ALTER_EXAMPLE", "use_after_free.txt")
+    alter_list = analyzer.read_alter_file(os.path.join("ALTER_EXAMPLE", "use_after_free.txt"))
     for alter in alter_list:
         print(alter.to_prompt())

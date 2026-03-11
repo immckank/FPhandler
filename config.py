@@ -1,27 +1,21 @@
-# program under test 
-PUT_ROOT_PATH = "PUT/libtiff-b9b93f66" 
-# PUT_ROOT_PATH = "PUT/openssl-67dc995e" 
-# PUT_NAME = "openssl"
-PUT_NAME = "libtiff-jpeg"
+# 三路径配置：源码根、bitcode 文件、SAR 文件（均为显式路径，不再拼接）
+# 项目源码根目录（os.walk / 相对路径基准）
+PROJECT_ROOT = "/data/OpenHarmony-4.1-Release"
+# PROJECT_ROOT = "/data/PUT/openssl-67dc995e"
 
-PROJECT_NAME = "libtiff"
-# PROJECT_NAME = "openssl"
-# PROJECT_DESC = "Memcached is a long-running background service (daemon) that continuously runs in the background after the server starts. It listens on a specified network port and manages a pre-allocated block of memory."
-PROJECT_DESC = "Libtiff is a widely-used software library that provides a set of programming interfaces for applications. It does not run as a standalone program but is linked by other software to handle the reading and writing of TIFF (Tagged Image File Format) image files."
-# PROJECT_DESC = "OpenSSL is a widely-used software library that does not run as a standalone program but is linked by other software to handle cryptographic functions and secure network protocols (like TLS/SSL)."
-# static analysis result
-SAR_ROOT_PATH = "SAR"
-# sar_name = "openssl-67dc995e.txt"
-# sar_name = "libtiff-57449991.txt"
-sar_name = "libtiff-b9b93f66-jpeg-debug.txt"
-# sar_name = "openssl-67dc995e.txt"
-alter_index = 0
+# bitcode 完整路径（graph-reader 与 path-cond 等统一使用）
+BITCODE_PATH = "/data/bundle_00.bc"
+# BITCODE_PATH = "/data/OpenHarmony-4.1-Release.bc"
 
-# result
+# SAR 完整路径（静态分析结果文本）
+SAR_PATH = "SAR/bundle00_leak.txt"
+# SAR_PATH = "SAR/openssl-67dc995e.txt"
+
+# LLM 提示用展示名
+PROJECT_LABEL = "OpenHarmony-4.1-Release"
+# PROJECT_LABEL = "openssl"
+PROJECT_DESC = ""
+# PROJECT_DESC = "OpenSSL is a widely-used software library ..."
+
 RES_ROOT_PATH = "RES"
-
-# LLM_TYPE = "DeepSeek"
 LLM_TYPE = "DeepSeek"
-
-# free / function / path
-ANALYZER_TYPE = "path"
