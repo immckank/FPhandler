@@ -15,8 +15,8 @@ PROJECT_ROOT = os.path.abspath(config.PROJECT_ROOT)
 BITCODE_PATH = config.BITCODE_PATH
 
 # source_location 格式校验：支持相对路径（如 ../../../dir/file.c:755），后端允许此类输入；
-# 规则：冒号仅用于分隔行号；路径任意非空且以 .c / .h / .cpp 结尾
-SOURCE_LOCATION_PATTERN = re.compile(r'^[^:]+\.(c|h|cpp):\d+$')
+# 规则：冒号仅用于分隔行号；路径任意非空且以 .c / .h / .cpp / .inl 结尾
+SOURCE_LOCATION_PATTERN = re.compile(r'^[^:]+\.(c|h|cpp|inl):\d+$')
 
 
 def _strip_error_false(res_json: dict) -> None:
