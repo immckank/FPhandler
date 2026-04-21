@@ -2,6 +2,7 @@
 .idea
 .pytest_cache
 .pytest_cache
+.cursor
 __pycache__
 pipcache/
 /GRAPH
