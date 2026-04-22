@@ -1,6 +1,6 @@
 import itertools
 
-from memory_defect import NeverFree, DoubleFree, PartialLeak, UseAfterFree
+from memory_defect import NeverFree, DoubleFree, PartialLeak, UseAfterFree, BufferOverflow
 from utils import *
 
 class AlterAnalyzer():
@@ -20,6 +20,15 @@ class AlterAnalyzer():
             r"^\s*Use at :\s*\(\s*({.*?})\)"
         )
         self.ANSI_ESCAPE = re.compile(r'\x1b\[[0-9;]*m')
+        self.BOF_HEADER_RE = re.compile(
+            r"\[BufferOverflowChecker\]\s*Buffer Overflow Error detected!"
+        )
+        self.BOF_BASE_VALVAR_RE = re.compile(r"^\s*Base:\s*ValVar ID:\s*(\d+)\s*$")
+        self.BOF_DBG_LOC_RE = re.compile(
+            r'\{\s*"ln"\s*:\s*(\d+)\s*,\s*"cl"\s*:\s*(\d+)\s*,\s*"fl"\s*:\s*"([^"]+)"\s*\}'
+        )
+        self.BOF_BUFFER_INDEX_RE = re.compile(r"^\s*Buffer index:\s*(.+)\s*$")
+        self.BOF_BUFFER_SIZE_RE = re.compile(r"^\s*Buffer size:\s*(.+)\s*$")
 
     def get_alter_list(self):
         return self.alter_list
@@ -43,6 +52,71 @@ class AlterAnalyzer():
         except (json.JSONDecodeError, AttributeError, TypeError, ValueError):
             return None
 
+    def _parse_bof_entry(self, lines):
+        """
+        在已匹配 [BufferOverflowChecker] 头行之后，从同一迭代器读取一条 BOF 记录。
+        source_loc 使用 IR 行尾 dbg 中的 fl/ln/cl，作为警报发生位置（与 run.py 去重键一致）。
+        """
+        val_var_id = None
+        ir_instruction = None
+        source_loc = None
+        try:
+            while source_loc is None:
+                nl = next(lines)
+                nl = self.ANSI_ESCAPE.sub("", nl).strip()
+                if not nl:
+                    continue
+                m_base = self.BOF_BASE_VALVAR_RE.match(nl)
+                if m_base:
+                    val_var_id = int(m_base.group(1))
+                    continue
+                m_dbg = self.BOF_DBG_LOC_RE.search(nl)
+                if m_dbg:
+                    ir_instruction = nl.strip()
+                    source_loc = {
+                        "fl": m_dbg.group(3),
+                        "ln": int(m_dbg.group(1)),
+                        "cl": int(m_dbg.group(2)),
+                    }
+                    break
+                return None
+        except StopIteration:
+            return None
+
+        buf_idx = None
+        buf_size = None
+        try:
+            while buf_idx is None:
+                nl = next(lines)
+                nl = self.ANSI_ESCAPE.sub("", nl).strip()
+                if not nl:
+                    continue
+                m_idx = self.BOF_BUFFER_INDEX_RE.match(nl)
+                if m_idx:
+                    buf_idx = m_idx.group(1).strip()
+                    break
+                return None
+            while buf_size is None:
+                nl = next(lines)
+                nl = self.ANSI_ESCAPE.sub("", nl).strip()
+                if not nl:
+                    continue
+                m_sz = self.BOF_BUFFER_SIZE_RE.match(nl)
+                if m_sz:
+                    buf_size = m_sz.group(1).strip()
+                    break
+                return None
+        except StopIteration:
+            return None
+
+        return BufferOverflow(
+            source_loc,
+            val_var_id=val_var_id,
+            ir_instruction=ir_instruction,
+            buffer_index_text=buf_idx,
+            buffer_size_text=buf_size,
+        )
+
     def read_alter_file(self, sar_path):
         """sar_path: SAR 文件完整路径（与 config.SAR_PATH 一致）。"""
         self.alter_list = []
@@ -59,6 +133,10 @@ class AlterAnalyzer():
                 line = self.ANSI_ESCAPE.sub('', line).strip()
                 leak_match = self.LEAK_RE.match(line)
                 if not leak_match:
+                    if self.BOF_HEADER_RE.search(line):
+                        bof = self._parse_bof_entry(lines)
+                        if bof:
+                            self.alter_list.append(bof)
                     continue
 
                 leak_type, node_detail_str = leak_match.groups()

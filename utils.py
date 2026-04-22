@@ -1,19 +1,31 @@
 import os
 from config import *
+import config as _cfg
 import logging
-import datetime
+import datetime as _dt
 import json
 import re
 
 def _sar_basename_stem():
-    """SAR_PATH 去扩展名，用于日志文件名前缀。"""
-    return os.path.splitext(os.path.basename(SAR_PATH))[0]
+    """SAR_PATH 去扩展名，用于日志文件名前缀；批处理可由 config.RUN_LOG_STEM 覆盖。"""
+    stem = getattr(_cfg, "RUN_LOG_STEM", None)
+    if stem:
+        return stem
+    return os.path.splitext(os.path.basename(_cfg.SAR_PATH))[0]
+
+
+def _session_time_str():
+    ts = getattr(_cfg, "RUN_SESSION_TIME_STR", None)
+    if ts:
+        return ts
+    return _dt.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+
 
 # 设置日志
 def setup_logger(log_type):
     main_formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     llm_formatter = logging.Formatter("%(message)s")
-    time_str = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    time_str = _session_time_str()
     sar_stem = _sar_basename_stem()
     if log_type == "main":
         log_file_name = f"{sar_stem}-{time_str}.log"

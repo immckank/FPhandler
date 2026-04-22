@@ -57,7 +57,12 @@ class FreeAnalysisModel(ABC):
     def responseToAlter(self, alter_prompt, user_prompt=""):
         pass
 
-    def responseForAlter(self, alter:memory_defect.MemoryLeak):
+    def responseForAlter(self, alter: memory_defect.MemoryDefect):
+        """
+        返回 True 表示模型已调用 set_conclusion 并得到成功结论；
+        run.py 仅在此时把 alter.get_source_loc() 规范化为 fl:ln 写入去重文件。
+        去重键由各缺陷类构造时的 source_loc（警报发生位置）决定，与是否 MemoryLeak 无关。
+        """
         allowed_tools = [
             set_conclusion_desc_free, dump_source_snippet_desc_free, dump_source_line_desc_free, 
             find_current_function_desc_free, find_function_body_desc_free, find_callers_desc_free
@@ -110,7 +115,7 @@ class FreeAnalysisModel(ABC):
                     function_response["function_name"] = alter_function_name
                     self.analysis_logger.info(f"Tool response: {function_response}")
                     self.result_logger.info(f"{function_response}")
-                    return
+                    return True
                 elif tool_function_name in self.tool_functions:
                     function_response = self.tool_functions[tool_function_name](**tool_arguments)
                 else:
@@ -133,7 +138,7 @@ class FreeAnalysisModel(ABC):
             if not response.content: response.content = ""
             self.analysis_logger.info(f"Model response: {response.content}")
             messages.append(response)
-        return
+        return False
 
 class GeminiFreeAnalyzer(FreeAnalysisModel):
     def __init__(self, model_name="gemini-2.5-flash"):
@@ -155,6 +160,7 @@ class GeminiFreeAnalyzer(FreeAnalysisModel):
         return response.text
     
     def responseForAlter(self, alter, user_prompt="", allowed_tool_names = []):
+        # 与 OpenAI 路径不同；批处理去重以 FreeAnalysisModel 为准
         allowed_tools = []
         for tool_name in allowed_tool_names:
             if tool_name == "dump_source_snippet":
@@ -199,8 +205,8 @@ class DeepSeekFreeAnalyzer(FreeAnalysisModel):
     def responseToAlter(self, alter_prompt, user_prompt=""):
         return None
     
-    def responseForAlter(self, alter:memory_defect.MemoryLeak):
-        super().responseForAlter(alter)
+    def responseForAlter(self, alter: memory_defect.MemoryDefect):
+        return super().responseForAlter(alter)
 
 class QwenFreeAnalyzer(FreeAnalysisModel):
     def __init__(self, model_name="qwen3-max"):
@@ -214,8 +220,8 @@ class QwenFreeAnalyzer(FreeAnalysisModel):
     def responseToAlter(self, alter_prompt, user_prompt=""):
         return None
     
-    def responseForAlter(self, alter:memory_defect.MemoryLeak):
-        super().responseForAlter(alter)
+    def responseForAlter(self, alter: memory_defect.MemoryDefect):
+        return super().responseForAlter(alter)
 
 
 def create_analyzer():

@@ -310,3 +310,83 @@ class UseAfterFree(MemoryDefect):
             super().to_goal_prompt()
             + "there exists a path on control-flow that memory is freed and then used without reallocation in between."
         )
+
+
+class BufferOverflow(MemoryDefect):
+    """缓冲区溢出：source_loc 为分析器报告的源码位置（dbg fl/ln），与 run.py 按位置去重一致。"""
+
+    def __init__(
+        self,
+        source_loc,
+        val_var_id=None,
+        ir_instruction=None,
+        buffer_index_text=None,
+        buffer_size_text=None,
+    ):
+        super().__init__("BufferOverflow", source_loc)
+        self.val_var_id = val_var_id
+        self.ir_instruction = ir_instruction
+        self.buffer_index_text = buffer_index_text
+        self.buffer_size_text = buffer_size_text
+
+    def get_val_var_id(self):
+        return self.val_var_id
+
+    def get_ir_instruction(self):
+        return self.ir_instruction
+
+    def get_buffer_index_text(self):
+        return self.buffer_index_text
+
+    def get_buffer_size_text(self):
+        return self.buffer_size_text
+
+    def to_prompt(self):
+        loc = self.source_location
+        type_prompt = f"Type of bug: {self.defect_type}.\n"
+        guidance_prompt = (
+            "Guidance on triaging this type of bug:\n"
+            "The warning is a true positive (TP) if:\n"
+            "  - There exists a feasible path where the accessed index/offset lies outside the valid buffer bounds\n"
+            "  - The buffer size and index ranges from the analyzer are consistent with an out-of-bounds access\n\n"
+            "The warning is a false positive (FP) if:\n"
+            "  - Infeasible path constraints make the overflow unreachable\n"
+            "  - The analyzer over-approximated buffer size or under-approximated valid index range\n"
+            "  - A larger allocation or different object is actually used at runtime than modeled\n"
+        )
+        site_line = _code_line_for_loc(self._source_loc) or ""
+        site_prompt = f"Alert source location: {loc}\n"
+        site_code = f"Source code at alert site: {site_line}\n\n"
+
+        detail_prompt = "Checker details:\n"
+        if self.val_var_id is not None:
+            detail_prompt += f"  ValVar ID: {self.val_var_id}\n"
+        if self.ir_instruction:
+            detail_prompt += f"  LLVM IR (with dbg): {self.ir_instruction}\n"
+        if self.buffer_index_text:
+            detail_prompt += f"  Buffer index: {self.buffer_index_text}\n"
+        if self.buffer_size_text:
+            detail_prompt += f"  Buffer size: {self.buffer_size_text}\n"
+        detail_prompt += "\n"
+
+        message_prompt = (
+            f"Message: A buffer overflow may occur at {loc} according to the index/size "
+            "ranges above relative to the modeled buffer.\n\n"
+        )
+        task_prompt = "Task: Please classify this alert as TP, FP, or UNCERTAIN, and provide your reasoning."
+
+        return (
+            type_prompt
+            + guidance_prompt
+            + site_prompt
+            + site_code
+            + detail_prompt
+            + message_prompt
+            + task_prompt
+        )
+
+    def to_goal_prompt(self):
+        return (
+            super().to_goal_prompt()
+            + "there exists a feasible execution where a memory access exceeds the allocated buffer bounds."
+        )

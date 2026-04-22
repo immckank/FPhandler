@@ -3,6 +3,13 @@ import json
 import subprocess
 import atexit
 import time
+import shlex
+import shutil
+from pathlib import Path
+
+_SCRIPT_DIR = Path(__file__).resolve().parent
+_DEFAULT_SETUP_SH = _SCRIPT_DIR.parent / "SVFmemplus" / "setup.sh"
+
 
 class CommandCaller:
     _instance = None
@@ -13,14 +20,22 @@ class CommandCaller:
             cls._instance = super(CommandCaller, cls).__new__(cls)
         return cls._instance
 
-    def __init__(self, setupbash_path="../SVFmemplus/setup.sh", startup_timeout_sec: float = 12120.0):
+    def __init__(self, setupbash_path=None, startup_timeout_sec: float = 12120.0):
         if getattr(self, "_initialized", False):
             return
         self._initialized = True
-        self.setupbash_path = setupbash_path
+        if setupbash_path is None:
+            p = _DEFAULT_SETUP_SH
+        else:
+            p = Path(setupbash_path)
+            if not p.is_absolute():
+                p = (_SCRIPT_DIR / p).resolve()
+            else:
+                p = p.resolve()
+        self.setupbash_path = str(p)
         self.startup_timeout_sec = startup_timeout_sec
 
-        # 1) source setup.sh into current env
+        # 1) 在 setup.sh 所在目录下 source（与手动 cd 到 SVFmemplus 再 source 一致），并合并进当前进程环境
         self._setup_env()
 
         # 2) start graph-reader <bitcode_path>
@@ -33,14 +48,37 @@ class CommandCaller:
         atexit.register(self._cleanup_process)
 
     def _setup_env(self):
-        command = f"bash -c 'source {self.setupbash_path} && env'"
-        proc = subprocess.Popen(command, stdout=subprocess.PIPE, shell=True)
-        for line in proc.stdout:
-            key, _, value = line.decode("utf-8").partition("=")
-            os.environ[key] = value.strip()
-        proc.communicate()
-        proc.wait()
-        # environment sourced
+        setup = Path(self.setupbash_path)
+        if not setup.is_file():
+            raise FileNotFoundError(
+                f"未找到 setup.sh: {setup}（请确认 SVFmemplus 路径或传入 setupbash_path）"
+            )
+        setup_dir = setup.parent
+        inner = (
+            f"cd -- {shlex.quote(str(setup_dir))} && "
+            f"source ./{shlex.quote(setup.name)} && env"
+        )
+        proc = subprocess.run(
+            ["bash", "-lc", inner],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"source setup.sh 失败 (exit {proc.returncode}): {proc.stderr.strip() or proc.stdout.strip()}"
+            )
+        for line in proc.stdout.splitlines():
+            if not line or line.startswith("#"):
+                continue
+            key, _, value = line.partition("=")
+            if key:
+                os.environ[key] = value
+        if not shutil.which("graph-reader", path=os.environ.get("PATH", "")):
+            raise FileNotFoundError(
+                "PATH 中仍找不到 graph-reader：请先在 SVFmemplus 下编译生成 "
+                "Release-build/bin/graph-reader（或 Debug），并确认 setup.sh 能正确 export PATH。"
+            )
 
     def _start_graph_reader_process(self):
         if CommandCaller._process is not None and CommandCaller._process.poll() is None:
