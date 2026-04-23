@@ -14,6 +14,7 @@ _DEFAULT_SETUP_SH = _SCRIPT_DIR.parent / "SVFmemplus" / "setup.sh"
 class CommandCaller:
     _instance = None
     _process = None
+    _active_bitcode_path = None
 
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
@@ -38,13 +39,9 @@ class CommandCaller:
         # 1) 在 setup.sh 所在目录下 source（与手动 cd 到 SVFmemplus 再 source 一致），并合并进当前进程环境
         self._setup_env()
 
-        # 2) start graph-reader <bitcode_path>
-        self._start_graph_reader_process()
-        
-        # 3) wait until we see the ready signal from C++
-        self._wait_until_ready()
-        
-        # 4) register cleanup
+        # graph-reader 在 ensure_bitcode_for_sar 或首次 send_query 时再启动（支持按 SAR 切换 .bc）
+
+        # 2) register cleanup
         atexit.register(self._cleanup_process)
 
     def _setup_env(self):
@@ -80,16 +77,16 @@ class CommandCaller:
                 "Release-build/bin/graph-reader（或 Debug），并确认 setup.sh 能正确 export PATH。"
             )
 
-    def _start_graph_reader_process(self):
-        if CommandCaller._process is not None and CommandCaller._process.poll() is None:
-            return
+    def _start_graph_reader_process_with_path(self, bitcode_path: str):
+        if CommandCaller._process is not None:
+            if CommandCaller._process.poll() is None:
+                return
+            CommandCaller._process = None
+        bitcode_path = os.path.abspath(os.path.expanduser(bitcode_path))
+        if not os.path.isfile(bitcode_path):
+            raise FileNotFoundError(f"bitcode 文件不存在: {bitcode_path}")
 
-        from config import BITCODE_PATH
-        bitcode_path = BITCODE_PATH
-
-        command = ['graph-reader', '-stat=false', bitcode_path]
-        # command = ['graph-reader', bitcode_path]
-        # start graph-reader
+        command = ["graph-reader", "-stat=false", bitcode_path]
         CommandCaller._process = subprocess.Popen(
             command,
             stdin=subprocess.PIPE,
@@ -97,9 +94,29 @@ class CommandCaller:
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
-            env=os.environ
+            env=os.environ,
         )
-        # process started
+
+    def ensure_bitcode_for_sar(self, sar_path: str) -> str:
+        """按 SAR 解析 .bc；与当前 graph-reader 所用路径不同时会重启子进程。"""
+        from utils import resolve_bitcode_path_for_sar
+
+        path = os.path.abspath(resolve_bitcode_path_for_sar(sar_path))
+        if not os.path.isfile(path):
+            raise FileNotFoundError(
+                f"与 SAR 同名的 bitcode 不存在: {path}（SAR: {sar_path}）"
+            )
+        if (
+            CommandCaller._active_bitcode_path == path
+            and CommandCaller._process is not None
+            and CommandCaller._process.poll() is None
+        ):
+            return path
+        self._cleanup_process()
+        CommandCaller._active_bitcode_path = path
+        self._start_graph_reader_process_with_path(path)
+        self._wait_until_ready()
+        return path
 
     def _wait_until_ready(self):
         if CommandCaller._process is None:
@@ -128,7 +145,21 @@ class CommandCaller:
 
     def send_query(self, query_json: dict) -> str:
         if CommandCaller._process is None or CommandCaller._process.poll() is not None:
-            self._start_graph_reader_process()
+            bp = CommandCaller._active_bitcode_path
+            if not bp:
+                from config import BITCODE_PATH as _cfg_bp
+
+                if _cfg_bp and str(_cfg_bp).strip():
+                    bp = os.path.abspath(os.path.expanduser(str(_cfg_bp).strip()))
+            if not bp:
+                return json.dumps(
+                    {
+                        "error": "GraphReader process not available: call "
+                        "ensure_bitcode_for_sar(sar_path) first, or set BITCODE_PATH in config."
+                    }
+                )
+            CommandCaller._active_bitcode_path = bp
+            self._start_graph_reader_process_with_path(bp)
             self._wait_until_ready()
             if CommandCaller._process is None or CommandCaller._process.poll() is not None:
                 return json.dumps({"error": "GraphReader process not available."})
@@ -151,18 +182,20 @@ class CommandCaller:
         return response_line
 
     def _cleanup_process(self):
-        if CommandCaller._process and CommandCaller._process.poll() is None:
+        proc = CommandCaller._process
+        if proc is None:
+            return
+        if proc.poll() is None:
             try:
-                CommandCaller._process.stdin.write(json.dumps({"command": "exit"}) + '\n')
-                CommandCaller._process.stdin.flush()
-                CommandCaller._process.stdin.close()
-                CommandCaller._process.wait(timeout=5)
-                if CommandCaller._process.poll() is None:
-                    CommandCaller._process.terminate()
-            except Exception as e:
+                proc.stdin.write(json.dumps({"command": "exit"}) + "\n")
+                proc.stdin.flush()
+                proc.stdin.close()
+                proc.wait(timeout=5)
+                if proc.poll() is None:
+                    proc.terminate()
+            except Exception:
                 pass
-            finally:
-                CommandCaller._process = None
+        CommandCaller._process = None
 
 if __name__ == '__main__':
     # Simple manual test using the commands from options.txt (1-8)

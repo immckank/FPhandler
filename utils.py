@@ -6,6 +6,18 @@ import datetime as _dt
 import json
 import re
 
+
+def resolve_bitcode_path_for_sar(sar_path: str) -> str:
+    """若 BITCODE_PATH 非空则用其；否则在 LINKED_BC_DIR 下使用与 SAR 文件同主名的 .bc。"""
+    explicit = getattr(_cfg, "BITCODE_PATH", None)
+    if explicit is not None and str(explicit).strip():
+        return os.path.abspath(os.path.expanduser(str(explicit).strip()))
+    linked = getattr(_cfg, "LINKED_BC_DIR", None) or "/data/linked"
+    linked = os.path.abspath(os.path.expanduser(str(linked).strip()))
+    stem = os.path.splitext(os.path.basename(sar_path))[0]
+    return os.path.join(linked, stem + ".bc")
+
+
 def _sar_basename_stem():
     """SAR_PATH 去扩展名，用于日志文件名前缀；批处理可由 config.RUN_LOG_STEM 覆盖。"""
     stem = getattr(_cfg, "RUN_LOG_STEM", None)

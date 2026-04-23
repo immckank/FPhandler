@@ -1,7 +1,7 @@
 import logging
 import os
+import sys
 from datetime import datetime
-import threading
 
 from config import *
 import config as _cfg
@@ -78,7 +78,40 @@ def _alter_location_key(alter):
         if hasattr(alter, "get_source_loc") and alter.get_source_loc()
         else None
     )
+    base_loc = location_string_from_source_loc(loc)
+    if not base_loc:
+        return None
+    defect_type = (
+        alter.get_defect_type()
+        if hasattr(alter, "get_defect_type")
+        else getattr(alter, "defect_type", None)
+    )
+    defect_type = (str(defect_type).strip() if defect_type is not None else "") or "UnknownDefect"
+    # 新格式：<defect_type>|<fl:ln>，用于区分不同缺陷类型的同一源码位置。
+    return f"{defect_type}|{base_loc}"
+
+
+def _alter_location_key_legacy(alter):
+    """兼容历史去重文件中的旧键格式：仅 fl:ln。"""
+    loc = (
+        alter.get_source_loc()
+        if hasattr(alter, "get_source_loc") and alter.get_source_loc()
+        else None
+    )
     return location_string_from_source_loc(loc)
+
+
+def _validate_sar_paths(paths, logger):
+    """启动前检查：路径存在且为普通文件。"""
+    missing = [p for p in paths if not os.path.isfile(p)]
+    if missing:
+        for p in missing:
+            logger.error("SAR 不存在或不是文件: %s", p)
+        return False
+    if not paths:
+        logger.error("SAR 列表为空")
+        return False
+    return True
 
 
 if __name__ == "__main__":
@@ -95,6 +128,8 @@ if __name__ == "__main__":
     main_logger = setup_logger(log_type="main")
     main_logger.info("start")
     main_logger.info("SAR files: %s", sar_paths)
+    if not _validate_sar_paths(sar_paths, main_logger):
+        sys.exit(1)
 
     analyzed_path = getattr(_cfg, "ANALYZED_LOCATIONS_FILE", None) or os.path.join(
         RES_ROOT_PATH, "analyzed_allocation_locations.txt"
@@ -104,8 +139,7 @@ if __name__ == "__main__":
         "dedupe: loaded %d keys from %s", len(analyzed_keys), analyzed_path
     )
 
-    # Start CommandCaller initialization in the background; do not block main flow
-    threading.Thread(target=CommandCaller, kwargs={}, daemon=True).start()
+    graph_caller = CommandCaller()
     reader = AlterAnalyzer()
     analyzer = create_analyzer()
 
@@ -117,14 +151,23 @@ if __name__ == "__main__":
     session_seen_loc_keys = set()
 
     for sar_path in sar_paths:
+        # 1) 读取缺陷条目
         alter_list = reader.read_alter_file(sar_path)
         alter_num = len(alter_list)
         main_logger.info("file %s — %d alerts", sar_path, alter_num)
+
+        # 2) 去重：历史已分析 + 本次运行内同位置只保留一条待分析
+        pending = []
         for i in range(alter_num):
             global_idx += 1
             alter = alter_list[i]
             loc_key = _alter_location_key(alter)
-            if loc_key and loc_key in analyzed_keys:
+            legacy_loc_key = _alter_location_key_legacy(alter)
+            # 兼容旧格式去重键：fl:ln
+            if loc_key and (
+                loc_key in analyzed_keys
+                or (legacy_loc_key and legacy_loc_key in analyzed_keys)
+            ):
                 skipped += 1
                 main_logger.info(
                     "skip (already analyzed) [%s] file %s index %d/%d",
@@ -144,11 +187,29 @@ if __name__ == "__main__":
                     alter_num,
                 )
                 continue
+            pending.append((global_idx, i, alter, loc_key))
             if loc_key:
                 session_seen_loc_keys.add(loc_key)
+
+        if not pending:
+            main_logger.info(
+                "file %s — no alerts to analyze after dedupe; skip graph-reader / LLM",
+                os.path.basename(sar_path),
+            )
+            continue
+
+        # 3) 有待分析项：启动 graph-reader（按 SAR 解析 .bc），再跑 LLM Agent
+        bc_path = graph_caller.ensure_bitcode_for_sar(sar_path)
+        main_logger.info(
+            "bitcode for %s -> %s (%d alert(s) to analyze)",
+            sar_path,
+            bc_path,
+            len(pending),
+        )
+        for gidx, i, alter, loc_key in pending:
             main_logger.info(
                 "analysing global %d — %s index %d/%d",
-                global_idx,
+                gidx,
                 os.path.basename(sar_path),
                 i + 1,
                 alter_num,
@@ -171,9 +232,8 @@ if __name__ == "__main__":
         analyzed_path,
     )
 
-    # After analysis completes, explicitly ask graph-reader to exit
+    # 若曾启动 graph-reader，优雅退出（避免 send_query 在未启动时尝试拉起进程）
     try:
-        caller = CommandCaller()
-        caller.send_query({"command": "exit"})
+        CommandCaller()._cleanup_process()
     except Exception:
         pass

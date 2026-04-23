@@ -7,6 +7,7 @@ from openai import OpenAI
 import json
 import os
 import logging
+import time
 
 import memory_defect
 
@@ -45,12 +46,31 @@ class FreeAnalysisModel(ABC):
         pass
     
     def send_message(self, messages, tools=""):
-        response = self.client.chat.completions.create(
-            model=self.model_name,
-            messages=messages,
-            tools=tools
-        )
-        return response.choices[0].message 
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model_name,
+                    messages=messages,
+                    tools=tools
+                )
+                if response and getattr(response, "choices", None):
+                    return response.choices[0].message
+                self.analysis_logger.error(
+                    "LLM returned empty response/choices (attempt %d/%d)",
+                    attempt,
+                    max_attempts,
+                )
+            except Exception as e:
+                self.analysis_logger.error(
+                    "LLM request failed (attempt %d/%d): %s",
+                    attempt,
+                    max_attempts,
+                    str(e),
+                )
+            if attempt < max_attempts:
+                time.sleep(1.5 * attempt)
+        return None
     
     
     @abstractmethod
@@ -86,10 +106,19 @@ class FreeAnalysisModel(ABC):
                 func_info.get("function_name") if isinstance(func_info, dict) else None
             ) or "unknown"
         response = self.send_message(messages, allowed_tools)
-        if not response.content: response.content = ""
-        self.analysis_logger.info(f"Model response: {response.content}")
+        if response is None:
+            err = {
+                "classification": "UNCERTAIN",
+                "reason": "LLM returned empty/invalid response before any tool call.",
+                "function_name": alter_function_name,
+            }
+            self.analysis_logger.error(f"Model response is None: {err}")
+            self.result_logger.info(f"{err}")
+            return False
+        response_content = getattr(response, "content", None) or ""
+        self.analysis_logger.info(f"Model response: {response_content}")
         messages.append(response)
-        while response.tool_calls:
+        while getattr(response, "tool_calls", None):
             for tool_call in response.tool_calls:
                 tool_function_name = tool_call.function.name
                 try:
@@ -135,9 +164,24 @@ class FreeAnalysisModel(ABC):
                 )
             # Send the tool responses back to the model
             response = self.send_message(messages, allowed_tools)
-            if not response.content: response.content = ""
-            self.analysis_logger.info(f"Model response: {response.content}")
+            if response is None:
+                err = {
+                    "classification": "UNCERTAIN",
+                    "reason": "LLM returned empty/invalid response after tool call.",
+                    "function_name": alter_function_name,
+                }
+                self.analysis_logger.error(f"Model response is None: {err}")
+                self.result_logger.info(f"{err}")
+                return False
+            response_content = getattr(response, "content", None) or ""
+            self.analysis_logger.info(f"Model response: {response_content}")
             messages.append(response)
+        if response_content.strip():
+            self.result_logger.info(
+                "{'classification': 'UNCERTAIN', 'reason': 'Model returned text only without tool call.', 'raw_response': %s, 'function_name': %r}",
+                repr(response_content),
+                alter_function_name,
+            )
         return False
 
 class GeminiFreeAnalyzer(FreeAnalysisModel):

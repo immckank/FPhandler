@@ -1,22 +1,24 @@
 import os
 
-# 三路径配置：源码根、bitcode 文件、SAR 文件（均为显式路径，不再拼接）
+# 路径配置：源码根、bitcode（显式或按 SAR 在 LINKED_BC_DIR 同名解析）、SAR
 # 项目源码根目录（os.walk / 相对路径基准）
 PROJECT_ROOT = "/data/OpenHarmony-4.0-Release"
 # PROJECT_ROOT = "/data/PUT/openssl-67dc995e"
 
-# bitcode 完整路径（graph-reader 与 path-cond 等统一使用）
-BITCODE_PATH = "/data/linked/base_security_00.bc"
+# bitcode：非空时为固定路径；空字符串则在 LINKED_BC_DIR 下按当前 SAR 基名（无扩展名）+ ".bc" 自动解析
+LINKED_BC_DIR = "/data/linked"
+BITCODE_PATH = ""
 # BITCODE_PATH = "/data/OpenHarmony-4.1-Release.bc"
 
 # SAR 完整路径（无批处理目录或目录无效时作为唯一输入）
-SAR_PATH = "SAR/oh-4.0-release-leak/base_security/base_security_00.txt"
+SAR_PATH = ""
 # SAR_PATH = "SAR/openssl-67dc995e.txt"
 
 # 批处理：SAR_BATCH_DIRS 非空时优先，按列表顺序依次扫各目录下全部 .txt；否则用 SAR_BATCH_DIR 单目录
 SAR_BATCH_DIRS = [
-    "SAR/oh-4.0-release-leak/foundation_communication",
-    "SAR/oh-4.0-release-leak/foundation_systemabilitymgr",
+    "SAR/oh-4.0-release-uaf/base_security",
+    "SAR/oh-4.0-release-uaf/foundation_communication",
+    "SAR/oh-4.0-release-uaf/foundation_systemabilitymgr",
 ]
 # SAR_BATCH_DIRS = []
 

@@ -128,8 +128,14 @@ class AlterAnalyzer():
 
         with open(full_path, 'r') as f:
             lines = iter(f)
-            for line in lines:
-                line = line.strip()
+            # 必须用 next(lines) 驱动外层循环：内层会把未消费行 chain 回 lines，
+            # 若用 for line in lines，迭代器在循环入口已固定，推回的行永远不会再被外层读到。
+            while True:
+                try:
+                    raw_line = next(lines)
+                except StopIteration:
+                    break
+                line = raw_line.strip()
                 line = self.ANSI_ESCAPE.sub('', line).strip()
                 leak_match = self.LEAK_RE.match(line)
                 if not leak_match:
@@ -245,13 +251,15 @@ class AlterAnalyzer():
                                             lines = itertools.chain([use_path_line], lines)
 
                                         condition = None
-                                        condition_location = None
+                                        condition_loc = None
                                         try:
                                             cond_line = next(lines).strip()
                                             cond_match = self.COND_PATH_RE.match(cond_line)
                                             if cond_match:
                                                 cond_node_detail_str, cond = cond_match.groups()
-                                                condition_loc = self._parse_location(cond_node_detail_str)
+                                                condition_loc = self._parse_location(
+                                                    cond_node_detail_str
+                                                )
                                                 condition = cond
                                         except StopIteration:
                                             pass
