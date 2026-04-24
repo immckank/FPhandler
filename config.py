@@ -16,9 +16,7 @@ SAR_PATH = ""
 
 # 批处理：SAR_BATCH_DIRS 非空时优先，按列表顺序依次扫各目录下全部 .txt；否则用 SAR_BATCH_DIR 单目录
 SAR_BATCH_DIRS = [
-    "SAR/oh-4.0-release-uaf/base_security",
-    "SAR/oh-4.0-release-uaf/foundation_communication",
-    "SAR/oh-4.0-release-uaf/foundation_systemabilitymgr",
+    "SAR/oh-4.0-release-uninit/foundation_communication",
 ]
 # SAR_BATCH_DIRS = []
 

@@ -390,3 +390,55 @@ class BufferOverflow(MemoryDefect):
             super().to_goal_prompt()
             + "there exists a feasible execution where a memory access exceeds the allocated buffer bounds."
         )
+
+
+class UninitUse(MemoryDefect):
+    """未初始化使用：SAR 中 allocation / use 可能缺一；source_loc 优先为分配点，否则为首个有效 use。"""
+
+    def __init__(self, source_loc, alloc_loc=None, use_sites=None):
+        super().__init__("UninitUse", source_loc)
+        self._alloc_loc = normalize_source_loc(alloc_loc) if alloc_loc else None
+        self._use_sites = [
+            u for u in (normalize_source_loc(x) for x in (use_sites or [])) if u
+        ]
+
+    def get_alloc_loc(self):
+        return self._alloc_loc
+
+    def get_use_sites(self):
+        return list(self._use_sites)
+
+    def to_prompt(self):
+        loc = self.source_location
+        type_prompt = f"Type of bug: {self.defect_type} (use of uninitialized memory).\n"
+        guidance_prompt = (
+            "Guidance on triaging:\n"
+            "TP if a feasible path reads or branches on memory before it is written/initialized as required by the language or API contract.\n"
+            "FP if all paths initialize before use, the analyzer lost field-sensitivity, or the value is overwritten on every path before the use.\n\n"
+        )
+        parts = [type_prompt + guidance_prompt]
+        if self._alloc_loc:
+            al = source_loc_to_string(self._alloc_loc["fl"], self._alloc_loc["ln"])
+            line_a = _code_line_for_loc(self._alloc_loc) or ""
+            parts.append(f"Allocation / definition site (analyzer): {al}\nCode: {line_a}\n\n")
+        site_line = _code_line_for_loc(self._source_loc) or ""
+        parts.append(f"Primary alert location (for dedup / graph): {loc}\nCode at primary site: {site_line}\n\n")
+        if self._use_sites:
+            parts.append("Use site(s) reported by the analyzer:\n")
+            for i, u in enumerate(self._use_sites, 1):
+                us = source_loc_to_string(u["fl"], u["ln"])
+                ul = _code_line_for_loc(u) or ""
+                parts.append(f"  {i}. {us}\n      {ul}\n")
+            parts.append("\n")
+        parts.append(
+            "Message: Static analysis reports a possible read or use of uninitialized storage "
+            f"along a path involving the location(s) above.\n\n"
+            "Task: Please classify this alert as TP, FP, or UNCERTAIN, and provide your reasoning."
+        )
+        return "".join(parts)
+
+    def to_goal_prompt(self):
+        return (
+            super().to_goal_prompt()
+            + "there exists a feasible path where memory is used before being properly initialized."
+        )

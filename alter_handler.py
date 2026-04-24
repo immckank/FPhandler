@@ -1,6 +1,13 @@
 import itertools
 
-from memory_defect import NeverFree, DoubleFree, PartialLeak, UseAfterFree, BufferOverflow
+from memory_defect import (
+    NeverFree,
+    DoubleFree,
+    PartialLeak,
+    UseAfterFree,
+    BufferOverflow,
+    UninitUse,
+)
 from utils import *
 
 class AlterAnalyzer():
@@ -29,6 +36,10 @@ class AlterAnalyzer():
         )
         self.BOF_BUFFER_INDEX_RE = re.compile(r"^\s*Buffer index:\s*(.+)\s*$")
         self.BOF_BUFFER_SIZE_RE = re.compile(r"^\s*Buffer size:\s*(.+)\s*$")
+        self.UNINIT_HEADER_RE = re.compile(
+            r"^\s*Uninit use\s*:\s*memory allocation at\s*:\s*\(\s*(.*)\s*\)\s*$"
+        )
+        self.UNINIT_USE_LINE_RE = re.compile(r"^\s*Use at :\s*\(\s*(.*)\s*\)\s*$")
 
     def get_alter_list(self):
         return self.alter_list
@@ -117,6 +128,44 @@ class AlterAnalyzer():
             buffer_size_text=buf_size,
         )
 
+    def _parse_uninit_entry(self, line, lines):
+        """
+        解析一条 Uninit use 块（当前行已为 header）。无有效 fl/ln 的条目返回 None（丢弃）。
+        分配点与所有 use 均无位置时跳过。
+        """
+        m = self.UNINIT_HEADER_RE.match(line)
+        if not m:
+            return None
+        inner = (m.group(1) or "").strip()
+        alloc_loc = self._parse_location(inner) if inner else None
+        use_locs = []
+        while True:
+            try:
+                raw = next(lines)
+            except StopIteration:
+                break
+            ul = self.ANSI_ESCAPE.sub("", raw).strip()
+            if not ul:
+                break
+            um = self.UNINIT_USE_LINE_RE.match(ul)
+            if not um:
+                lines = itertools.chain([raw], lines)
+                break
+            u_inner = (um.group(1) or "").strip()
+            if not u_inner:
+                continue
+            loc = self._parse_location(u_inner)
+            if loc:
+                use_locs.append(loc)
+        primary = None
+        if normalize_source_loc(alloc_loc):
+            primary = alloc_loc
+        elif use_locs:
+            primary = use_locs[0]
+        if primary is None:
+            return None
+        return UninitUse(primary, alloc_loc=alloc_loc, use_sites=use_locs)
+
     def read_alter_file(self, sar_path):
         """sar_path: SAR 文件完整路径（与 config.SAR_PATH 一致）。"""
         self.alter_list = []
@@ -143,6 +192,10 @@ class AlterAnalyzer():
                         bof = self._parse_bof_entry(lines)
                         if bof:
                             self.alter_list.append(bof)
+                    elif self.UNINIT_HEADER_RE.match(line):
+                        uninit = self._parse_uninit_entry(line, lines)
+                        if uninit:
+                            self.alter_list.append(uninit)
                     continue
 
                 leak_type, node_detail_str = leak_match.groups()
