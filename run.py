@@ -225,7 +225,7 @@ if __name__ == "__main__":
             ]
         if max_per_file > 0:
             alter_list = alter_list[:max_per_file]
-        if getattr(_cfg, "UNINIT_GROUP_FROM_SLICES", False) and is_uninit_sar(sar_path):
+        if getattr(_cfg, "UNINIT_GROUP_FROM_SLICES", True) and is_uninit_sar(sar_path):
             before = len(alter_list)
             alter_list = replace_uninit_with_slice_groups(
                 alter_list,
@@ -239,7 +239,7 @@ if __name__ == "__main__":
                 before,
                 len(alter_list),
             )
-        if getattr(_cfg, "UAF_CLUSTER_BY_FREE_LOCATION", False):
+        if getattr(_cfg, "UAF_CLUSTER_BY_FREE_LOCATION", True):
             before = len(alter_list)
             uaf_raw = sum(
                 1
@@ -262,7 +262,7 @@ if __name__ == "__main__":
                 uaf_clustered,
             )
         skip_slice_enrich = (
-            getattr(_cfg, "UNINIT_GROUP_FROM_SLICES", False) and is_uninit_sar(sar_path)
+            getattr(_cfg, "UNINIT_GROUP_FROM_SLICES", True) and is_uninit_sar(sar_path)
         )
         slice_matched = (
             0

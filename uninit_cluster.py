@@ -174,4 +174,13 @@ def replace_uninit_with_slice_groups(
         include_substrings=include_substrings,
         max_samples=max_samples,
     )
+    if not groups:
+        # slice JSON 缺失或无 groups 时保留原始 SAR 条目，避免静默丢弃 uninit 告警
+        uninit = [
+            a
+            for a in alerts
+            if (a.get_defect_type() if hasattr(a, "get_defect_type") else None)
+            == "UninitUse"
+        ]
+        return others + uninit
     return others + groups
