@@ -187,11 +187,18 @@ def find_function_body(function_name: str) -> Optional[Dict[str, Any]]:
         return res_json
     return None
 
-def find_current_function(source_location) -> Optional[Dict[str, Any]]:
+def find_current_function(
+    source_location=None,
+    file_name=None,
+    line_number=None,
+    **_,
+) -> Optional[Dict[str, Any]]:
     """Finds the function in which the given source location exists.
 
     Args:
         source_location: The source location, in the format 'filename.c:line_number'.
+        file_name: Alias used by some LLM tool calls (paired with line_number).
+        line_number: Alias used by some LLM tool calls (paired with file_name).
 
     Returns:
         A dictionary containing the details of the function, including its name,
@@ -201,6 +208,10 @@ def find_current_function(source_location) -> Optional[Dict[str, Any]]:
         {'function_name': 'current_func', 'filename': 'a.c', 'start_line': 5,
          'end_line': 25, 'function_body': '...'}
     """
+    if source_location is None and file_name is not None and line_number is not None:
+        source_location = f"{file_name}:{int(line_number)}"
+    if source_location is None:
+        return {"error": "Invalid source location."}
     if isinstance(source_location, str) and not SOURCE_LOCATION_PATTERN.match(source_location):
         if not parse_source_location_to_fl_ln(source_location):
             return {"error": "Invalid source location format, source_location should be in the format 'filename.c:line_number'."}

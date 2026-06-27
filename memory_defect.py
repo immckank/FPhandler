@@ -19,6 +19,21 @@ class MemoryDefect:
             self._source_loc = parse_source_location_to_fl_ln(source_loc)
             if self._source_loc is not None:
                 self._source_loc["cl"] = None
+        self._slice_context = None
+
+    def set_slice_context(self, text):
+        self._slice_context = (text or "").strip() or None
+
+    def get_slice_context(self):
+        return self._slice_context
+
+    def _slice_prompt_block(self) -> str:
+        if not self._slice_context:
+            return ""
+        return (
+            "Enhanced slice context (SaberSliceExport / static analyzer):\n"
+            f"{self._slice_context}\n\n"
+        )
 
     @property
     def source_location(self):
@@ -94,7 +109,15 @@ class NeverFree(MemoryLeak):
         else:
             Message_prompt = f"Message: The memory allocated at {loc} may not be freed along certain execution paths.  \n"
         Task_prompt = "Task: Please classify this alert as TP, FP, or UNCERTAIN, and provide your reasoning."
-        return Type_prompt + Guidance_prompt + Location_prompt + Code_prompt + Message_prompt + Task_prompt
+        return (
+            Type_prompt
+            + Guidance_prompt
+            + Location_prompt
+            + Code_prompt
+            + Message_prompt
+            + self._slice_prompt_block()
+            + Task_prompt
+        )
 
     def to_goal_prompt(self):
         return super().to_goal_prompt() + "upon reaching the end of the function, the memory has become unreachable and can never be freed."
@@ -142,7 +165,15 @@ class PartialLeak(MemoryLeak):
         else:
             Message_prompt = f"Message: The memory allocated at {loc} may not be freed along certain execution paths .  \n"
         Task_prompt = "Task: Please classify this alert as TP, FP, or UNCERTAIN, and provide your reasoning."
-        return Type_prompt + Guidance_prompt + Location_prompt + Code_prompt + Message_prompt + Task_prompt
+        return (
+            Type_prompt
+            + Guidance_prompt
+            + Location_prompt
+            + Code_prompt
+            + Message_prompt
+            + self._slice_prompt_block()
+            + Task_prompt
+        )
 
     def to_goal_prompt(self):
         return super().to_goal_prompt() + "upon reaching the end of the function, the memory has become unreachable and can never be freed."
@@ -196,7 +227,16 @@ class DoubleFree(MemoryLeak):
                 Message_prompt += " and"
             Message_prompt = Message_prompt[:-4] + ".\n"
         Task_prompt = "Task: Please classify this alert as TP, FP, or UNCERTAIN, and provide your reasoning."
-        return Type_prompt + Guidance_prompt + Location_prompt + Code_prompt + Message_prompt + Code_prompt + Task_prompt
+        return (
+            Type_prompt
+            + Guidance_prompt
+            + Location_prompt
+            + Code_prompt
+            + Message_prompt
+            + Code_prompt
+            + self._slice_prompt_block()
+            + Task_prompt
+        )
 
     def to_goal_prompt(self):
         return super().to_goal_prompt() + "there exists a path on control-flow that the same memory is freed more than once without a reallocation in between."
@@ -244,6 +284,12 @@ class UseAfterFree(MemoryDefect):
 
     def to_prompt(self):
         loc = self.source_location
+        alloc_sources = getattr(self, "_alloc_sources", None) or []
+        clustered_by_free = bool(alloc_sources) or (
+            len(self.node_pairs) == 1
+            and self.node_pairs[0]._free_loc
+            and normalize_source_loc(self._source_loc) == self.node_pairs[0]._free_loc
+        )
         type_prompt = f"Type of bug: {self.defect_type}.\n"
         guidance_prompt = (
             "Guidance on triaging this type of bug:\n"
@@ -257,9 +303,21 @@ class UseAfterFree(MemoryDefect):
             "  - The use occurs before the free in execution order\n"
             "  - Different memory blocks are involved in free and use operations\n"
         )
-        alloc_line = _code_line_for_loc(self._source_loc) or ""
-        alloc_prompt = f"Memory allocation at: {loc}\n"
-        alloc_code = f"Allocation code: {alloc_line}\n\n"
+        if clustered_by_free:
+            free_line = _code_line_for_loc(self._source_loc) or ""
+            alloc_prompt = f"Primary alert site (free): {loc}\n"
+            alloc_code = f"Free code: {free_line}\n"
+            if alloc_sources:
+                alloc_prompt = (
+                    "This alert is clustered by unique free site. "
+                    f"Related allocation site(s): {', '.join(alloc_sources)}\n"
+                    + alloc_prompt
+                )
+            alloc_code += "\n"
+        else:
+            alloc_line = _code_line_for_loc(self._source_loc) or ""
+            alloc_prompt = f"Memory allocation at: {loc}\n"
+            alloc_code = f"Allocation code: {alloc_line}\n\n"
 
         nodes_prompt = "Free-Use Node Pairs:\n"
         for i, pair in enumerate(self.node_pairs):
@@ -283,15 +341,22 @@ class UseAfterFree(MemoryDefect):
 
             nodes_prompt += "\n"
 
-        alloc_line_for_var = _code_line_for_loc(self._source_loc) or ""
-        variable_name = extract_lhs_variable(alloc_line_for_var)
-        if variable_name is None:
-            variable_name = "unknown"
-        message_prompt = (
-            f"Message: Memory allocated to '{variable_name}' at {loc} "
-            "is accessed after being freed in the paths shown above. "
-            "This results in undefined behavior and potential security vulnerabilities.\n\n"
-        )
+        if clustered_by_free:
+            message_prompt = (
+                f"Message: Memory freed at {loc} may be used afterward at the use site(s) "
+                "listed above without reallocation. "
+                "This results in undefined behavior and potential security vulnerabilities.\n\n"
+            )
+        else:
+            alloc_line_for_var = _code_line_for_loc(self._source_loc) or ""
+            variable_name = extract_lhs_variable(alloc_line_for_var)
+            if variable_name is None:
+                variable_name = "unknown"
+            message_prompt = (
+                f"Message: Memory allocated to '{variable_name}' at {loc} "
+                "is accessed after being freed in the paths shown above. "
+                "This results in undefined behavior and potential security vulnerabilities.\n\n"
+            )
 
         task_prompt = "Task: Please classify this alert as TP, FP, or UNCERTAIN, and provide your reasoning."
 
@@ -302,6 +367,7 @@ class UseAfterFree(MemoryDefect):
             + alloc_code
             + nodes_prompt
             + message_prompt
+            + self._slice_prompt_block()
             + task_prompt
         )
 
@@ -382,6 +448,7 @@ class BufferOverflow(MemoryDefect):
             + site_code
             + detail_prompt
             + message_prompt
+            + self._slice_prompt_block()
             + task_prompt
         )
 
@@ -395,12 +462,16 @@ class BufferOverflow(MemoryDefect):
 class UninitUse(MemoryDefect):
     """未初始化使用：SAR 中 allocation / use 可能缺一；source_loc 优先为分配点，否则为首个有效 use。"""
 
-    def __init__(self, source_loc, alloc_loc=None, use_sites=None):
+    def __init__(self, source_loc, alloc_loc=None, use_sites=None, path_conditions=None):
         super().__init__("UninitUse", source_loc)
         self._alloc_loc = normalize_source_loc(alloc_loc) if alloc_loc else None
         self._use_sites = [
             u for u in (normalize_source_loc(x) for x in (use_sites or [])) if u
         ]
+        self._path_conditions = path_conditions or []
+
+    def get_path_conditions(self):
+        return list(self._path_conditions)
 
     def get_alloc_loc(self):
         return self._alloc_loc
@@ -433,6 +504,9 @@ class UninitUse(MemoryDefect):
         parts.append(
             "Message: Static analysis reports a possible read or use of uninitialized storage "
             f"along a path involving the location(s) above.\n\n"
+        )
+        parts.append(self._slice_prompt_block())
+        parts.append(
             "Task: Please classify this alert as TP, FP, or UNCERTAIN, and provide your reasoning."
         )
         return "".join(parts)
@@ -441,4 +515,80 @@ class UninitUse(MemoryDefect):
         return (
             super().to_goal_prompt()
             + "there exists a feasible path where memory is used before being properly initialized."
+        )
+
+
+class UninitUseGroup(MemoryDefect):
+    """SVF slice JSON group: one LLM triage call covers many related uninit slices."""
+
+    def __init__(
+        self,
+        source_loc,
+        object_type="",
+        member_count=0,
+        caller_contexts=None,
+        member_slices=None,
+        group_index=0,
+    ):
+        super().__init__("UninitUse", source_loc)
+        self.object_type = object_type or "unknown"
+        self.member_count = int(member_count or 0)
+        self.caller_contexts = list(caller_contexts or [])
+        self.member_slices = list(member_slices or [])
+        self.group_index = int(group_index or 0)
+
+    def get_group_key(self):
+        return self.object_type
+
+    def get_defect_type(self):
+        return "UninitUseGroup"
+
+    def to_prompt(self):
+        loc = self.source_location
+        type_prompt = (
+            "Type of bug: UninitUse (grouped triage — one verdict for the whole cluster).\n"
+            f"Object type (SVF grouping): {self.object_type}\n"
+            f"Grouped slice count: {self.member_count}\n"
+            f"Group index: {self.group_index}\n\n"
+        )
+        guidance_prompt = (
+            "Guidance on triaging grouped uninit reports:\n"
+            "- Many members may share the same sink (e.g. logging macro) but different caller sites.\n"
+            "- TP if any member reflects a real uninitialized read on a feasible path in project code.\n"
+            "- FP if all members are analyzer artifacts (macro/logging funnel, header-only objects, "
+            "or paths that always initialize before use).\n"
+            "- If only some caller contexts are real bugs, classify TP and name which caller sites matter.\n\n"
+        )
+        parts = [type_prompt + guidance_prompt]
+        site_line = _code_line_for_loc(self._source_loc) or ""
+        parts.append(
+            f"Representative location (graph-reader / dedup anchor): {loc}\n"
+            f"Code at representative site:\n{site_line}\n\n"
+        )
+        if self.caller_contexts:
+            parts.append("Caller contexts aggregated in this group:\n")
+            for i, ctx in enumerate(self.caller_contexts[:35], 1):
+                parts.append(f"  {i}. {ctx}\n")
+            if len(self.caller_contexts) > 35:
+                parts.append(
+                    f"  ... and {len(self.caller_contexts) - 35} more caller contexts\n"
+                )
+            parts.append("\n")
+        parts.append(
+            "Message: Static analysis reported multiple UNINIT_USE slices sharing the same "
+            f"uninitialized object type ({self.object_type}). "
+            "Please judge the cluster as a whole.\n\n"
+        )
+        parts.append(self._slice_prompt_block())
+        parts.append(
+            "Task: Classify this grouped alert cluster as TP, FP, or UNCERTAIN, "
+            "and provide your reasoning."
+        )
+        return "".join(parts)
+
+    def to_goal_prompt(self):
+        return (
+            f"You are triaging a cluster of {self.member_count} related UninitUse static-analysis "
+            f"reports for object type {self.object_type!r} near {self.source_location}. "
+            "Determine whether any member indicates a genuine uninitialized use in project code."
         )

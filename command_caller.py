@@ -72,10 +72,58 @@ class CommandCaller:
             if key:
                 os.environ[key] = value
         if not shutil.which("graph-reader", path=os.environ.get("PATH", "")):
-            raise FileNotFoundError(
-                "PATH 中仍找不到 graph-reader：请先在 SVFmemplus 下编译生成 "
-                "Release-build/bin/graph-reader（或 Debug），并确认 setup.sh 能正确 export PATH。"
-            )
+            import config as _cfg
+
+            if not (
+                getattr(_cfg, "GRAPH_READER_DOCKER_IMAGE", None)
+                or os.environ.get("GRAPH_READER_DOCKER_IMAGE")
+            ):
+                raise FileNotFoundError(
+                    "PATH 中仍找不到 graph-reader：请先在 SVFmemplus 下编译生成 "
+                    "Release-build/bin/graph-reader（或 Debug），并确认 setup.sh 能正确 export PATH；"
+                    "或在 config.GRAPH_READER_DOCKER_IMAGE 中指定 Docker 镜像。"
+                )
+
+    def _graph_reader_docker_image(self):
+        import config as _cfg
+
+        return (
+            getattr(_cfg, "GRAPH_READER_DOCKER_IMAGE", None)
+            or os.environ.get("GRAPH_READER_DOCKER_IMAGE")
+            or ""
+        ).strip()
+
+    def _graph_reader_command(self, bitcode_path: str):
+        image = self._graph_reader_docker_image()
+        if not image:
+            return ["graph-reader", "-stat=false", bitcode_path]
+
+        svf_dir = Path(self.setupbash_path).parent.resolve()
+        bc_path = Path(bitcode_path).resolve()
+        inner = (
+            "source ./setup.sh Release && "
+            "export PATH=/SVFmemplus/Release-build/bin:$PATH && "
+            "export LD_LIBRARY_PATH=/SVFmemplus/z3.obj/bin:${LD_LIBRARY_PATH:-} && "
+            "if [[ ! -e /usr/lib/libz3.so.4 && -e /SVFmemplus/z3.obj/bin/libz3.so ]]; then "
+            "ln -sf /SVFmemplus/z3.obj/bin/libz3.so /usr/lib/libz3.so.4; fi && "
+            "exec graph-reader -stat=false /data/target.bc"
+        )
+        return [
+            "docker",
+            "run",
+            "-i",
+            "--rm",
+            "-v",
+            f"{svf_dir}:/SVFmemplus",
+            "-v",
+            f"{bc_path}:/data/target.bc:ro",
+            "-w",
+            "/SVFmemplus",
+            image,
+            "bash",
+            "-lc",
+            inner,
+        ]
 
     def _start_graph_reader_process_with_path(self, bitcode_path: str):
         if CommandCaller._process is not None:
@@ -86,7 +134,7 @@ class CommandCaller:
         if not os.path.isfile(bitcode_path):
             raise FileNotFoundError(f"bitcode 文件不存在: {bitcode_path}")
 
-        command = ["graph-reader", "-stat=false", bitcode_path]
+        command = self._graph_reader_command(bitcode_path)
         CommandCaller._process = subprocess.Popen(
             command,
             stdin=subprocess.PIPE,

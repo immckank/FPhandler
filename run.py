@@ -10,13 +10,38 @@ from utils import *
 from alter_handler import AlterAnalyzer
 from free_analyzer import create_analyzer
 from command_caller import CommandCaller
+from slice_handler import (
+    enrich_alerts_with_slices,
+    alert_passes_source_filter,
+    alert_passes_focus_filter,
+)
+from uaf_cluster import cluster_uaf_alerts_by_free_location
+from uninit_cluster import is_uninit_sar, replace_uninit_with_slice_groups
+
+
+def _load_dotenv(path: str):
+    if not path or not os.path.isfile(path):
+        return
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            s = line.strip()
+            if not s or s.startswith("#") or "=" not in s:
+                continue
+            key, _, val = s.partition("=")
+            key = key.strip()
+            val = val.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = val
 
 
 def _txt_files_in_dir(d):
     names = sorted(
         f
         for f in os.listdir(d)
-        if f.lower().endswith(".txt") and os.path.isfile(os.path.join(d, f))
+        if f.lower().endswith(".txt")
+        and os.path.isfile(os.path.join(d, f))
+        and not f.lower().endswith(".meta.txt")
+        and f.startswith("svf_")
     )
     return [os.path.join(d, f) for f in names]
 
@@ -72,6 +97,27 @@ def _append_analyzed_location(path, key):
         f.write(key + "\n")
 
 
+def _dedup_category(alter):
+    """
+    Dedup category for alert keys. Saber leak/dfree share defect_type MemoryLeak but
+    must not dedupe across PartialLeak / DoubleFree / NeverFree at the same alloc site.
+    """
+    if hasattr(alter, "get_group_key") and callable(alter.get_group_key):
+        gk = alter.get_group_key()
+        if gk:
+            return f"UninitUseGroup|{gk}"
+    if hasattr(alter, "get_leak_type") and callable(alter.get_leak_type):
+        leak_type = alter.get_leak_type()
+        if leak_type:
+            return str(leak_type).strip()
+    defect_type = (
+        alter.get_defect_type()
+        if hasattr(alter, "get_defect_type")
+        else getattr(alter, "defect_type", None)
+    )
+    return (str(defect_type).strip() if defect_type is not None else "") or "UnknownDefect"
+
+
 def _alter_location_key(alter):
     loc = (
         alter.get_source_loc()
@@ -81,14 +127,8 @@ def _alter_location_key(alter):
     base_loc = location_string_from_source_loc(loc)
     if not base_loc:
         return None
-    defect_type = (
-        alter.get_defect_type()
-        if hasattr(alter, "get_defect_type")
-        else getattr(alter, "defect_type", None)
-    )
-    defect_type = (str(defect_type).strip() if defect_type is not None else "") or "UnknownDefect"
-    # 新格式：<defect_type>|<fl:ln>，用于区分不同缺陷类型的同一源码位置。
-    return f"{defect_type}|{base_loc}"
+    category = _dedup_category(alter)
+    return f"{category}|{base_loc}"
 
 
 def _alter_location_key_legacy(alter):
@@ -99,6 +139,19 @@ def _alter_location_key_legacy(alter):
         else None
     )
     return location_string_from_source_loc(loc)
+
+
+def _already_analyzed(loc_key, legacy_loc_key, category, analyzed_keys):
+    if loc_key and loc_key in analyzed_keys:
+        return True
+    if not legacy_loc_key:
+        return False
+    # 旧版 saber leak/dfree 统一写入 MemoryLeak|fl:ln，无法区分 PartialLeak vs DoubleFree。
+    # 仅对 DoubleFree/NeverFree 保守跳过；PartialLeak 必须单独分析。
+    legacy_ml_key = f"MemoryLeak|{legacy_loc_key}"
+    if category in ("DoubleFree", "NeverFree") and legacy_ml_key in analyzed_keys:
+        return True
+    return legacy_loc_key in analyzed_keys
 
 
 def _validate_sar_paths(paths, logger):
@@ -115,6 +168,8 @@ def _validate_sar_paths(paths, logger):
 
 
 if __name__ == "__main__":
+    _load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+
     batch_dirs = [
         d
         for d in _effective_batch_dir_list()
@@ -153,8 +208,78 @@ if __name__ == "__main__":
     for sar_path in sar_paths:
         # 1) 读取缺陷条目
         alter_list = reader.read_alter_file(sar_path)
+        slice_dir = getattr(_cfg, "SLICE_DIR", None) or None
+        include_paths = getattr(_cfg, "SOURCE_PATH_INCLUDE", None) or None
+        focus_locs = getattr(_cfg, "EXPERIMENT_FOCUS_LOCATIONS", None) or None
+        focus_tol = int(getattr(_cfg, "EXPERIMENT_FOCUS_TOLERANCE", 0) or 0)
+        max_per_file = int(getattr(_cfg, "EXPERIMENT_MAX_ALERTS_PER_FILE", 0) or 0)
+        if include_paths:
+            alter_list = [
+                a for a in alter_list if alert_passes_source_filter(a, include_paths)
+            ]
+        if focus_locs:
+            alter_list = [
+                a
+                for a in alter_list
+                if alert_passes_focus_filter(a, focus_locs, focus_tol)
+            ]
+        if max_per_file > 0:
+            alter_list = alter_list[:max_per_file]
+        if getattr(_cfg, "UNINIT_GROUP_FROM_SLICES", False) and is_uninit_sar(sar_path):
+            before = len(alter_list)
+            alter_list = replace_uninit_with_slice_groups(
+                alter_list,
+                sar_path,
+                slice_dir,
+                include_substrings=include_paths,
+                max_samples=int(getattr(_cfg, "UNINIT_GROUP_MAX_SAMPLE_SLICES", 5) or 5),
+            )
+            main_logger.info(
+                "uninit group-from-slices: %s -> %d group alert(s)",
+                before,
+                len(alter_list),
+            )
+        if getattr(_cfg, "UAF_CLUSTER_BY_FREE_LOCATION", False):
+            before = len(alter_list)
+            uaf_raw = sum(
+                1
+                for a in alter_list
+                if (a.get_defect_type() if hasattr(a, "get_defect_type") else None)
+                == "UseAfterFree"
+            )
+            alter_list = cluster_uaf_alerts_by_free_location(alter_list)
+            uaf_clustered = sum(
+                1
+                for a in alter_list
+                if (a.get_defect_type() if hasattr(a, "get_defect_type") else None)
+                == "UseAfterFree"
+            )
+            main_logger.info(
+                "uaf cluster by free site: %d alerts (%d uaf raw) -> %d alerts (%d uaf clustered)",
+                before,
+                uaf_raw,
+                len(alter_list),
+                uaf_clustered,
+            )
+        skip_slice_enrich = (
+            getattr(_cfg, "UNINIT_GROUP_FROM_SLICES", False) and is_uninit_sar(sar_path)
+        )
+        slice_matched = (
+            0
+            if skip_slice_enrich
+            else enrich_alerts_with_slices(alter_list, sar_path, slice_dir)
+        )
+        if skip_slice_enrich:
+            slice_matched = sum(
+                1 for a in alter_list if getattr(a, "get_slice_context", lambda: None)()
+            )
         alter_num = len(alter_list)
-        main_logger.info("file %s — %d alerts", sar_path, alter_num)
+        main_logger.info(
+            "file %s — %d alerts (%d with slice context)",
+            sar_path,
+            alter_num,
+            slice_matched,
+        )
 
         # 2) 去重：历史已分析 + 本次运行内同位置只保留一条待分析
         pending = []
@@ -163,10 +288,9 @@ if __name__ == "__main__":
             alter = alter_list[i]
             loc_key = _alter_location_key(alter)
             legacy_loc_key = _alter_location_key_legacy(alter)
-            # 兼容旧格式去重键：fl:ln
-            if loc_key and (
-                loc_key in analyzed_keys
-                or (legacy_loc_key and legacy_loc_key in analyzed_keys)
+            category = _dedup_category(alter)
+            if loc_key and _already_analyzed(
+                loc_key, legacy_loc_key, category, analyzed_keys
             ):
                 skipped += 1
                 main_logger.info(

@@ -13,17 +13,23 @@
 
 ```text
 FPhandler/
-├── config.py           # 运行配置
+├── config.example.py   # 配置模板（复制为 config.py 后修改）
 ├── run.py              # 主入口
 ├── command_caller.py   # graph-reader 拉起与通信
 ├── alter_handler.py    # SAR 告警解析
 ├── free_analyzer.py    # LLM 研判流程
 ├── tools.py            # 分析工具接口
-├── RES/                # 输出目录（运行后自动生成）
-└── SAR/                # 建议放置 SVFmemplus 告警文件
+├── script/             # 各分析对象的项目配置与入口
+│   ├── object1/        # openEuler kernel drivers/ub
+│   ├── object2/        # FalconFS
+│   └── object3/        # ubs-engine SDK
+├── RES/                # 输出目录（运行后自动生成，已 gitignore）
+└── SAR/                # 可选：放置 SVFmemplus 告警文件（已 gitignore）
 ```
 
-## 关键配置（`config.py`）
+## 关键配置（`config.example.py`）
+
+复制 `config.example.py` 为 `config.py` 后修改，或直接使用 `script/<object>/run_*.py` 入口（已内置对应项目配置）。
 
 最小必配项：
 
@@ -52,8 +58,30 @@ export QWEN_API_KEY=sk-xxxxx
 
 ## 执行
 
+通用入口（需先准备 `config.py`）：
+
 ```bash
 python run.py
+```
+
+各分析对象专用入口（推荐）：
+
+```bash
+# Object1 全量缺陷
+python script/object1/run_all_defects.py
+
+# Object1 memory-file 子集
+python script/object1/run_memory_file.py
+
+# Object2 FalconFS 扩展集
+python script/object2/run_extended.py
+
+# Object2 BOF / uninit 专项
+python script/object2/run_bof.py
+python script/object2/run_uninit.py
+
+# Object3 ubs-engine SDK
+python script/object3/run_sdk_subset.py
 ```
 
 执行流程：

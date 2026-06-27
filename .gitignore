@@ -1,9 +1,10 @@
 .vscode
 .idea
 .pytest_cache
-.pytest_cache
 .cursor
-__pycache__
+__pycache__/
+script/**/__pycache__/
+script/*
 pipcache/
 /GRAPH
 /PUT/*
@@ -11,3 +12,5 @@ pipcache/
 /SAR/*
 /REF/*
 /FP
+/config.py
+/.env

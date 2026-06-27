@@ -28,11 +28,20 @@ class AlterAnalyzer():
         )
         self.ANSI_ESCAPE = re.compile(r'\x1b\[[0-9;]*m')
         self.BOF_HEADER_RE = re.compile(
-            r"\[BufferOverflowChecker\]\s*Buffer Overflow Error detected!"
+            r"\[BufferOverflowChecker\]\s*(?:Buffer Overflow Error detected!|(?:MUST|MAY) buffer overflow)"
         )
-        self.BOF_BASE_VALVAR_RE = re.compile(r"^\s*Base:\s*ValVar ID:\s*(\d+)\s*$")
+        self.BOF_BASE_VALVAR_RE = re.compile(
+            r"^\s*Base\s*:?\s*ValVar ID:\s*(\d+)\s*$"
+        )
         self.BOF_DBG_LOC_RE = re.compile(
-            r'\{\s*"ln"\s*:\s*(\d+)\s*,\s*"cl"\s*:\s*(\d+)\s*,\s*"fl"\s*:\s*"([^"]+)"\s*\}'
+            r'\{\s*"(?:ln|line)"\s*:\s*(\d+)\s*,\s*"(?:cl|col)"\s*:\s*(\d+)\s*,\s*"(?:fl|file)"\s*:\s*"([^"]+)"\s*\}'
+        )
+        self.BOF_ACCESS_RE = re.compile(r"^\s*Access\s*:?\s*(.+)\s*$")
+        self.BOF_VALID_RANGE_RE = re.compile(
+            r"^\s*Valid range\s*:?\s*(.+?)(?:\s+\((\w+)\))?\s*$"
+        )
+        self.BOF_LOCATION_RE = re.compile(
+            r'^\s*Location\s*:?\s*(\{.*\})\s*$'
         )
         self.BOF_BUFFER_INDEX_RE = re.compile(r"^\s*Buffer index:\s*(.+)\s*$")
         self.BOF_BUFFER_SIZE_RE = re.compile(r"^\s*Buffer size:\s*(.+)\s*$")
@@ -40,9 +49,20 @@ class AlterAnalyzer():
             r"^\s*Uninit use\s*:\s*memory allocation at\s*:\s*\(\s*(.*)\s*\)\s*$"
         )
         self.UNINIT_USE_LINE_RE = re.compile(r"^\s*Use at :\s*\(\s*(.*)\s*\)\s*$")
+        self.UNINIT_COND_PATH_RE = re.compile(
+            r"^\s*-->\s*\(\s*(?:CallICFGNode:\s*)?(\{.*\})\s*\|\s*(.*?)\s*\)\s*$"
+        )
 
     def get_alter_list(self):
         return self.alter_list
+
+    def _extract_json_blob(self, s):
+        s = (s or "").strip()
+        if s.startswith("CallICFGNode:"):
+            s = s[len("CallICFGNode:") :].strip()
+        if s.startswith("(") and s.endswith(")"):
+            s = s[1:-1].strip()
+        return s
 
     def _parse_location(self, node_detail_str):
         """
@@ -50,74 +70,92 @@ class AlterAnalyzer():
         Keeps fl as given (may be relative path); cl optional from SAR.
         """
         try:
-            details = json.loads(node_detail_str)
-            fl = details.get("fl")
+            details = json.loads(self._extract_json_blob(node_detail_str))
+            fl = details.get("fl") or details.get("file")
             ln = details.get("ln")
+            if ln is None:
+                ln = details.get("line")
             if not fl or ln is None:
                 return None
             out = {"fl": fl, "ln": int(ln)}
             cl = details.get("cl")
+            if cl is None:
+                cl = details.get("col")
             if cl is not None:
                 out["cl"] = int(cl)
             return out
         except (json.JSONDecodeError, AttributeError, TypeError, ValueError):
             return None
 
+    def _loc_from_dbg_text(self, text):
+        m = self.BOF_DBG_LOC_RE.search(text)
+        if not m:
+            return None
+        return {"fl": m.group(3), "ln": int(m.group(1)), "cl": int(m.group(2))}
+
     def _parse_bof_entry(self, lines):
         """
         在已匹配 [BufferOverflowChecker] 头行之后，从同一迭代器读取一条 BOF 记录。
-        source_loc 使用 IR 行尾 dbg 中的 fl/ln/cl，作为警报发生位置（与 run.py 去重键一致）。
+        兼容旧版 Buffer index/size 与新版 Access/Valid range/Location 格式。
         """
         val_var_id = None
         ir_instruction = None
         source_loc = None
+        buf_idx = None
+        buf_size = None
+        location_line = None
+
         try:
-            while source_loc is None:
+            while True:
                 nl = next(lines)
                 nl = self.ANSI_ESCAPE.sub("", nl).strip()
                 if not nl:
                     continue
+                if self.BOF_HEADER_RE.search(nl):
+                    lines = itertools.chain([nl], lines)
+                    break
                 m_base = self.BOF_BASE_VALVAR_RE.match(nl)
                 if m_base:
                     val_var_id = int(m_base.group(1))
                     continue
                 m_dbg = self.BOF_DBG_LOC_RE.search(nl)
-                if m_dbg:
+                if m_dbg and ir_instruction is None:
                     ir_instruction = nl.strip()
-                    source_loc = {
-                        "fl": m_dbg.group(3),
-                        "ln": int(m_dbg.group(1)),
-                        "cl": int(m_dbg.group(2)),
-                    }
-                    break
-                return None
-        except StopIteration:
-            return None
-
-        buf_idx = None
-        buf_size = None
-        try:
-            while buf_idx is None:
-                nl = next(lines)
-                nl = self.ANSI_ESCAPE.sub("", nl).strip()
-                if not nl:
+                    if source_loc is None:
+                        source_loc = self._loc_from_dbg_text(nl)
+                    continue
+                m_loc = self.BOF_LOCATION_RE.match(nl)
+                if m_loc:
+                    location_line = m_loc.group(1)
+                    loc = self._parse_location(location_line)
+                    if loc:
+                        source_loc = loc
+                    continue
+                m_acc = self.BOF_ACCESS_RE.match(nl)
+                if m_acc and buf_idx is None:
+                    buf_idx = m_acc.group(1).strip()
+                    continue
+                m_val = self.BOF_VALID_RANGE_RE.match(nl)
+                if m_val and buf_size is None:
+                    buf_size = m_val.group(1).strip()
+                    if m_val.group(2):
+                        buf_size += f" ({m_val.group(2)})"
+                    if source_loc is not None:
+                        break
                     continue
                 m_idx = self.BOF_BUFFER_INDEX_RE.match(nl)
-                if m_idx:
+                if m_idx and buf_idx is None:
                     buf_idx = m_idx.group(1).strip()
-                    break
-                return None
-            while buf_size is None:
-                nl = next(lines)
-                nl = self.ANSI_ESCAPE.sub("", nl).strip()
-                if not nl:
                     continue
                 m_sz = self.BOF_BUFFER_SIZE_RE.match(nl)
-                if m_sz:
+                if m_sz and buf_size is None:
                     buf_size = m_sz.group(1).strip()
-                    break
-                return None
+                    if source_loc is not None:
+                        break
         except StopIteration:
+            pass
+
+        if source_loc is None:
             return None
 
         return BufferOverflow(
@@ -139,6 +177,7 @@ class AlterAnalyzer():
         inner = (m.group(1) or "").strip()
         alloc_loc = self._parse_location(inner) if inner else None
         use_locs = []
+        path_conditions = []
         while True:
             try:
                 raw = next(lines)
@@ -147,6 +186,12 @@ class AlterAnalyzer():
             ul = self.ANSI_ESCAPE.sub("", raw).strip()
             if not ul:
                 break
+            cm = self.UNINIT_COND_PATH_RE.match(ul)
+            if cm:
+                cond_loc = self._parse_location(cm.group(1))
+                if cond_loc:
+                    path_conditions.append((cm.group(2).strip(), cond_loc))
+                continue
             um = self.UNINIT_USE_LINE_RE.match(ul)
             if not um:
                 lines = itertools.chain([raw], lines)
@@ -164,7 +209,9 @@ class AlterAnalyzer():
             primary = use_locs[0]
         if primary is None:
             return None
-        return UninitUse(primary, alloc_loc=alloc_loc, use_sites=use_locs)
+        return UninitUse(
+            primary, alloc_loc=alloc_loc, use_sites=use_locs, path_conditions=path_conditions
+        )
 
     def read_alter_file(self, sar_path):
         """sar_path: SAR 文件完整路径（与 config.SAR_PATH 一致）。"""
@@ -282,12 +329,27 @@ class AlterAnalyzer():
                             except StopIteration:
                                 break
 
+                            while True:
+                                try:
+                                    path_line = next(lines).strip()
+                                except StopIteration:
+                                    break
+                                if not path_line:
+                                    break
+                                if self.COND_PATH_RE.match(path_line):
+                                    continue
+                                lines = itertools.chain([path_line], lines)
+                                break
+
                             # 收集该free位置对应的所有use位置和条件路径
                             use_nodes = []  # 存储UseNode对象
                             while True:
                                 try:
                                     use_line = next(lines).strip()
                                     if not use_line:
+                                        continue
+
+                                    if self.COND_PATH_RE.match(use_line):
                                         continue
 
                                     use_match = self.USE_RE.match(use_line)
@@ -298,26 +360,29 @@ class AlterAnalyzer():
                                     use_node_detail_str = use_match.group(1)
                                     use_loc = self._parse_location(use_node_detail_str)
 
+                                    condition = None
+                                    condition_loc = None
                                     try:
                                         use_path_line = next(lines).strip()
                                         if use_path_line != "use path:":
                                             lines = itertools.chain([use_path_line], lines)
-
-                                        condition = None
-                                        condition_loc = None
-                                        try:
+                                        while True:
                                             cond_line = next(lines).strip()
+                                            if not cond_line:
+                                                continue
                                             cond_match = self.COND_PATH_RE.match(cond_line)
-                                            if cond_match:
-                                                cond_node_detail_str, cond = cond_match.groups()
-                                                condition_loc = self._parse_location(
-                                                    cond_node_detail_str
-                                                )
+                                            if not cond_match:
+                                                lines = itertools.chain([cond_line], lines)
+                                                break
+                                            cond_node_detail_str, cond = cond_match.groups()
+                                            parsed_cond_loc = self._parse_location(
+                                                cond_node_detail_str
+                                            )
+                                            if parsed_cond_loc:
+                                                condition_loc = parsed_cond_loc
                                                 condition = cond
-                                        except StopIteration:
-                                            pass
                                     except StopIteration:
-                                        break
+                                        pass
 
                                     if use_loc:
                                         use_node = UseAfterFree.UseNode(
