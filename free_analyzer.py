@@ -267,6 +267,23 @@ class QwenFreeAnalyzer(FreeAnalysisModel):
     def responseForAlter(self, alter: memory_defect.MemoryDefect):
         return super().responseForAlter(alter)
 
+class ExampleFreeAnalyzer(FreeAnalysisModel):
+    """Template analyzer: copy and adjust base_url / model_name / api key env for a new provider."""
+
+    def __init__(self, model_name="example-model"):
+        super().__init__()
+        self.model_name = model_name
+        self.client = OpenAI(
+            api_key=os.environ.get("EXAMPLE_KEY"),
+            base_url="exampleurl",
+        )
+
+    def responseToAlter(self, alter_prompt, user_prompt=""):
+        return None
+
+    def responseForAlter(self, alter: memory_defect.MemoryDefect):
+        return super().responseForAlter(alter)
+
 
 def create_analyzer():
     """Create the free-form analyzer for the configured LLM_TYPE."""
@@ -276,4 +293,6 @@ def create_analyzer():
         return DeepSeekFreeAnalyzer()
     if LLM_TYPE == "Qwen":
         return QwenFreeAnalyzer()
+    if LLM_TYPE == "Example":
+        return ExampleFreeAnalyzer()
     raise ValueError(f"Unknown LLM type: {LLM_TYPE}")
