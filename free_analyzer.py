@@ -285,6 +285,24 @@ class ExampleFreeAnalyzer(FreeAnalysisModel):
         return super().responseForAlter(alter)
 
 
+class HWFreeAnalyzer(FreeAnalysisModel):
+    """OpenAI-compatible analyzer using HW_KEY and model auto."""
+
+    def __init__(self, model_name="auto"):
+        super().__init__()
+        self.model_name = model_name
+        self.client = OpenAI(
+            api_key=os.environ.get("HW_KEY"),
+            base_url="exampleurl",
+        )
+
+    def responseToAlter(self, alter_prompt, user_prompt=""):
+        return None
+
+    def responseForAlter(self, alter: memory_defect.MemoryDefect):
+        return super().responseForAlter(alter)
+
+
 def create_analyzer():
     """Create the free-form analyzer for the configured LLM_TYPE."""
     if LLM_TYPE == "Gemini":
@@ -295,4 +313,6 @@ def create_analyzer():
         return QwenFreeAnalyzer()
     if LLM_TYPE == "Example":
         return ExampleFreeAnalyzer()
+    if LLM_TYPE == "HW":
+        return HWFreeAnalyzer()
     raise ValueError(f"Unknown LLM type: {LLM_TYPE}")
