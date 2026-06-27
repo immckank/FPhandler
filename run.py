@@ -1,3 +1,4 @@
+import argparse
 import logging
 import os
 import sys
@@ -8,15 +9,14 @@ import config as _cfg
 from utils import *
 
 from alter_handler import AlterAnalyzer
-from free_analyzer import create_analyzer
-from command_caller import CommandCaller
-from slice_handler import (
-    enrich_alerts_with_slices,
-    alert_passes_source_filter,
-    alert_passes_focus_filter,
+from alert_stats import (
+    aggregate_stats,
+    load_analyzed_location_keys,
+    prepare_sar_alerts,
+    print_stats_report,
+    write_stats_json,
 )
-from uaf_cluster import cluster_uaf_alerts_by_free_location
-from uninit_cluster import is_uninit_sar, replace_uninit_with_slice_groups
+from command_caller import CommandCaller
 
 
 def _load_dotenv(path: str):
@@ -112,18 +112,6 @@ def _run_log_stem_for_batch_dirs(dirs):
     return "-".join(parts)
 
 
-def _load_analyzed_location_keys(path):
-    if not path or not os.path.isfile(path):
-        return set()
-    keys = set()
-    with open(path, "r", encoding="utf-8", errors="replace") as f:
-        for line in f:
-            s = line.strip()
-            if s:
-                keys.add(s)
-    return keys
-
-
 def _append_analyzed_location(path, key):
     if not key:
         return
@@ -132,63 +120,6 @@ def _append_analyzed_location(path, key):
         os.makedirs(parent, exist_ok=True)
     with open(path, "a", encoding="utf-8") as f:
         f.write(key + "\n")
-
-
-def _dedup_category(alter):
-    """
-    Dedup category for alert keys. Saber leak/dfree share defect_type MemoryLeak but
-    must not dedupe across PartialLeak / DoubleFree / NeverFree at the same alloc site.
-    """
-    if hasattr(alter, "get_group_key") and callable(alter.get_group_key):
-        gk = alter.get_group_key()
-        if gk:
-            return f"UninitUseGroup|{gk}"
-    if hasattr(alter, "get_leak_type") and callable(alter.get_leak_type):
-        leak_type = alter.get_leak_type()
-        if leak_type:
-            return str(leak_type).strip()
-    defect_type = (
-        alter.get_defect_type()
-        if hasattr(alter, "get_defect_type")
-        else getattr(alter, "defect_type", None)
-    )
-    return (str(defect_type).strip() if defect_type is not None else "") or "UnknownDefect"
-
-
-def _alter_location_key(alter):
-    loc = (
-        alter.get_source_loc()
-        if hasattr(alter, "get_source_loc") and alter.get_source_loc()
-        else None
-    )
-    base_loc = location_string_from_source_loc(loc)
-    if not base_loc:
-        return None
-    category = _dedup_category(alter)
-    return f"{category}|{base_loc}"
-
-
-def _alter_location_key_legacy(alter):
-    """兼容历史去重文件中的旧键格式：仅 fl:ln。"""
-    loc = (
-        alter.get_source_loc()
-        if hasattr(alter, "get_source_loc") and alter.get_source_loc()
-        else None
-    )
-    return location_string_from_source_loc(loc)
-
-
-def _already_analyzed(loc_key, legacy_loc_key, category, analyzed_keys):
-    if loc_key and loc_key in analyzed_keys:
-        return True
-    if not legacy_loc_key:
-        return False
-    # 旧版 saber leak/dfree 统一写入 MemoryLeak|fl:ln，无法区分 PartialLeak vs DoubleFree。
-    # 仅对 DoubleFree/NeverFree 保守跳过；PartialLeak 必须单独分析。
-    legacy_ml_key = f"MemoryLeak|{legacy_loc_key}"
-    if category in ("DoubleFree", "NeverFree") and legacy_ml_key in analyzed_keys:
-        return True
-    return legacy_loc_key in analyzed_keys
 
 
 def _validate_sar_paths(paths, logger):
@@ -204,7 +135,24 @@ def _validate_sar_paths(paths, logger):
     return True
 
 
+def _parse_cli_args():
+    parser = argparse.ArgumentParser(description="FPhandler SAR 告警研判 / 条目统计")
+    parser.add_argument(
+        "--stats-only",
+        action="store_true",
+        help="只统计告警条目（不启动 graph-reader / LLM）",
+    )
+    return parser.parse_args()
+
+
+def _stats_only_enabled(cli_stats_only: bool) -> bool:
+    return cli_stats_only or bool(getattr(_cfg, "STATS_ONLY", False))
+
+
 if __name__ == "__main__":
+    cli_args = _parse_cli_args()
+    stats_only = _stats_only_enabled(cli_args.stats_only)
+
     _load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
     batch_dirs = [
@@ -222,7 +170,7 @@ if __name__ == "__main__":
                 _cfg.RUN_LOG_STEM = _run_log_stem_for_batch_dirs(batch_dirs)
 
     main_logger = setup_logger(log_type="main")
-    main_logger.info("start")
+    main_logger.info("start%s", " (stats-only)" if stats_only else "")
     main_logger.info("SAR files: %s", sar_paths)
     if not _validate_sar_paths(sar_paths, main_logger):
         sys.exit(1)
@@ -230,131 +178,45 @@ if __name__ == "__main__":
     analyzed_path = getattr(_cfg, "ANALYZED_LOCATIONS_FILE", None) or os.path.join(
         RES_ROOT_PATH, "analyzed_allocation_locations.txt"
     )
-    analyzed_keys = _load_analyzed_location_keys(analyzed_path)
+    analyzed_keys = load_analyzed_location_keys(analyzed_path)
     main_logger.info(
         "dedupe: loaded %d keys from %s", len(analyzed_keys), analyzed_path
     )
 
-    graph_caller = CommandCaller()
     reader = AlterAnalyzer()
-    analyzer = create_analyzer()
+    analyzer = None
+    graph_caller = None
+    if not stats_only:
+        from free_analyzer import create_analyzer
+
+        graph_caller = CommandCaller()
+        analyzer = create_analyzer()
 
     global_idx = 0
     skipped = 0
     skipped_session_dup = 0
     concluded = 0
-    # 本次进程内已处理过的警报位置（与 analyzed_keys 互补：避免同批多文件中重复 fl:ln 多次调用模型）
     session_seen_loc_keys = set()
+    all_file_stats = []
 
     for sar_path in sar_paths:
-        # 1) 读取缺陷条目
-        alter_list = reader.read_alter_file(sar_path)
-        slice_dir = getattr(_cfg, "SLICE_DIR", None) or None
-        include_paths = getattr(_cfg, "SOURCE_PATH_INCLUDE", None) or None
-        focus_locs = getattr(_cfg, "EXPERIMENT_FOCUS_LOCATIONS", None) or None
-        focus_tol = int(getattr(_cfg, "EXPERIMENT_FOCUS_TOLERANCE", 0) or 0)
-        max_per_file = int(getattr(_cfg, "EXPERIMENT_MAX_ALERTS_PER_FILE", 0) or 0)
-        if include_paths:
-            alter_list = [
-                a for a in alter_list if alert_passes_source_filter(a, include_paths)
-            ]
-        if focus_locs:
-            alter_list = [
-                a
-                for a in alter_list
-                if alert_passes_focus_filter(a, focus_locs, focus_tol)
-            ]
-        if max_per_file > 0:
-            alter_list = alter_list[:max_per_file]
-        if getattr(_cfg, "UNINIT_GROUP_FROM_SLICES", True) and is_uninit_sar(sar_path):
-            before = len(alter_list)
-            alter_list = replace_uninit_with_slice_groups(
-                alter_list,
-                sar_path,
-                slice_dir,
-                include_substrings=include_paths,
-                max_samples=int(getattr(_cfg, "UNINIT_GROUP_MAX_SAMPLE_SLICES", 5) or 5),
-            )
-            main_logger.info(
-                "uninit group-from-slices: %s -> %d group alert(s)",
-                before,
-                len(alter_list),
-            )
-        if getattr(_cfg, "UAF_CLUSTER_BY_FREE_LOCATION", True):
-            before = len(alter_list)
-            uaf_raw = sum(
-                1
-                for a in alter_list
-                if (a.get_defect_type() if hasattr(a, "get_defect_type") else None)
-                == "UseAfterFree"
-            )
-            alter_list = cluster_uaf_alerts_by_free_location(alter_list)
-            uaf_clustered = sum(
-                1
-                for a in alter_list
-                if (a.get_defect_type() if hasattr(a, "get_defect_type") else None)
-                == "UseAfterFree"
-            )
-            main_logger.info(
-                "uaf cluster by free site: %d alerts (%d uaf raw) -> %d alerts (%d uaf clustered)",
-                before,
-                uaf_raw,
-                len(alter_list),
-                uaf_clustered,
-            )
-        skip_slice_enrich = (
-            getattr(_cfg, "UNINIT_GROUP_FROM_SLICES", True) and is_uninit_sar(sar_path)
-        )
-        slice_matched = (
-            0
-            if skip_slice_enrich
-            else enrich_alerts_with_slices(alter_list, sar_path, slice_dir)
-        )
-        if skip_slice_enrich:
-            slice_matched = sum(
-                1 for a in alter_list if getattr(a, "get_slice_context", lambda: None)()
-            )
-        alter_num = len(alter_list)
-        main_logger.info(
-            "file %s — %d alerts (%d with slice context)",
+        prepared = prepare_sar_alerts(
             sar_path,
-            alter_num,
-            slice_matched,
+            reader,
+            _cfg,
+            analyzed_keys,
+            session_seen_loc_keys,
+            logger=main_logger,
         )
+        all_file_stats.append(prepared.stats)
+        skipped += prepared.stats.skip_analyzed
+        skipped_session_dup += prepared.stats.skip_session_dup
 
-        # 2) 去重：历史已分析 + 本次运行内同位置只保留一条待分析
-        pending = []
-        for i in range(alter_num):
-            global_idx += 1
-            alter = alter_list[i]
-            loc_key = _alter_location_key(alter)
-            legacy_loc_key = _alter_location_key_legacy(alter)
-            category = _dedup_category(alter)
-            if loc_key and _already_analyzed(
-                loc_key, legacy_loc_key, category, analyzed_keys
-            ):
-                skipped += 1
-                main_logger.info(
-                    "skip (already analyzed) [%s] file %s index %d/%d",
-                    loc_key,
-                    os.path.basename(sar_path),
-                    i + 1,
-                    alter_num,
-                )
-                continue
-            if loc_key and loc_key in session_seen_loc_keys:
-                skipped_session_dup += 1
-                main_logger.info(
-                    "skip (duplicate alert location this run) [%s] file %s index %d/%d",
-                    loc_key,
-                    os.path.basename(sar_path),
-                    i + 1,
-                    alter_num,
-                )
-                continue
-            pending.append((global_idx, i, alter, loc_key))
-            if loc_key:
-                session_seen_loc_keys.add(loc_key)
+        alter_num = len(prepared.alter_list)
+        pending = prepared.pending
+
+        if stats_only:
+            continue
 
         if not pending:
             main_logger.info(
@@ -363,7 +225,6 @@ if __name__ == "__main__":
             )
             continue
 
-        # 3) 有待分析项：启动 graph-reader（按 SAR 解析 .bc），再跑 LLM Agent
         bc_path = graph_caller.ensure_bitcode_for_sar(sar_path)
         main_logger.info(
             "bitcode for %s -> %s (%d alert(s) to analyze)",
@@ -371,10 +232,11 @@ if __name__ == "__main__":
             bc_path,
             len(pending),
         )
-        for gidx, i, alter, loc_key in pending:
+        for i, alter, loc_key in pending:
+            global_idx += 1
             main_logger.info(
                 "analysing global %d — %s index %d/%d",
-                gidx,
+                global_idx,
                 os.path.basename(sar_path),
                 i + 1,
                 alter_num,
@@ -389,16 +251,28 @@ if __name__ == "__main__":
                     "no alert location key (fl:ln) for alter in %s", sar_path
                 )
 
-    main_logger.info(
-        "done: concluded=%d skipped_already_analyzed=%d skipped_session_dup_loc=%d analyzed_path=%s",
-        concluded,
-        skipped,
-        skipped_session_dup,
-        analyzed_path,
-    )
-
-    # 若曾启动 graph-reader，优雅退出（避免 send_query 在未启动时尝试拉起进程）
-    try:
-        CommandCaller()._cleanup_process()
-    except Exception:
-        pass
+    if stats_only:
+        print_stats_report(all_file_stats)
+        totals = aggregate_stats(all_file_stats)
+        main_logger.info(
+            "stats-only done: pending=%d skip_analyzed=%d skip_session_dup=%d",
+            totals.get("pending", 0),
+            totals.get("skip_analyzed", 0),
+            totals.get("skip_session_dup", 0),
+        )
+        stats_json_path = getattr(_cfg, "STATS_OUTPUT_JSON", None)
+        if stats_json_path:
+            write_stats_json(all_file_stats, stats_json_path)
+            main_logger.info("stats JSON written to %s", stats_json_path)
+    else:
+        main_logger.info(
+            "done: concluded=%d skipped_already_analyzed=%d skipped_session_dup_loc=%d analyzed_path=%s",
+            concluded,
+            skipped,
+            skipped_session_dup,
+            analyzed_path,
+        )
+        try:
+            CommandCaller()._cleanup_process()
+        except Exception:
+            pass

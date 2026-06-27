@@ -46,3 +46,9 @@ EXPERIMENT_MAX_ALERTS_PER_FILE = 0
 UNINIT_GROUP_FROM_SLICES = True
 UNINIT_GROUP_MAX_SAMPLE_SLICES = 5
 UAF_CLUSTER_BY_FREE_LOCATION = True
+
+# 只统计告警条目，不启动 graph-reader / LLM（也可用 python run.py --stats-only）
+STATS_ONLY = False
+# 非空时在 stats-only 模式下写入 JSON 报告，例如：
+# STATS_OUTPUT_JSON = os.path.join(RES_ROOT_PATH, "stats_report.json")
+STATS_OUTPUT_JSON = None
