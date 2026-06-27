@@ -39,7 +39,7 @@ LINKED_BC_DIR = "/path/to/linked_bc_dir"
 BITCODE_PATH = ""          # 为空时，按 SAR 文件主名在 LINKED_BC_DIR 下解析同名 .bc
 SAR_PATH = "/path/to/xxx.txt"
 SAR_BATCH_DIRS = []        # 批量分析目录列表，非空时优先于 SAR_PATH
-LLM_TYPE = "DeepSeek"      # 可选：DeepSeek / Qwen / Gemini
+LLM_TYPE = "DeepSeek"      # 可选：DeepSeek / Qwen
 ```
 
 说明：

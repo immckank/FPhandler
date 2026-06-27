@@ -1,7 +1,4 @@
-from google import genai
-from google.genai import types
 from abc import ABC, abstractmethod
-from pydantic import BaseModel
 from openai import OpenAI
 
 import json
@@ -24,10 +21,6 @@ from tools import (
     find_function_body_desc_free,
     find_callers_desc_free
 )
-
-class judgeResult(BaseModel):
-    classification: str
-    reasoning: str
 
 class FreeAnalysisModel(ABC):
     def __init__(self):
@@ -184,59 +177,6 @@ class FreeAnalysisModel(ABC):
             )
         return False
 
-class GeminiFreeAnalyzer(FreeAnalysisModel):
-    def __init__(self, model_name="gemini-2.5-flash"):
-        super().__init__()
-        self.model_name = model_name
-                 
-    def resposeToAlter(self, alter_prompt, user_prompt=""):
-        config = types.GenerateContentConfig(
-            system_instruction=SYS_PROMPT+ASSUMPTION_PROMPT,
-            response_schema=judgeResult,
-            response_mime_type="application/json",
-        )
-        client = genai.Client()
-        response = client.models.generate_content(
-            model=self.model_name,
-            contents=alter_prompt + "\n" + user_prompt,
-            config=config
-        )
-        return response.text
-    
-    def responseForAlter(self, alter, user_prompt="", allowed_tool_names = []):
-        # 与 OpenAI 路径不同；批处理去重以 FreeAnalysisModel 为准
-        allowed_tools = []
-        for tool_name in allowed_tool_names:
-            if tool_name == "dump_source_snippet":
-                allowed_tools.append(dump_source_snippet)
-            elif tool_name == "dump_source_line":
-                allowed_tools.append(dump_source_line)
-            elif tool_name == "find_callee":
-                allowed_tools.append(find_callee)
-            elif tool_name == "find_current_function":
-                allowed_tools.append(find_current_function)
-            elif tool_name == "find_callers":
-                allowed_tools.append(find_callers)
-            elif tool_name == "find_function_body":
-                allowed_tools.append(find_function_body)
-            elif tool_name == "get_path_cond_func":
-                allowed_tools.append(get_path_cond_func)
-            else:
-                raise ValueError(f"Unknown tool name: {tool_name}")
-        config = types.GenerateContentConfig(
-            system_instruction=SYS_PROMPT+ASSUMPTION_PROMPT,
-            # response_schema=judgeResult,
-            # response_mime_type="application/json",
-            tools=allowed_tools
-        )
-        client = genai.Client()
-        response = client.models.generate_content(
-            model=self.model_name,
-            contents=alter.to_prompt() + "\n" + user_prompt,
-            config=config
-        )
-        return response
-    
 class DeepSeekFreeAnalyzer(FreeAnalysisModel):
     def __init__(self, model_name="deepseek-chat"):
         super().__init__()
@@ -305,8 +245,6 @@ class HWFreeAnalyzer(FreeAnalysisModel):
 
 def create_analyzer():
     """Create the free-form analyzer for the configured LLM_TYPE."""
-    if LLM_TYPE == "Gemini":
-        return GeminiFreeAnalyzer()
     if LLM_TYPE == "DeepSeek":
         return DeepSeekFreeAnalyzer()
     if LLM_TYPE == "Qwen":

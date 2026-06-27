@@ -30,7 +30,7 @@ PROJECT_DESC = ""
 RES_ROOT_PATH = "RES"
 ANALYZED_LOCATIONS_FILE = os.path.join(RES_ROOT_PATH, "analyzed_locations.txt")
 
-LLM_TYPE = "DeepSeek"  # DeepSeek / Qwen / Gemini / Example / HW
+LLM_TYPE = "DeepSeek"  # DeepSeek / Qwen / Example / HW
 
 GRAPH_READER_DOCKER_IMAGE = "svf-llvm21"
 
