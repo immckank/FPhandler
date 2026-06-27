@@ -11,6 +11,11 @@ LINKED_BC_DIR = "/path/to/linked_bc_dir"
 BITCODE_PATH = ""
 
 SAR_PATH = "/path/to/xxx.txt"
+# 显式指定待分析的 warning 列表（非空时优先于 SAR_BATCH_DIRS / SAR_PATH）
+SAR_PATHS = [
+    # "/path/to/sar_output/total_leak_report.txt",
+    # "/path/to/sar_output/total_uaf_report.txt",
+]
 SAR_BATCH_DIRS = []
 SAR_BATCH_DIR = ""
 

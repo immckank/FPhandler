@@ -56,14 +56,51 @@ def _effective_batch_dir_list():
     return [d] if d else []
 
 
+def _normalize_sar_path_list(raw_paths):
+    """Expand user/config paths to absolute .txt SAR file paths."""
+    out = []
+    for p in raw_paths or []:
+        s = str(p).strip()
+        if not s:
+            continue
+        out.append(os.path.abspath(os.path.expanduser(s)))
+    return out
+
+
 def _resolve_sar_paths():
+    """
+    Resolve SAR inputs with priority:
+      1) SAR_PATHS — explicit list of warning .txt files
+      2) SAR_BATCH_DIRS / SAR_BATCH_DIR — scan dirs for svf_*.txt
+      3) SAR_PATH — single file
+    """
+    explicit = _normalize_sar_path_list(getattr(_cfg, "SAR_PATHS", None))
+    if explicit:
+        return explicit, True
+
     paths = []
     for d in _effective_batch_dir_list():
         if d and os.path.isdir(d):
             paths.extend(_txt_files_in_dir(d))
     if paths:
         return paths, True
-    return [SAR_PATH], False
+
+    sar_path = getattr(_cfg, "SAR_PATH", None) or ""
+    sar_path = str(sar_path).strip()
+    if sar_path:
+        return [os.path.abspath(os.path.expanduser(sar_path))], False
+    return [], False
+
+
+def _run_log_stem_for_sar_paths(paths):
+    if not paths:
+        return "sar-list"
+    if len(paths) == 1:
+        return os.path.splitext(os.path.basename(paths[0]))[0] or "sar"
+    stems = [os.path.splitext(os.path.basename(p))[0] for p in paths]
+    if len(stems) <= 3:
+        return "-".join(stems)
+    return f"{stems[0]}-and-{len(stems) - 1}-more"
 
 
 def _run_log_stem_for_batch_dirs(dirs):
@@ -176,9 +213,13 @@ if __name__ == "__main__":
         if d and os.path.isdir(d)
     ]
     sar_paths, sar_paths_from_batch = _resolve_sar_paths()
-    if sar_paths_from_batch and batch_dirs:
+    if sar_paths_from_batch:
         _cfg.RUN_SESSION_TIME_STR = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-        _cfg.RUN_LOG_STEM = _run_log_stem_for_batch_dirs(batch_dirs)
+        if not getattr(_cfg, "RUN_LOG_STEM", None):
+            if _normalize_sar_path_list(getattr(_cfg, "SAR_PATHS", None)):
+                _cfg.RUN_LOG_STEM = _run_log_stem_for_sar_paths(sar_paths)
+            elif batch_dirs:
+                _cfg.RUN_LOG_STEM = _run_log_stem_for_batch_dirs(batch_dirs)
 
     main_logger = setup_logger(log_type="main")
     main_logger.info("start")

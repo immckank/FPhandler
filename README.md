@@ -45,7 +45,8 @@ LLM_TYPE = "DeepSeek"      # 可选：DeepSeek / Qwen / Gemini
 说明：
 
 - 单文件模式：使用 `SAR_PATH`
-- 批处理模式：使用 `SAR_BATCH_DIRS`（会遍历目录下全部 `.txt`）
+- 指定列表：使用 `SAR_PATHS`（非空时优先，适合自选若干 warning 文件）
+- 批处理模式：使用 `SAR_BATCH_DIRS`（会遍历目录下全部 `svf_*.txt`）
 - 去重文件：`ANALYZED_LOCATIONS_FILE`（默认在 `RES` 下），用于跳过已完成结论的告警
 
 ## 模型密钥
