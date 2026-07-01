@@ -6,6 +6,7 @@ _FPH_ROOT = os.path.abspath(os.path.dirname(__file__))
 _WORKSPACE = os.path.abspath(os.path.join(_FPH_ROOT, ".."))
 
 PROJECT_ROOT = "/path/to/project/source"
+OUTPUT_DIR = "/path/to/saber/output"
 
 LINKED_BC_DIR = "/path/to/linked_bc_dir"
 BITCODE_PATH = ""
@@ -19,7 +20,7 @@ SAR_PATHS = [
 SAR_BATCH_DIRS = []
 SAR_BATCH_DIR = ""
 
-SLICE_DIR = ""
+SLICE_DIR = OUTPUT_DIR
 
 RUN_LOG_STEM = None
 RUN_SESSION_TIME_STR = None
@@ -27,8 +28,11 @@ RUN_SESSION_TIME_STR = None
 PROJECT_LABEL = "my-project"
 PROJECT_DESC = ""
 
-RES_ROOT_PATH = "RES"
+RES_ROOT_PATH = os.path.join(OUTPUT_DIR, "fphandler")
 ANALYZED_LOCATIONS_FILE = os.path.join(RES_ROOT_PATH, "analyzed_locations.txt")
+# LLM semantic facts are appended here as status=proposed; review them with
+# `python semantic_rules.py <file> --approve <id> --export-approved <out>`.
+SEMANTIC_RULE_REPOSITORY = os.path.join(RES_ROOT_PATH, "semantic_rules.json")
 
 LLM_TYPE = "DeepSeek"  # DeepSeek / Qwen / Example / HW
 

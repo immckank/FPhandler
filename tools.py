@@ -12,9 +12,33 @@ set_conclusion_desc_free = {
                     "description": "The classification of the alert, must be one of 'FP' (False Positive), 'TP' (True Positive), or 'UNCERTAIN'.",
                     "enum": ["FP", "TP", "UNCERTAIN"]
                 },
-                "reason": { "type": "string", "description": "A detailed explanation for the given classification."}
+                "reason": { "type": "string", "description": "A detailed explanation for the given classification."},
+                "semantic_candidates": {
+                    "type": "array",
+                    "description": "Only reusable, code-backed semantic facts. Return [] when none are justified.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "kind": {
+                                "type": "string",
+                                "enum": ["initializer", "memory_transfer", "allocator", "deallocator", "resource_open", "resource_close", "ownership_transfer", "heap_object_summary", "domain_hint"]
+                            },
+                            "function": {"type": "string"},
+                            "match": {"type": "string", "enum": ["exact", "substring"]},
+                            "effect": {"type": "string"},
+                            "target_arg": {"type": "integer", "minimum": -1},
+                            "source_arg": {"type": "integer", "minimum": -1},
+                            "length_arg": {"type": "integer", "minimum": -1},
+                            "field_path": {"type": "string"},
+                            "pair": {"type": "string"},
+                            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                            "reason": {"type": "string"}
+                        },
+                        "required": ["kind", "function", "confidence", "reason"]
+                    }
+                }
             },
-            "required": ["classification", "reason"]
+            "required": ["classification", "reason", "semantic_candidates"]
         }
     }
 }

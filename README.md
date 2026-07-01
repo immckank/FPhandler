@@ -1,55 +1,77 @@
 # FPhandler
 
-## 模块功能
+`FPhandler` 读取 SVFmemplus 的 Saber 告警及 `saber-report/v2` 报告，结合源码、报告语义和 `graph-reader` 查询能力，使用 LLM 将告警分类为 `TP`、`FP` 或 `UNCERTAIN`，并把结果写回原报告。
 
-`FPhandler` 是交付件3“基于大模型推理的定向选择性缺陷告警检测方法”的源码实现。  
-该模块读取 `SVFmemplus` 产出的告警报告（SAR），结合 `graph-reader` 提供的中间表示语义查询能力，完成告警自动研判（TP/FP/UNCERTAIN）。
+## 输入输出约定
 
-## 环境配置
+`OUTPUT_DIR` 是统一管线管理文件的唯一目录：
 
-请先按交付目录中的环境脚本准备运行环境，并安装 `requirements.txt` 依赖。
+- SVFmemplus 在其中写入 Saber TXT、Markdown、JSON 和 slice 文件；
+- FPhandler 从其中发现 `svf_*.txt`，并读取同主名的 `*_report.json`；
+- FPhandler 的日志、去重索引和语义规则库默认写入 `OUTPUT_DIR/fphandler/`；
+- LLM 分类和扩增语义原子写回原 `*_report.json`。
 
-## 目录说明
+例如：
 
 ```text
-FPhandler/
-├── config.example.py   # 配置模板（复制为 config.py 后修改）
-├── run.py              # 主入口
-├── command_caller.py   # graph-reader 拉起与通信
-├── alter_handler.py    # SAR 告警解析
-├── free_analyzer.py    # LLM 研判流程
-├── tools.py            # 分析工具接口
-├── script/             # 各分析对象的项目配置与入口
-│   ├── object1/        # openEuler kernel drivers/ub
-│   ├── object2/        # FalconFS
-│   └── object3/        # ubs-engine SDK
-├── RES/                # 输出目录（运行后自动生成，已 gitignore）
-└── SAR/                # 可选：放置 SVFmemplus 告警文件（已 gitignore）
+output/
+├── svf_falconfs_extended_leak.txt
+├── svf_falconfs_extended_leak_report.json
+├── svf_falconfs_extended_leak_report.md
+├── svf_falconfs_extended_leak_slices.json
+└── fphandler/
+    ├── RUN/
+    ├── TRACE/
+    ├── RESULT/
+    ├── analyzed_locations.txt
+    └── semantic_rules.json
 ```
 
-## 关键配置（`config.example.py`）
+## 环境与配置
 
-复制 `config.example.py` 为 `config.py` 后修改，或直接使用 `script/<object>/run_*.py` 入口（已内置对应项目配置）。
+安装 Python 依赖：
 
-最小必配项：
+```bash
+python -m pip install -r requirements.txt
+```
+
+复制配置模板：
+
+```bash
+cp config.example.py config.py
+```
+
+最小配置：
 
 ```python
 PROJECT_ROOT = "/path/to/project/source"
+OUTPUT_DIR = "/path/to/saber/output"
+
 LINKED_BC_DIR = "/path/to/linked_bc_dir"
-BITCODE_PATH = ""          # 为空时，按 SAR 文件主名在 LINKED_BC_DIR 下解析同名 .bc
-SAR_PATH = "/path/to/xxx.txt"
-SAR_BATCH_DIRS = []        # 批量分析目录列表，非空时优先于 SAR_PATH
-LLM_TYPE = "DeepSeek"      # 可选：DeepSeek / Qwen
+BITCODE_PATH = ""  # 为空时按 SAR 主名在 LINKED_BC_DIR 中解析 .bc
+
+SAR_PATH = ""
+SAR_PATHS = []
+SAR_BATCH_DIRS = []
+
+LLM_TYPE = "DeepSeek"  # DeepSeek / Qwen / Example / HW
+GRAPH_READER_DOCKER_IMAGE = "nf-image:llvm21"
 ```
 
-说明：
+告警来源优先级：
 
-- 单文件模式：使用 `SAR_PATH`
-- 指定列表：使用 `SAR_PATHS`（非空时优先，适合自选若干 warning 文件）
-- 批处理模式：使用 `SAR_BATCH_DIRS`（会遍历目录下全部 `svf_*.txt`）
-- 去重文件：`ANALYZED_LOCATIONS_FILE`（默认在 `RES` 下），用于跳过已完成结论的告警
+1. `OUTPUT_DIR` 存在 `svf_*.txt` 时，直接使用该目录；
+2. 否则使用非空的 `SAR_PATHS` 显式文件列表；
+3. 否则扫描 `SAR_BATCH_DIRS`；
+4. 最后回退到单个 `SAR_PATH`。
 
-## 模型密钥
+`SLICE_DIR` 通常保持为 `OUTPUT_DIR`。`RES_ROOT_PATH` 默认应设为：
+
+```python
+RES_ROOT_PATH = os.path.join(OUTPUT_DIR, "fphandler")
+```
+
+模型密钥通过环境变量提供：
 
 ```bash
 export DEEPSEEK_API_KEY=sk-xxxxx
@@ -59,52 +81,97 @@ export QWEN_API_KEY=sk-xxxxx
 
 ## 执行
 
-通用入口（需先准备 `config.py`）：
+通用入口：
 
 ```bash
 python run.py
 ```
 
-各分析对象专用入口（推荐）：
+只解析和统计告警，不启动 `graph-reader` 或调用 LLM：
 
 ```bash
-# Object1 全量缺陷
-python script/object1/run_all_defects.py
-
-# Object1 memory-file 子集
-python script/object1/run_memory_file.py
-
-# Object2 FalconFS 扩展集
-python script/object2/run_extended.py
-
-# Object2 BOF / uninit 专项
-python script/object2/run_bof.py
-python script/object2/run_uninit.py
-
-# Object3 ubs-engine SDK
-python script/object3/run_sdk_subset.py
+python run.py --stats-only
 ```
 
-执行流程：
+也可使用 `script/object1/`、`script/object2/` 和 `script/object3/` 下的项目专用入口。
 
-- 读取 SAR 告警并解析为结构化缺陷对象
-- 按“缺陷类型 + 源码位置”去重
-- 按 SAR 解析对应 `.bc`，启动/复用 `graph-reader`
-- 调用 LLM + 工具链进行逐条研判
-- 写入结果与日志
+## 报告复用与写回
 
-## 输出产物
+FPhandler 根据 TXT 文件主名定位同目录 `*_report.json`，直接使用已有字段：
 
-- `RES/RUN/`：任务运行日志
-- `RES/TRACE/`：模型与工具调用过程日志
-- `RES/RESULT/`：最终研判结论日志
-- `RES/analyzed_allocation_locations.txt`：已完成结论告警的位置去重索引
+- 源码位置与源码片段
+- 稳定告警 ID
+- 调用及值流轨迹
+- 路径条件
+- 求解器状态和摘要
+- slice/cluster 信息
 
-## 与交付件2联动
+LLM 完成分类后，告警记录写入：
 
-`FPhandler` 依赖 `SVFmemplus` 的两个输出：
+```json
+{
+  "triage": {
+    "analysis_time": "ISO-8601 UTC time",
+    "analysis_result": {
+      "classification": "TP | FP | UNCERTAIN",
+      "reason": "classification evidence",
+      "function_name": "related function"
+    },
+    "source": "FPhandler"
+  },
+  "llm_enrichment": {
+    "analysis_time": "ISO-8601 UTC time",
+    "analysis_result": {
+      "classification": "TP | FP | UNCERTAIN",
+      "reason": "classification evidence",
+      "function_name": "related function"
+    },
+    "semantic_facts": [],
+    "source_context": "...",
+    "path_conditions": [],
+    "trace": []
+  },
+  "semantic_candidates": []
+}
+```
 
-- 告警文本（SAR）作为输入待研判集合
-- `graph-reader` 作为语义查询后端（函数、路径、值流、节点信息等）
+其中 `analysis_time + analysis_result` 是分类结果的稳定接口。顶层兼容字段仍会保留，供已有消费者继续读取。
 
-建议先完成 `SVFmemplus` 构建并确保 `graph-reader` 可执行，再运行本模块。
+UAF 可按释放位置聚类，uninit 可按 slice 聚类，以减少重复 LLM 调用。一个聚类得到结论后，结果会写回所有匹配的具体告警记录；缺少聚类信息时自动回退为逐条分析。
+
+## 语义规则反馈
+
+LLM 只在源码或 IR 证据足够时生成可复用的 `semantic_candidates`。候选规则以 `proposed` 状态追加到：
+
+```text
+OUTPUT_DIR/fphandler/semantic_rules.json
+```
+
+人工审核并导出：
+
+```bash
+python semantic_rules.py "$OUTPUT_DIR/fphandler/semantic_rules.json" \
+  --approve '<rule-id>' \
+  --export-approved "$OUTPUT_DIR/fphandler/semantic_rules.approved.json"
+```
+
+再由 Saber 加载批准后的规则：
+
+```bash
+saber -uninit \
+  -saber-semantic-rules="$OUTPUT_DIR/fphandler/semantic_rules.approved.json" \
+  -report-dir="$OUTPUT_DIR" \
+  input.bc
+```
+
+规则支持 `initializer`、`memory_transfer`、`allocator`、`deallocator`、`resource_open`、`resource_close`、`ownership_transfer`、`heap_object_summary` 和 `domain_hint`。当前直接参与求解的是初始化、内存传输和资源 API；其他类型作为可审计证据及后续分析扩展接口。
+
+## 主要代码
+
+- `run.py`：告警发现、任务调度和统计入口
+- `saber_report.py`：v2 报告读取、上下文复用和原子写回
+- `alter_handler.py`：TXT/SAR 告警解析
+- `free_analyzer.py`：LLM 研判流程
+- `command_caller.py`：`graph-reader` 生命周期与通信
+- `semantic_rules.py`：语义规则审核和导出
+- `config.example.py`：统一目录配置模板

@@ -36,6 +36,7 @@ class FreeAnalysisModel(ABC):
             "find_function_body": find_function_body,
             "get_path_cond_func_": get_path_cond_func_,
         }   
+        self.last_result = None
         pass
     
     def send_message(self, messages, tools=""):
@@ -76,6 +77,7 @@ class FreeAnalysisModel(ABC):
         run.py 仅在此时把 alter.get_source_loc() 规范化为 fl:ln 写入去重文件。
         去重键由各缺陷类构造时的 source_loc（警报发生位置）决定，与是否 MemoryLeak 无关。
         """
+        self.last_result = None
         allowed_tools = [
             set_conclusion_desc_free, dump_source_snippet_desc_free, dump_source_line_desc_free, 
             find_current_function_desc_free, find_function_body_desc_free, find_callers_desc_free
@@ -135,6 +137,7 @@ class FreeAnalysisModel(ABC):
                     if "error" in function_response:
                         continue
                     function_response["function_name"] = alter_function_name
+                    self.last_result = function_response
                     self.analysis_logger.info(f"Tool response: {function_response}")
                     self.result_logger.info(f"{function_response}")
                     return True

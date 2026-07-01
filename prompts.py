@@ -7,6 +7,7 @@ Assess findings based on the defined threat model: prioritize vulnerabilities th
 
 P1: Ideal Execution Assumption
 Assume the program is running in a correct production environment, with proper configuration, adequate resources, and all necessary dependencies present.
+When concluding, also return reusable semantic_candidates. Only propose a candidate when source or IR evidence establishes a function-level effect. Distinguish full from partial or conditional initialization, include argument roles and field paths, and return an empty list when no reusable fact is justified.
 Internal inputs are assumed well-formed and correctly typed; external inputs (e.g., user input, network data) must be treated as potentially malicious.
 Assume a normal program lifecycle, disregarding scenarios with forced terminations (e.g., kill -9) and ensuring that cleanup logic runs on graceful shutdown.
 

@@ -6,6 +6,7 @@ from datetime import datetime
 
 from config import *
 import config as _cfg
+from saber_report import SaberReportStore, append_candidates, report_path_for_sar
 from utils import *
 
 from alter_handler import AlterAnalyzer
@@ -74,6 +75,12 @@ def _resolve_sar_paths():
       2) SAR_BATCH_DIRS / SAR_BATCH_DIR — scan dirs for svf_*.txt
       3) SAR_PATH — single file
     """
+    output_dir = str(getattr(_cfg, "OUTPUT_DIR", None) or "").strip()
+    if output_dir and os.path.isdir(output_dir):
+        paths = _txt_files_in_dir(output_dir)
+        if paths:
+            return paths, True
+
     explicit = _normalize_sar_path_list(getattr(_cfg, "SAR_PATHS", None))
     if explicit:
         return explicit, True
@@ -214,6 +221,22 @@ if __name__ == "__main__":
 
         alter_num = len(prepared.alter_list)
         pending = prepared.pending
+        report_store = SaberReportStore(
+            report_path_for_sar(
+                sar_path, getattr(_cfg, "OUTPUT_DIR", None)
+            )
+        )
+        report_records = {}
+        if report_store.available():
+            for _, alter, _ in pending:
+                record = report_store.attach_context(alter)
+                records = report_store.matching_records(alter)
+                if record is not None:
+                    report_records[id(alter)] = records
+            main_logger.info(
+                "saber-report/v2: matched %d/%d alert(s) from %s",
+                len(report_records), len(pending), report_store.path,
+            )
 
         if stats_only:
             continue
@@ -242,6 +265,19 @@ if __name__ == "__main__":
                 alter_num,
             )
             had_conclusion = analyzer.responseForAlter(alter)
+            result = getattr(analyzer, "last_result", None)
+            records = report_records.get(id(alter)) or []
+            if isinstance(result, dict) and records:
+                for record in records:
+                    report_store.record_triage(record, result)
+                alert_id = (records[0].get("alert") or {}).get("id", "")
+                candidate_path = getattr(_cfg, "SEMANTIC_RULE_REPOSITORY", None)
+                if candidate_path:
+                    append_candidates(
+                        candidate_path,
+                        alert_id,
+                        result.get("semantic_candidates") or [],
+                    )
             if had_conclusion is True and loc_key:
                 analyzed_keys.add(loc_key)
                 _append_analyzed_location(analyzed_path, loc_key)

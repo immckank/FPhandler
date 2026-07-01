@@ -53,7 +53,7 @@ def _location_query_payload(source_loc) -> Optional[dict]:
 system function
 '''
 
-def set_conclusion(classification: str, reason: str) -> Dict[str, str]:
+def set_conclusion(classification: str, reason: str, semantic_candidates=None) -> Dict[str, object]:
     """Sets the final conclusion for an alert analysis.
 
     This function is intended to be called at the end of an analysis to provide a definitive classification and the reasoning behind it.
@@ -74,7 +74,11 @@ def set_conclusion(classification: str, reason: str) -> Dict[str, str]:
     if reason is None:
         message = {"error" : "reason must not be none"}
         return message
-    message = {"classification" : classification, "reason" : reason}
+    message = {
+        "classification": classification,
+        "reason": reason,
+        "semantic_candidates": semantic_candidates if isinstance(semantic_candidates, list) else [],
+    }
     return message
 
 '''
