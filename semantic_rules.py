@@ -3,7 +3,11 @@ import argparse
 import json
 import sys
 
-from saber_report import ALLOWED_KINDS
+ALLOWED_KINDS = {
+    "initializer", "memory_transfer", "allocator", "deallocator",
+    "resource_open", "resource_close", "ownership_transfer",
+    "heap_object_summary", "domain_hint",
+}
 
 
 def validate(data):

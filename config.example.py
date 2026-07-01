@@ -1,6 +1,12 @@
 import os
 
-# 复制为 config.py 后按需修改，或直接使用 script/<object>/run_*.py 入口。
+# 复制为 config.py 后按需修改，或使用全局管线 script/config.py。
+#
+#   cp script/config.env.example script/config.env
+#   ./script/run_pipeline.sh
+#   # 或
+#   source script/lib/common.sh && load_config
+#   cd FPhandler && python3 run.py --config ../script/config.py
 
 _FPH_ROOT = os.path.abspath(os.path.dirname(__file__))
 _WORKSPACE = os.path.abspath(os.path.join(_FPH_ROOT, ".."))
@@ -8,19 +14,8 @@ _WORKSPACE = os.path.abspath(os.path.join(_FPH_ROOT, ".."))
 PROJECT_ROOT = "/path/to/project/source"
 OUTPUT_DIR = "/path/to/saber/output"
 
-LINKED_BC_DIR = "/path/to/linked_bc_dir"
 BITCODE_PATH = ""
-
-SAR_PATH = "/path/to/xxx.txt"
-# 显式指定待分析的 warning 列表（非空时优先于 SAR_BATCH_DIRS / SAR_PATH）
-SAR_PATHS = [
-    # "/path/to/sar_output/total_leak_report.txt",
-    # "/path/to/sar_output/total_uaf_report.txt",
-]
-SAR_BATCH_DIRS = []
-SAR_BATCH_DIR = ""
-
-SLICE_DIR = OUTPUT_DIR
+ALERT_DIR = os.path.join(OUTPUT_DIR, "alerts")
 
 RUN_LOG_STEM = None
 RUN_SESSION_TIME_STR = None
@@ -29,30 +24,11 @@ PROJECT_LABEL = "my-project"
 PROJECT_DESC = ""
 
 RES_ROOT_PATH = os.path.join(OUTPUT_DIR, "fphandler")
-ANALYZED_LOCATIONS_FILE = os.path.join(RES_ROOT_PATH, "analyzed_locations.txt")
-# LLM semantic facts are appended here as status=proposed; review them with
-# `python semantic_rules.py <file> --approve <id> --export-approved <out>`.
-SEMANTIC_RULE_REPOSITORY = os.path.join(RES_ROOT_PATH, "semantic_rules.json")
 
 LLM_TYPE = "DeepSeek"  # DeepSeek / Qwen / Example / HW
+ALERT_BATCH_SIZE = 5
 
-GRAPH_READER_DOCKER_IMAGE = "svf-llvm21"
+# Docker 模式下 graph-reader 与 saber 共用 SVF_DOCKER_IMAGE（由 script/config.env 导出）
+SVF_DOCKER_IMAGE = ""
 
-SOURCE_PATH_INCLUDE = []
-
-EXPERIMENT_FOCUS_LOCATIONS = []
-EXPERIMENT_FOCUS_TOLERANCE = 3
-
-EXPERIMENT_MAX_ALERTS_PER_FILE = 0
-
-# 默认开启：按 slice JSON 合并 uninit / 按 free 点合并 UAF，减少 LLM 调用次数。
-# uninit 合并需同名 *_slices.json（或 SLICE_DIR）；缺失时自动回退为逐条 SAR 告警。
-UNINIT_GROUP_FROM_SLICES = True
-UNINIT_GROUP_MAX_SAMPLE_SLICES = 5
-UAF_CLUSTER_BY_FREE_LOCATION = True
-
-# 只统计告警条目，不启动 graph-reader / LLM（也可用 python run.py --stats-only）
 STATS_ONLY = False
-# 非空时在 stats-only 模式下写入 JSON 报告，例如：
-# STATS_OUTPUT_JSON = os.path.join(RES_ROOT_PATH, "stats_report.json")
-STATS_OUTPUT_JSON = None

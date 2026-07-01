@@ -15,6 +15,7 @@ from prompts import *
 import re
 from tools import (
     set_conclusion_desc_free,
+    set_batch_conclusions_desc_free,
     dump_source_snippet_desc_free,
     dump_source_line_desc_free,
     find_current_function_desc_free,
@@ -37,6 +38,7 @@ class FreeAnalysisModel(ABC):
             "get_path_cond_func_": get_path_cond_func_,
         }   
         self.last_result = None
+        self.last_results = {}
         pass
     
     def send_message(self, messages, tools=""):
@@ -178,6 +180,84 @@ class FreeAnalysisModel(ABC):
                 repr(response_content),
                 alter_function_name,
             )
+        return False
+
+    def responseForAlerts(self, alerts):
+        """Analyze a related batch while requiring one result per stable alert id."""
+        self.last_results = {}
+        if not alerts:
+            return True
+        expected = {
+            alert.document.data["alert_id"]
+            for alert in alerts
+        }
+        prompt = (
+            "Analyze every alert below independently. They are batched only to reuse "
+            "context. Call set_batch_conclusions once with exactly one result for each "
+            "alert_id; do not propagate one representative verdict to other alerts.\n\n"
+            + "\n\n--- NEXT ALERT ---\n\n".join(a.to_prompt() for a in alerts)
+        )
+        tools = [
+            set_batch_conclusions_desc_free,
+            dump_source_snippet_desc_free,
+            dump_source_line_desc_free,
+            find_current_function_desc_free,
+            find_function_body_desc_free,
+            find_callers_desc_free,
+        ]
+        messages = [
+            {"role": "system", "content": SYS_PROMPT + ASSUMPTION_PROMPT},
+            {"role": "user", "content": prompt},
+        ]
+        for _ in range(12):
+            response = self.send_message(messages, tools)
+            if response is None:
+                return False
+            messages.append(response)
+            calls = getattr(response, "tool_calls", None) or []
+            if not calls:
+                return False
+            for call in calls:
+                name = call.function.name
+                try:
+                    arguments = safe_load_json(call.function.arguments)
+                except Exception as error:
+                    value = {"error": f"invalid tool arguments: {error}"}
+                else:
+                    if name == "set_batch_conclusions":
+                        results = arguments.get("results")
+                        if not isinstance(results, list):
+                            value = {"error": "results must be an array"}
+                        else:
+                            by_id = {
+                                item.get("alert_id"): item
+                                for item in results
+                                if isinstance(item, dict) and item.get("alert_id")
+                            }
+                            if set(by_id) != expected:
+                                value = {
+                                    "error": "result alert_id set does not match batch",
+                                    "missing": sorted(expected - set(by_id)),
+                                    "unexpected": sorted(set(by_id) - expected),
+                                }
+                            elif any(
+                                item.get("classification") not in {"TP", "FP", "UNCERTAIN"}
+                                or not isinstance(item.get("reason"), str)
+                                for item in by_id.values()
+                            ):
+                                value = {"error": "invalid classification or reason"}
+                            else:
+                                self.last_results = by_id
+                                return True
+                    elif name in self.tool_functions:
+                        value = self.tool_functions[name](**arguments)
+                    else:
+                        value = {"error": f"unknown tool: {name}"}
+                messages.append({
+                    "tool_call_id": call.id,
+                    "role": "tool",
+                    "content": value if isinstance(value, str) else json.dumps(value),
+                })
         return False
 
 class DeepSeekFreeAnalyzer(FreeAnalysisModel):

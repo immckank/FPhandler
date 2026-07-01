@@ -43,6 +43,47 @@ set_conclusion_desc_free = {
     }
 }
 
+set_batch_conclusions_desc_free = {
+    "type": "function",
+    "function": {
+        "name": "set_batch_conclusions",
+        "description": (
+            "Sets one independent conclusion for every alert in the current batch. "
+            "Every input alert_id must occur exactly once."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "alert_id": {"type": "string"},
+                            "classification": {
+                                "type": "string",
+                                "enum": ["FP", "TP", "UNCERTAIN"],
+                            },
+                            "reason": {"type": "string"},
+                            "semantic_candidates": {
+                                "type": "array",
+                                "items": {"type": "object"},
+                            },
+                        },
+                        "required": [
+                            "alert_id",
+                            "classification",
+                            "reason",
+                            "semantic_candidates",
+                        ],
+                    },
+                }
+            },
+            "required": ["results"],
+        },
+    },
+}
+
 dump_source_snippet_desc_free = {
     "type": "function",
     "function": {

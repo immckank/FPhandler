@@ -75,20 +75,24 @@ class CommandCaller:
             import config as _cfg
 
             if not (
-                getattr(_cfg, "GRAPH_READER_DOCKER_IMAGE", None)
+                os.environ.get("SVF_DOCKER_IMAGE")
+                or getattr(_cfg, "SVF_DOCKER_IMAGE", None)
+                or getattr(_cfg, "GRAPH_READER_DOCKER_IMAGE", None)
                 or os.environ.get("GRAPH_READER_DOCKER_IMAGE")
             ):
                 raise FileNotFoundError(
                     "PATH 中仍找不到 graph-reader：请先在 SVFmemplus 下编译生成 "
                     "Release-build/bin/graph-reader（或 Debug），并确认 setup.sh 能正确 export PATH；"
-                    "或在 config.GRAPH_READER_DOCKER_IMAGE 中指定 Docker 镜像。"
+                    "或在全局 config.env 设置 svf_docker_image。"
                 )
 
     def _graph_reader_docker_image(self):
         import config as _cfg
 
         return (
-            getattr(_cfg, "GRAPH_READER_DOCKER_IMAGE", None)
+            os.environ.get("SVF_DOCKER_IMAGE")
+            or getattr(_cfg, "SVF_DOCKER_IMAGE", None)
+            or getattr(_cfg, "GRAPH_READER_DOCKER_IMAGE", None)
             or os.environ.get("GRAPH_READER_DOCKER_IMAGE")
             or ""
         ).strip()
