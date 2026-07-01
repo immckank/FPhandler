@@ -31,6 +31,7 @@ _bootstrap_config_from_cli()
 import config as _cfg
 from alert_document import AlertDocument, UnifiedAlert
 from command_caller import CommandCaller
+from semantic_rule_repository import append_candidates
 from utils import setup_logger
 
 
@@ -130,7 +131,11 @@ def main() -> int:
     graph.ensure_bitcode_for_sar(pending[0].path)
     analyzer = create_analyzer()
     concluded = 0
-    max_batch = max(1, int(getattr(_cfg, "ALERT_BATCH_SIZE", 5) or 5))
+    semantic_rules_path = os.path.abspath(
+        getattr(_cfg, "SEMANTIC_RULE_REPOSITORY", os.path.join(_cfg.OUTPUT_DIR, "semantic_rules.json"))
+    )
+    semantic_appended = 0
+    max_batch = max(1, int(getattr(_cfg, "ALERT_BATCH_SIZE", 8) or 8))
     batches = make_batches(pending, max_batch)
     for index, batch in enumerate(batches, 1):
         logger.info(
@@ -141,14 +146,9 @@ def main() -> int:
             [document.data["alert_id"] for document in batch],
         )
         alerts = [UnifiedAlert(document) for document in batch]
-        if len(alerts) == 1:
-            success = analyzer.responseForAlter(alerts[0]) is True
-            results = {
-                batch[0].data["alert_id"]: getattr(analyzer, "last_result", None)
-            }
-        else:
-            success = analyzer.responseForAlerts(alerts) is True
-            results = getattr(analyzer, "last_results", {})
+        batch_id = f"B{index:04d}"
+        success = analyzer.responseForAlerts(alerts, batch_id=batch_id) is True
+        results = getattr(analyzer, "last_results", {})
         if not success:
             logger.warning("no complete conclusion for batch %d", index)
             continue
@@ -159,7 +159,26 @@ def main() -> int:
                 continue
             document.write_classification(result)
             concluded += 1
-    logger.info("done: concluded=%d pending=%d", concluded, len(pending) - concluded)
+            try:
+                added = append_candidates(
+                    semantic_rules_path,
+                    document.data["alert_id"],
+                    result.get("semantic_candidates"),
+                )
+                semantic_appended += added
+            except (OSError, ValueError) as error:
+                logger.warning(
+                    "semantic_rules append failed for %s: %s",
+                    document.data["alert_id"],
+                    error,
+                )
+    logger.info(
+        "done: concluded=%d pending=%d semantic_rules_appended=%d path=%s",
+        concluded,
+        len(pending) - concluded,
+        semantic_appended,
+        semantic_rules_path,
+    )
     graph._cleanup_process()
     return 0
 

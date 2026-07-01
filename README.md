@@ -41,12 +41,13 @@ python3 run.py --config ../script/config.py
 已有 `classification` 的警报会被跳过。`--stats-only` 只校验和统计 JSON，
 不会启动 graph-reader 或调用模型。
 
-UAF 按 free 位置、UNINIT 按对象类型组成最多 `ALERT_BATCH_SIZE` 条的请求。
-批处理工具要求 Agent 为批次内每个 `alert_id` 返回独立
-`classification/reason`；ID 集不完整时整批拒绝写回。
+UAF 按 free 位置、UNINIT 按对象类型组成最多 `ALERT_BATCH_SIZE`（默认 8）
+条的请求。Agent 只看到 `B0001-A01` 形式的批内短 ID；磁盘中的 SHA-256
+canonical ID 不变。一次 conclusion 可用 `alert_ids` 覆盖一条或多条警报，
+也可分多轮提交不同结论。循环仅在本批全部 ID 已分类后结束并统一写回。
 
 ## 测试
 
 ```bash
-python3 -m unittest test_alert_document.py
+python3 -m unittest discover -p 'test_*.py'
 ```

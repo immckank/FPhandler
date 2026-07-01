@@ -53,7 +53,7 @@ def _location_query_payload(source_loc) -> Optional[dict]:
 system function
 '''
 
-def set_conclusion(classification: str, reason: str, semantic_candidates=None) -> Dict[str, object]:
+def set_conclusion(alert_ids, classification: str, reason: str, semantic_candidates=None) -> Dict[str, object]:
     """Sets the final conclusion for an alert analysis.
 
     This function is intended to be called at the end of an analysis to provide a definitive classification and the reasoning behind it.
@@ -66,6 +66,10 @@ def set_conclusion(classification: str, reason: str, semantic_candidates=None) -
     Returns:
         If the input is invalid, it returns a dictionary with an error message.
     """
+    if not isinstance(alert_ids, list) or not alert_ids or any(
+        not isinstance(alert_id, str) or not alert_id for alert_id in alert_ids
+    ):
+        return {"error": "alert_ids must contain one or more non-empty strings"}
     # check if classification in [FP, TP, UNCERTAIN]
     if classification not in ["FP", "TP", "UNCERTAIN"]:
         message = {"error" : "classification must be one of [FP, TP, UNCERTAIN]"}
@@ -75,6 +79,7 @@ def set_conclusion(classification: str, reason: str, semantic_candidates=None) -
         message = {"error" : "reason must not be none"}
         return message
     message = {
+        "alert_ids": alert_ids,
         "classification": classification,
         "reason": reason,
         "semantic_candidates": semantic_candidates if isinstance(semantic_candidates, list) else [],

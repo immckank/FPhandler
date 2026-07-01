@@ -24,9 +24,10 @@ PROJECT_LABEL = "my-project"
 PROJECT_DESC = ""
 
 RES_ROOT_PATH = os.path.join(OUTPUT_DIR, "fphandler")
+SEMANTIC_RULE_REPOSITORY = os.path.join(OUTPUT_DIR, "semantic_rules.json")
 
 LLM_TYPE = "DeepSeek"  # DeepSeek / Qwen / Example / HW
-ALERT_BATCH_SIZE = 5
+ALERT_BATCH_SIZE = 8
 
 # Docker 模式下 graph-reader 与 saber 共用 SVF_DOCKER_IMAGE（由 script/config.env 导出）
 SVF_DOCKER_IMAGE = ""

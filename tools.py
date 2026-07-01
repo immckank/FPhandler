@@ -7,6 +7,12 @@ set_conclusion_desc_free = {
         "parameters": {
             "type": "object",
             "properties": {
+                "alert_ids": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {"type": "string"},
+                    "description": "One or more alert IDs covered by this conclusion.",
+                },
                 "classification": {
                     "type": "string",
                     "description": "The classification of the alert, must be one of 'FP' (False Positive), 'TP' (True Positive), or 'UNCERTAIN'.",
@@ -38,7 +44,7 @@ set_conclusion_desc_free = {
                     }
                 }
             },
-            "required": ["classification", "reason", "semantic_candidates"]
+            "required": ["alert_ids", "classification", "reason", "semantic_candidates"]
         }
     }
 }
@@ -48,8 +54,9 @@ set_batch_conclusions_desc_free = {
     "function": {
         "name": "set_batch_conclusions",
         "description": (
-            "Sets one independent conclusion for every alert in the current batch. "
-            "Every input alert_id must occur exactly once."
+            "Classifies one or more alerts. A conclusion may cover multiple alert IDs "
+            "when they share a verdict. Call it repeatedly if different groups need "
+            "different verdicts; analysis ends only after every batch ID is covered."
         ),
         "parameters": {
             "type": "object",
@@ -59,7 +66,12 @@ set_batch_conclusions_desc_free = {
                     "items": {
                         "type": "object",
                         "properties": {
-                            "alert_id": {"type": "string"},
+                            "alert_ids": {
+                                "type": "array",
+                                "minItems": 1,
+                                "items": {"type": "string"},
+                                "description": "One or more short IDs shown in the current batch.",
+                            },
                             "classification": {
                                 "type": "string",
                                 "enum": ["FP", "TP", "UNCERTAIN"],
@@ -71,7 +83,7 @@ set_batch_conclusions_desc_free = {
                             },
                         },
                         "required": [
-                            "alert_id",
+                            "alert_ids",
                             "classification",
                             "reason",
                             "semantic_candidates",

@@ -126,8 +126,13 @@ class UnifiedAlert:
     def get_defect_type(self):
         return self.defect_type
 
-    def to_prompt(self) -> str:
-        payload = json.dumps(self.document.data, ensure_ascii=False, indent=2)
+    def to_prompt(self, agent_id: str | None = None) -> str:
+        data = dict(self.document.data)
+        if agent_id is not None:
+            # The canonical SHA-256 remains on disk for stable cross-run identity.
+            # The model only needs a short, unambiguous ID within this batch.
+            data["alert_id"] = agent_id
+        payload = json.dumps(data, ensure_ascii=False, indent=2)
         return (
             "Classify this Saber static-analysis alert. `path` is a pruned SVFG "
             "value-flow witness; branch entries carry the required control outcome. "

@@ -13,6 +13,7 @@ from config import *
 from utils import *
 from prompts import *
 import re
+from batch_conclusions import BatchConclusions
 from tools import (
     set_conclusion_desc_free,
     set_batch_conclusions_desc_free,
@@ -80,6 +81,11 @@ class FreeAnalysisModel(ABC):
         去重键由各缺陷类构造时的 source_loc（警报发生位置）决定，与是否 MemoryLeak 无关。
         """
         self.last_result = None
+        if hasattr(alter, "document"):
+            conclusion_id = alter.document.data["alert_id"]
+        else:
+            source = alter.get_source_loc() if hasattr(alter, "get_source_loc") else None
+            conclusion_id = f"legacy:{source or getattr(alter, 'source_location', 'unknown')}"
         allowed_tools = [
             set_conclusion_desc_free, dump_source_snippet_desc_free, dump_source_line_desc_free, 
             find_current_function_desc_free, find_function_body_desc_free, find_callers_desc_free
@@ -90,7 +96,15 @@ class FreeAnalysisModel(ABC):
         self.result_logger.info(f"\nPrompt: {alter.to_prompt()}\n")
         messages = [
             {"role": "system", "content": SYS_PROMPT + ASSUMPTION_PROMPT},
-            {"role": "user", "content": alter.to_prompt() + "\n" + project_prompt}
+            {
+                "role": "user",
+                "content": (
+                    alter.to_prompt()
+                    + "\n"
+                    + project_prompt
+                    + f"\nCall set_conclusion with alert_ids=[{conclusion_id!r}]."
+                ),
+            }
         ]
         # find_current_function 在失败时返回 {"error": ...}；优先用结构化 fl/ln 发后端
         func_info = find_current_function(
@@ -137,6 +151,22 @@ class FreeAnalysisModel(ABC):
                 if tool_function_name == "set_conclusion":
                     function_response = set_conclusion(**tool_arguments)
                     if "error" in function_response:
+                        messages.append({
+                            "tool_call_id": tool_call.id,
+                            "role": "tool",
+                            "content": json.dumps(function_response),
+                        })
+                        continue
+                    if function_response.get("alert_ids") != [conclusion_id]:
+                        function_response = {
+                            "error": "alert_ids must exactly match the current alert",
+                            "expected": [conclusion_id],
+                        }
+                        messages.append({
+                            "tool_call_id": tool_call.id,
+                            "role": "tool",
+                            "content": json.dumps(function_response),
+                        })
                         continue
                     function_response["function_name"] = alter_function_name
                     self.last_result = function_response
@@ -182,20 +212,26 @@ class FreeAnalysisModel(ABC):
             )
         return False
 
-    def responseForAlerts(self, alerts):
-        """Analyze a related batch while requiring one result per stable alert id."""
+    def responseForAlerts(self, alerts, batch_id="B0001"):
+        """Analyze alerts until every batch-local ID has a conclusion."""
         self.last_results = {}
         if not alerts:
             return True
-        expected = {
-            alert.document.data["alert_id"]
-            for alert in alerts
+        id_map = {
+            f"{batch_id}-A{index:02d}": alert.document.data["alert_id"]
+            for index, alert in enumerate(alerts, 1)
         }
+        state = BatchConclusions(id_map)
         prompt = (
-            "Analyze every alert below independently. They are batched only to reuse "
-            "context. Call set_batch_conclusions once with exactly one result for each "
-            "alert_id; do not propagate one representative verdict to other alerts.\n\n"
-            + "\n\n--- NEXT ALERT ---\n\n".join(a.to_prompt() for a in alerts)
+            f"Analyze batch {batch_id}. Every alert must be classified before you finish. "
+            "Call set_batch_conclusions with one or more conclusions. Each conclusion "
+            "must contain one or more alert_ids; group IDs only when the evidence supports "
+            "the same classification and reason. You may call the tool multiple times. "
+            "Use only the short IDs shown below.\n\n"
+            + "\n\n--- NEXT ALERT ---\n\n".join(
+                alert.to_prompt(short_id)
+                for short_id, alert in zip(id_map, alerts)
+            )
         )
         tools = [
             set_batch_conclusions_desc_free,
@@ -216,7 +252,14 @@ class FreeAnalysisModel(ABC):
             messages.append(response)
             calls = getattr(response, "tool_calls", None) or []
             if not calls:
-                return False
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "The batch is not complete. Call set_batch_conclusions for "
+                        f"these remaining IDs: {state.missing}"
+                    ),
+                })
+                continue
             for call in calls:
                 name = call.function.name
                 try:
@@ -225,30 +268,16 @@ class FreeAnalysisModel(ABC):
                     value = {"error": f"invalid tool arguments: {error}"}
                 else:
                     if name == "set_batch_conclusions":
-                        results = arguments.get("results")
-                        if not isinstance(results, list):
-                            value = {"error": "results must be an array"}
-                        else:
-                            by_id = {
-                                item.get("alert_id"): item
-                                for item in results
-                                if isinstance(item, dict) and item.get("alert_id")
-                            }
-                            if set(by_id) != expected:
-                                value = {
-                                    "error": "result alert_id set does not match batch",
-                                    "missing": sorted(expected - set(by_id)),
-                                    "unexpected": sorted(set(by_id) - expected),
-                                }
-                            elif any(
-                                item.get("classification") not in {"TP", "FP", "UNCERTAIN"}
-                                or not isinstance(item.get("reason"), str)
-                                for item in by_id.values()
-                            ):
-                                value = {"error": "invalid classification or reason"}
-                            else:
-                                self.last_results = by_id
-                                return True
+                        value = state.add(arguments.get("results"))
+                        self.analysis_logger.info(
+                            "Batch %s conclusion progress: %s", batch_id, value
+                        )
+                        self.result_logger.info(
+                            "Batch %s conclusion progress: %s", batch_id, value
+                        )
+                        if state.complete:
+                            self.last_results = state.canonical_results()
+                            return True
                     elif name in self.tool_functions:
                         value = self.tool_functions[name](**arguments)
                     else:
