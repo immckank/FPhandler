@@ -51,6 +51,10 @@ canonical ID 不变。一次 conclusion 可用 `alert_ids` 覆盖一条或多条
 每个成功落盘的警报记录 `wrote conclusion`，TRACE 会记录每轮响应、工具调用
 以及尚未完成的短 ID。
 
+Agent 默认最多运行 32 轮，并至少保留最后 10 轮（或批大小 + 2，取较大值）
+强制提交结论。可通过 `AGENT_MAX_TURNS` 和
+`AGENT_CONCLUSION_RESERVE_TURNS` 调整。
+
 ## 测试
 
 ```bash

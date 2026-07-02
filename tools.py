@@ -57,7 +57,10 @@ dump_source_snippet_desc_free = {
     "type": "function",
     "function": {
         "name": "dump_source_snippet",
-        "description": "Dumps a snippet of source code from a file between the given line numbers.",
+        "description": (
+            "Dumps source lines. Copy a path from alert evidence or a previous tool "
+            "result; source/mount prefixes and minor directory mismatches are resolved."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -74,7 +77,7 @@ dump_source_line_desc_free = {
     "type": "function",
     "function": {
         "name": "dump_source_line",
-        "description": "Dumps a single line of source code from a file.",
+        "description": "Dumps one source line using a path from alert evidence or another tool.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -90,7 +93,7 @@ find_current_function_desc_free = {
     "type": "function",
     "function": {
         "name": "find_current_function",
-        "description": "Finds the function in which the given source location exists.",
+        "description": "Finds the function containing an exact location copied from alert evidence.",
         "parameters": {
             "type": "object",
             "properties": { "source_location": {"type": "string", "description": "The source location, in the format 'filename.c:line_number'."} },
@@ -103,7 +106,10 @@ find_function_body_desc_free = {
     "type": "function",
     "function": {
         "name": "find_function_body",
-        "description": "Finds the function body by its name.",
+        "description": (
+            "Finds a function body by its exact IR/mangled name. Do not pass class "
+            "names, macro names, or guessed demangled fragments."
+        ),
         "parameters": {
             "type": "object",
             "properties": { "function_name": {"type": "string", "description": "The name of the function to find."} },

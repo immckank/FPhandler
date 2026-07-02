@@ -5,6 +5,7 @@ import logging
 import datetime as _dt
 import json
 import re
+from functools import lru_cache
 
 
 def resolve_bitcode_path_for_sar(sar_path: str) -> str:
@@ -87,60 +88,66 @@ def setup_logger(log_type):
 #             return os.path.relpath(full_path, PROJECT_ROOT)
 #     return None
 
+@lru_cache(maxsize=1)
+def _project_source_files():
+    root = os.path.abspath(PROJECT_ROOT)
+    return tuple(
+        os.path.relpath(os.path.join(directory, name), root).replace("\\", "/")
+        for directory, _, names in os.walk(root)
+        for name in names
+    )
+
+
 def find_file_path(file_name):
-    """
-    找到指定项目中指定文件名的路径。
-    
-    支持两种输入格式：
-    1. 简单文件名：如 "tiffcrop.c"
-    2. 相对路径：如 "libtiff/tiffcrop.c" 或 "crypto/evp/e_des3.c"
-    
-    如果有多个同名文件，优先返回路径匹配度最高的那个。
-    """
-    # 提取文件名部分
-    base_name = os.path.basename(file_name)
-    
-    # 提取传入的相对路径部分（用于匹配）
-    input_dir = os.path.dirname(file_name) if os.sep in file_name or '/' in file_name else ""
-    # 标准化路径分隔符
-    input_dir = input_dir.replace('\\', '/').replace(os.sep, '/')
-    
-    # 兼容旧 SAR：路径可能带源码树根目录名前缀，去掉后与 PROJECT_ROOT 下相对路径一致
-    _legacy_prefix = os.path.basename(PROJECT_ROOT) + '/'
-    if input_dir.startswith(_legacy_prefix):
-        input_dir = input_dir[len(_legacy_prefix):]
-    
-    # 搜索所有匹配的文件路径（相对 PROJECT_ROOT）
-    matching_paths = []
+    """Resolve GraphReader/model paths to one project-relative source path."""
+    if not isinstance(file_name, str) or not file_name.strip():
+        return None
     project_root = os.path.abspath(PROJECT_ROOT)
     if not os.path.isdir(project_root):
         return None
-    for root, dirs, files in os.walk(project_root):
-        if base_name in files:
-            full_path = os.path.join(root, base_name)
-            rel_path = os.path.relpath(full_path, project_root)
-            matching_paths.append(rel_path)
-    
-    # 如果没找到任何匹配
-    if not matching_paths:
+
+    normalized = os.path.normpath(file_name.strip()).replace("\\", "/")
+    if os.path.isabs(normalized):
+        relative = os.path.relpath(normalized, project_root).replace("\\", "/")
+        if not relative.startswith("../") and os.path.isfile(
+            os.path.join(project_root, relative)
+        ):
+            return relative
+
+    normalized = normalized.lstrip("./")
+    base_name = normalized.rsplit("/", 1)[-1]
+    matching = [
+        path for path in _project_source_files()
+        if path.rsplit("/", 1)[-1] == base_name
+    ]
+    if not matching:
         return None
-    
-    # 如果只有一个匹配，直接返回
-    if len(matching_paths) == 1:
-        return matching_paths[0]
-    
-    # 如果有多个匹配且传入的是路径，选择最匹配的
-    # print(f"matching_paths: {matching_paths}")
-    if input_dir:
-        # 收集所有包含 input_dir 的匹配路径
-        for path in list(matching_paths):  # 遍历副本，避免迭代中 remove 漏项
-            normalized_path = path.replace('\\', '/').replace(os.sep, '/')
-            if not normalized_path.endswith(input_dir + '/' + base_name):
-                matching_paths.remove(path)
-        if not matching_paths:
-            return None
-    
-    return min(matching_paths, key=len)
+
+    exact = [
+        path for path in matching
+        if normalized == path or normalized.endswith("/" + path)
+    ]
+    if exact:
+        return min(exact, key=len)
+    if len(matching) == 1:
+        return matching[0]
+    if "/" not in normalized:
+        # Preserve the historical basename-only behavior while preferring the
+        # nearest project file over a deeply nested third-party duplicate.
+        return min(matching, key=lambda path: (len(path), path))
+
+    wanted = normalized.split("/")
+
+    def suffix_score(candidate):
+        score = 0
+        for left, right in zip(reversed(wanted), reversed(candidate.split("/"))):
+            if left != right:
+                break
+            score += 1
+        return score
+
+    ranked = sorted(matching, key=lambda path: (-suffix_score(path), len(path), path))
+    return ranked[0] if suffix_score(ranked[0]) > 1 else None
 
 
 # --- Location protocol: fl / ln / cl (structured) vs location string (LLM tool / legacy) ---

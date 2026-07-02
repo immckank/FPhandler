@@ -185,6 +185,20 @@ def main() -> int:
         semantic_appended,
         semantic_rules_path,
     )
+    failure_summary = analyzer.tool_failure_recorder.summary()
+    summary_path = failure_summary["path"].replace(".jsonl", ".summary.json")
+    with open(summary_path, "w", encoding="utf-8") as handle:
+        import json as _json
+
+        _json.dump(failure_summary, handle, ensure_ascii=False, indent=2)
+    logger.info(
+        "tool_failures total=%d path=%s summary=%s by_tool=%s by_kind=%s",
+        failure_summary["total"],
+        failure_summary["path"],
+        summary_path,
+        failure_summary["by_tool"],
+        failure_summary["by_kind"],
+    )
     graph._cleanup_process()
     return 0
 

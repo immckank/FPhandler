@@ -167,6 +167,21 @@ def find_callee(source_location) -> Optional[List[Dict[str, Any]]]:
         return res_json
     return None
 
+def _itanium_body_aliases(function_name: str) -> List[str]:
+    """Return ABI-equivalent constructor/destructor names with emitted bodies."""
+    aliases = [function_name]
+    # C1/D1 are complete-object entry points. LLVM commonly emits/indexes only
+    # the C2/D2 base-object body at the same source location.
+    for source, target in (("C1", "C2"), ("D1", "D2"), ("C3", "C2"), ("D0", "D2")):
+        match = re.search(source + r"(?=E)", function_name)
+        if match:
+            marker = match.start()
+            candidate = function_name[:marker] + target + function_name[marker + 2:]
+            if candidate not in aliases:
+                aliases.append(candidate)
+    return aliases
+
+
 def find_function_body(function_name: str) -> Optional[Dict[str, Any]]:
     """Finds the function body by its name.
 
@@ -180,21 +195,40 @@ def find_function_body(function_name: str) -> Optional[Dict[str, Any]]:
         {'function_name': 'target_func', 'filename': 'a.c', 'start_line': 5,
          'end_line': 25, 'function_body': '...'}
     """
+    if not isinstance(function_name, str) or not function_name:
+        return {"error": "function_name must be a non-empty string"}
     command_caller = CommandCaller()
-    query = {
-        "command": "find-function-body-by-name",
-        "name": function_name
-    }
-    res = command_caller.send_query(query)
-    if res:
+    last_error = None
+    for candidate in _itanium_body_aliases(function_name):
+        res = command_caller.send_query({
+            "command": "find-function-body-by-name",
+            "name": candidate,
+        })
+        if not res:
+            last_error = "GraphReader returned an empty response."
+            continue
         res_json = json.loads(res)
-        error = res_json.get("error", None)
+        error = res_json.get("error")
         if error:
-            return {"error": f"Error finding function body for {function_name}, plesse check if the name is right. {error}"}
+            last_error = str(error)
+            continue
+        if candidate != function_name:
+            res_json["requested_function_name"] = function_name
+            res_json["resolved_abi_alias"] = candidate
+        resolved = find_file_path(res_json["filename"])
+        if resolved:
+            res_json["filename"] = resolved
         func_body = dump_source_snippet(res_json["filename"], res_json['start_line'], res_json['end_line'])
         res_json["function_body"] = func_body
         return res_json
-    return None
+    return {
+        "error": (
+            f"Function body unavailable for {function_name!r}. "
+            f"GraphReader: {last_error or 'unknown error'} "
+            "Use an exact function symbol copied from alert IR; macros and "
+            "non-emitted implicit functions have no queryable body."
+        )
+    }
 
 def find_current_function(
     source_location=None,
@@ -221,6 +255,12 @@ def find_current_function(
         source_location = f"{file_name}:{int(line_number)}"
     if source_location is None:
         return {"error": "Invalid source location."}
+    if isinstance(source_location, str):
+        parsed = parse_source_location_to_fl_ln(source_location)
+        if parsed:
+            resolved = find_file_path(parsed["fl"])
+            if resolved:
+                source_location = f"{resolved}:{parsed['ln']}"
     if isinstance(source_location, str) and not SOURCE_LOCATION_PATTERN.match(source_location):
         if not parse_source_location_to_fl_ln(source_location):
             return {"error": "Invalid source location format, source_location should be in the format 'filename.c:line_number'."}
@@ -235,6 +275,9 @@ def find_current_function(
         if error:
             return {"error": f"Error finding current function for {source_location!s}, check if the location is right."}
         _strip_error_false(res_json)
+        resolved = find_file_path(res_json["filename"])
+        if resolved:
+            res_json["filename"] = resolved
         func_body = dump_source_snippet(res_json["filename"], res_json['start_line'], res_json['end_line'])
         res_json["function_body"] = func_body
         return res_json

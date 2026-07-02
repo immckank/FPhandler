@@ -10,10 +10,12 @@ import memory_defect
 
 from analysis_operators import *
 from config import *
+import config as _cfg
 from utils import *
 from prompts import *
 import re
 from batch_conclusions import BatchConclusions
+from tool_failures import ToolFailureRecorder, classify_tool_failure
 from tools import (
     set_conclusion_desc_free,
     dump_source_snippet_desc_free,
@@ -39,8 +41,38 @@ class FreeAnalysisModel(ABC):
         }   
         self.last_result = None
         self.last_results = {}
-        pass
-    
+        self.tool_failure_recorder = ToolFailureRecorder()
+
+    def _maybe_record_tool_failure(
+        self,
+        tool: str,
+        response,
+        *,
+        batch_id: str = "",
+        turn: int = 0,
+        arguments=None,
+        context: str = "",
+    ) -> None:
+        failure = classify_tool_failure(response)
+        if failure is None:
+            return
+        self.tool_failure_recorder.record(
+            tool=tool,
+            response=response,
+            batch_id=batch_id,
+            turn=turn,
+            arguments=arguments,
+            context=context,
+        )
+        self.analysis_logger.warning(
+            "tool failure batch=%s turn=%d tool=%s kind=%s detail=%s",
+            batch_id or "-",
+            turn,
+            tool,
+            failure["kind"],
+            failure["detail"],
+        )
+
     def send_message(self, messages, tools="", tool_choice=None):
         max_attempts = 3
         for attempt in range(1, max_attempts + 1):
@@ -141,12 +173,18 @@ class FreeAnalysisModel(ABC):
                 except Exception as e:
                     # Log and respond with an error so the model can recover
                     self.analysis_logger.error(f"Failed to parse tool arguments: {e}")
-                    function_response = json.dumps({"error": f"failed to parse arguments: {str(e)}"})
+                    function_response = {"error": f"failed to parse arguments: {str(e)}"}
+                    self._maybe_record_tool_failure(
+                        tool_function_name,
+                        function_response,
+                        arguments=tool_call.function.arguments,
+                        context="parse_arguments",
+                    )
                     messages.append(
                         {
                             "tool_call_id": tool_call.id,
                             "role": "tool",
-                            "content": function_response,
+                            "content": json.dumps(function_response),
                         }
                     )
                     # ask the model for next action by continuing the loop
@@ -155,6 +193,12 @@ class FreeAnalysisModel(ABC):
                 if tool_function_name == "set_conclusion":
                     function_response = set_conclusion(**tool_arguments)
                     if "error" in function_response:
+                        self._maybe_record_tool_failure(
+                            tool_function_name,
+                            function_response,
+                            arguments=tool_arguments,
+                            context="set_conclusion",
+                        )
                         messages.append({
                             "tool_call_id": tool_call.id,
                             "role": "tool",
@@ -166,6 +210,12 @@ class FreeAnalysisModel(ABC):
                             "error": "alert_ids must exactly match the current alert",
                             "expected": [conclusion_id],
                         }
+                        self._maybe_record_tool_failure(
+                            tool_function_name,
+                            function_response,
+                            arguments=tool_arguments,
+                            context="set_conclusion",
+                        )
                         messages.append({
                             "tool_call_id": tool_call.id,
                             "role": "tool",
@@ -182,6 +232,12 @@ class FreeAnalysisModel(ABC):
                 else:
                     self.analysis_logger.error(f"Unknown tool call: {tool_function_name}")
                     function_response = f"Error: Tool '{tool_function_name}' not found."
+                self._maybe_record_tool_failure(
+                    tool_function_name,
+                    function_response,
+                    arguments=tool_arguments,
+                    context="single_alert",
+                )
                 # Convert response to JSON string if it's not already a string
                 if not isinstance(function_response, str):
                     function_response = json.dumps(function_response)
@@ -249,8 +305,22 @@ class FreeAnalysisModel(ABC):
             {"role": "system", "content": SYS_PROMPT + ASSUMPTION_PROMPT},
             {"role": "user", "content": prompt},
         ]
+        max_turns = max(1, int(getattr(_cfg, "AGENT_MAX_TURNS", 32) or 32))
+        configured_reserve = max(
+            1,
+            int(getattr(_cfg, "AGENT_CONCLUSION_RESERVE_TURNS", 10) or 10),
+        )
+        conclusion_reserve = min(
+            max_turns,
+            max(configured_reserve, len(alerts) + 2),
+        )
         force_conclusion = False
-        for turn in range(1, 13):
+        for turn in range(1, max_turns + 1):
+            # Reserve enough final turns for the worst case where the model
+            # concludes one alert per call. Earlier turns remain available for
+            # source/graph investigation.
+            conclusion_phase = turn > max_turns - conclusion_reserve
+            force_conclusion = force_conclusion or conclusion_phase
             tool_choice = (
                 {
                     "type": "function",
@@ -299,9 +369,26 @@ class FreeAnalysisModel(ABC):
                     arguments = safe_load_json(call.function.arguments)
                 except Exception as error:
                     value = {"error": f"invalid tool arguments: {error}"}
+                    self._maybe_record_tool_failure(
+                        name,
+                        value,
+                        batch_id=batch_id,
+                        turn=turn,
+                        arguments=call.function.arguments,
+                        context="parse_arguments",
+                    )
                 else:
                     if name == "set_conclusion":
                         value = state.add([arguments])
+                        if isinstance(value, dict) and value.get("error"):
+                            self._maybe_record_tool_failure(
+                                name,
+                                value,
+                                batch_id=batch_id,
+                                turn=turn,
+                                arguments=arguments,
+                                context="set_conclusion",
+                            )
                         self.analysis_logger.info(
                             "Batch %s conclusion progress: %s", batch_id, value
                         )
@@ -313,8 +400,24 @@ class FreeAnalysisModel(ABC):
                             return True
                     elif name in self.tool_functions:
                         value = self.tool_functions[name](**arguments)
+                        self._maybe_record_tool_failure(
+                            name,
+                            value,
+                            batch_id=batch_id,
+                            turn=turn,
+                            arguments=arguments,
+                            context="batch",
+                        )
                     else:
                         value = {"error": f"unknown tool: {name}"}
+                        self._maybe_record_tool_failure(
+                            name,
+                            value,
+                            batch_id=batch_id,
+                            turn=turn,
+                            arguments=arguments,
+                            context="unknown_tool",
+                        )
                 self.analysis_logger.info(
                     "Batch %s turn %d tool %s response: %s",
                     batch_id,
@@ -328,8 +431,9 @@ class FreeAnalysisModel(ABC):
                     "content": value if isinstance(value, str) else json.dumps(value),
                 })
         self.analysis_logger.error(
-            "Batch %s exhausted agent loop; missing=%s",
+            "Batch %s exhausted agent loop after %d turns; missing=%s",
             batch_id,
+            max_turns,
             state.missing,
         )
         self.result_logger.info(
