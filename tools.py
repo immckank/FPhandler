@@ -3,7 +3,11 @@ set_conclusion_desc_free = {
     "type": "function",
     "function": {
         "name": "set_conclusion",
-        "description": "Sets the final conclusion for an alert analysis. This function should be called at the end of an analysis to provide a definitive classification and the reasoning behind it.",
+        "description": (
+            "Sets one conclusion for one or more alert IDs. IDs in one call share "
+            "the same classification and reason. Call it repeatedly for groups with "
+            "different conclusions; analysis ends after every current-batch ID is covered."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -47,53 +51,6 @@ set_conclusion_desc_free = {
             "required": ["alert_ids", "classification", "reason", "semantic_candidates"]
         }
     }
-}
-
-set_batch_conclusions_desc_free = {
-    "type": "function",
-    "function": {
-        "name": "set_batch_conclusions",
-        "description": (
-            "Classifies one or more alerts. A conclusion may cover multiple alert IDs "
-            "when they share a verdict. Call it repeatedly if different groups need "
-            "different verdicts; analysis ends only after every batch ID is covered."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "results": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "alert_ids": {
-                                "type": "array",
-                                "minItems": 1,
-                                "items": {"type": "string"},
-                                "description": "One or more short IDs shown in the current batch.",
-                            },
-                            "classification": {
-                                "type": "string",
-                                "enum": ["FP", "TP", "UNCERTAIN"],
-                            },
-                            "reason": {"type": "string"},
-                            "semantic_candidates": {
-                                "type": "array",
-                                "items": {"type": "object"},
-                            },
-                        },
-                        "required": [
-                            "alert_ids",
-                            "classification",
-                            "reason",
-                            "semantic_candidates",
-                        ],
-                    },
-                }
-            },
-            "required": ["results"],
-        },
-    },
 }
 
 dump_source_snippet_desc_free = {

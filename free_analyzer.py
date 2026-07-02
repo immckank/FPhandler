@@ -16,7 +16,6 @@ import re
 from batch_conclusions import BatchConclusions
 from tools import (
     set_conclusion_desc_free,
-    set_batch_conclusions_desc_free,
     dump_source_snippet_desc_free,
     dump_source_line_desc_free,
     find_current_function_desc_free,
@@ -42,14 +41,19 @@ class FreeAnalysisModel(ABC):
         self.last_results = {}
         pass
     
-    def send_message(self, messages, tools=""):
+    def send_message(self, messages, tools="", tool_choice=None):
         max_attempts = 3
         for attempt in range(1, max_attempts + 1):
             try:
+                request = {
+                    "model": self.model_name,
+                    "messages": messages,
+                    "tools": tools,
+                }
+                if tool_choice is not None:
+                    request["tool_choice"] = tool_choice
                 response = self.client.chat.completions.create(
-                    model=self.model_name,
-                    messages=messages,
-                    tools=tools
+                    **request
                 )
                 if response and getattr(response, "choices", None):
                     return response.choices[0].message
@@ -224,9 +228,9 @@ class FreeAnalysisModel(ABC):
         state = BatchConclusions(id_map)
         prompt = (
             f"Analyze batch {batch_id}. Every alert must be classified before you finish. "
-            "Call set_batch_conclusions with one or more conclusions. Each conclusion "
-            "must contain one or more alert_ids; group IDs only when the evidence supports "
-            "the same classification and reason. You may call the tool multiple times. "
+            "Call set_conclusion with one or more alert_ids. Group IDs only when the "
+            "evidence supports the same classification and reason. Call the tool multiple "
+            "times when different groups need different conclusions. "
             "Use only the short IDs shown below.\n\n"
             + "\n\n--- NEXT ALERT ---\n\n".join(
                 alert.to_prompt(short_id)
@@ -234,7 +238,7 @@ class FreeAnalysisModel(ABC):
             )
         )
         tools = [
-            set_batch_conclusions_desc_free,
+            set_conclusion_desc_free,
             dump_source_snippet_desc_free,
             dump_source_line_desc_free,
             find_current_function_desc_free,
@@ -245,21 +249,50 @@ class FreeAnalysisModel(ABC):
             {"role": "system", "content": SYS_PROMPT + ASSUMPTION_PROMPT},
             {"role": "user", "content": prompt},
         ]
-        for _ in range(12):
-            response = self.send_message(messages, tools)
+        force_conclusion = False
+        for turn in range(1, 13):
+            tool_choice = (
+                {
+                    "type": "function",
+                    "function": {"name": "set_conclusion"},
+                }
+                if force_conclusion
+                else None
+            )
+            response = self.send_message(messages, tools, tool_choice=tool_choice)
             if response is None:
+                self.analysis_logger.error(
+                    "Batch %s turn %d: no model response; missing=%s",
+                    batch_id,
+                    turn,
+                    state.missing,
+                )
                 return False
             messages.append(response)
+            content = getattr(response, "content", None) or ""
             calls = getattr(response, "tool_calls", None) or []
+            self.analysis_logger.info(
+                "Batch %s turn %d: content=%r tools=%s missing=%s",
+                batch_id,
+                turn,
+                content,
+                [call.function.name for call in calls],
+                state.missing,
+            )
             if not calls:
+                # Preserve the model's textual analysis as context, then force a
+                # structured commit on the next turn.
+                force_conclusion = True
                 messages.append({
                     "role": "user",
                     "content": (
-                        "The batch is not complete. Call set_batch_conclusions for "
-                        f"these remaining IDs: {state.missing}"
+                        "Commit your analysis now. You must call set_conclusion "
+                        "for every remaining ID. Do not answer with text. Remaining IDs: "
+                        f"{state.missing}"
                     ),
                 })
                 continue
+            force_conclusion = False
             for call in calls:
                 name = call.function.name
                 try:
@@ -267,8 +300,8 @@ class FreeAnalysisModel(ABC):
                 except Exception as error:
                     value = {"error": f"invalid tool arguments: {error}"}
                 else:
-                    if name == "set_batch_conclusions":
-                        value = state.add(arguments.get("results"))
+                    if name == "set_conclusion":
+                        value = state.add([arguments])
                         self.analysis_logger.info(
                             "Batch %s conclusion progress: %s", batch_id, value
                         )
@@ -282,11 +315,28 @@ class FreeAnalysisModel(ABC):
                         value = self.tool_functions[name](**arguments)
                     else:
                         value = {"error": f"unknown tool: {name}"}
+                self.analysis_logger.info(
+                    "Batch %s turn %d tool %s response: %s",
+                    batch_id,
+                    turn,
+                    name,
+                    value,
+                )
                 messages.append({
                     "tool_call_id": call.id,
                     "role": "tool",
                     "content": value if isinstance(value, str) else json.dumps(value),
                 })
+        self.analysis_logger.error(
+            "Batch %s exhausted agent loop; missing=%s",
+            batch_id,
+            state.missing,
+        )
+        self.result_logger.info(
+            "Batch %s incomplete; missing=%s",
+            batch_id,
+            state.missing,
+        )
         return False
 
 class DeepSeekFreeAnalyzer(FreeAnalysisModel):

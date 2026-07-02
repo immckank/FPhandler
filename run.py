@@ -159,6 +159,12 @@ def main() -> int:
                 continue
             document.write_classification(result)
             concluded += 1
+            logger.info(
+                "wrote conclusion id=%s classification=%s path=%s",
+                document.data["alert_id"],
+                result.get("classification"),
+                document.path,
+            )
             try:
                 added = append_candidates(
                     semantic_rules_path,
