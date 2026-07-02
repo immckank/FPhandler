@@ -28,7 +28,7 @@ SEMANTIC_RULE_REPOSITORY = os.path.join(OUTPUT_DIR, "semantic_rules.json")
 
 LLM_TYPE = "DeepSeek"  # DeepSeek / Qwen / Example / HW
 ALERT_BATCH_SIZE = 8
-AGENT_MAX_TURNS = 32
+AGENT_MAX_TURNS = 64
 AGENT_CONCLUSION_RESERVE_TURNS = 10
 
 # Docker 模式下 graph-reader 与 saber 共用 SVF_DOCKER_IMAGE（由 script/config.env 导出）

@@ -4,14 +4,8 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
-VALID_CATEGORIES = {
-    "MEMORY_LEAK",
-    "DOUBLE_FREE",
-    "USE_AFTER_FREE",
-    "UNINIT_USE",
-}
 VALID_CLASSIFICATIONS = {"TP", "FP", "UNCERTAIN"}
 
 
@@ -31,52 +25,80 @@ def _path_nodes(document: dict[str, Any]) -> Iterable[dict[str, Any]]:
             )
 
 
-def primary_location(document: dict[str, Any]) -> dict[str, Any] | None:
+def _location(location: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "fl": str(location["file"]),
+        "ln": int(location["line"]),
+        "cl": int(location.get("column") or 0),
+    }
+
+
+def _path_location(document: dict[str, Any]) -> dict[str, Any]:
     preferred = ("use", "second_free", "free", "first_free", "allocation", "object_origin")
     nodes = list(_path_nodes(document))
     for role in preferred:
         for node in reversed(nodes):
             location = node.get("location")
             if node.get("role") == role and isinstance(location, dict):
-                if location.get("file") and int(location.get("line") or 0) > 0:
-                    return {
-                        "fl": str(location["file"]),
-                        "ln": int(location["line"]),
-                        "cl": int(location.get("column") or 0),
-                    }
-    return None
+                return _location(location)
+    raise KeyError(f"no primary location for {document['alert_id']}")
 
 
-def validate_document(document: Any) -> list[str]:
-    errors: list[str] = []
-    if not isinstance(document, dict):
-        return ["document must be an object"]
-    alert_id = document.get("alert_id")
-    if not isinstance(alert_id, str) or not alert_id.startswith("sha256:"):
-        errors.append("alert_id must start with sha256:")
-    category = document.get("category")
-    if category not in VALID_CATEGORIES:
-        errors.append(f"unsupported category: {category!r}")
-    if category == "MEMORY_LEAK":
-        if not isinstance(document.get("allocation"), dict):
-            errors.append("memory leak requires allocation")
-        if not isinstance(document.get("paths"), list):
-            errors.append("memory leak requires paths")
-        if not isinstance(document.get("leak_condition"), dict):
-            errors.append("memory leak requires leak_condition")
-        if "path" in document:
-            errors.append("memory leak must not contain singular path")
-    else:
-        if not isinstance(document.get("path"), list) or not document.get("path"):
-            errors.append("non-leak alert requires one non-empty path")
-        if "paths" in document:
-            errors.append("non-leak alert must not contain paths")
-    classification = document.get("classification")
-    if classification is not None and classification not in VALID_CLASSIFICATIONS:
-        errors.append(f"invalid classification: {classification!r}")
-    if not isinstance(document.get("reason", ""), str):
-        errors.append("reason must be a string")
-    return errors
+def _bof_location(document: dict[str, Any]) -> dict[str, Any]:
+    return _location(document["access"]["location"])
+
+
+def _single_alert_batch(document: dict[str, Any]) -> tuple:
+    return document["category"], document["alert_id"]
+
+
+def _uaf_batch(document: dict[str, Any]) -> tuple:
+    free = next(node for node in document["path"] if node["role"] == "free")
+    location = free["location"]
+    return document["category"], location["file"], int(location["line"])
+
+
+def _uninit_batch(document: dict[str, Any]) -> tuple:
+    memory = document["evidence"]["memory_object"]
+    return document["category"], memory["type"] or memory["descriptor"]
+
+
+def _bof_batch(document: dict[str, Any]) -> tuple:
+    return document["category"], document["access"]["kind"]
+
+
+@dataclass(frozen=True)
+class CategoryBehavior:
+    primary_location: Callable[[dict[str, Any]], dict[str, Any]]
+    batch_key: Callable[[dict[str, Any]], tuple]
+    prompt_hint: str
+
+
+PATH_HINT = (
+    "`path` is a pruned SVFG value-flow witness; branch entries carry the "
+    "required control outcome."
+)
+CATEGORY_BEHAVIORS = {
+    "MEMORY_LEAK": CategoryBehavior(
+        _path_location,
+        _single_alert_batch,
+        "`paths` are possible safe freeing witnesses and `leak_condition` is "
+        "the complement that constitutes danger.",
+    ),
+    "DOUBLE_FREE": CategoryBehavior(_path_location, _single_alert_batch, PATH_HINT),
+    "USE_AFTER_FREE": CategoryBehavior(_path_location, _uaf_batch, PATH_HINT),
+    "UNINIT_USE": CategoryBehavior(_path_location, _uninit_batch, PATH_HINT),
+    "BUFFER_OVERFLOW": CategoryBehavior(
+        _bof_location,
+        _bof_batch,
+        "`range_analysis` is the ordered value-range derivation from variables "
+        "and guards through the final bounds comparison.",
+    ),
+}
+
+
+def category_behavior(document: dict[str, Any]) -> CategoryBehavior:
+    return CATEGORY_BEHAVIORS[document["category"]]
 
 
 @dataclass
@@ -88,16 +110,13 @@ class AlertDocument:
     def load(cls, path: str) -> "AlertDocument":
         with open(path, encoding="utf-8") as stream:
             data = json.load(stream)
-        errors = validate_document(data)
-        if errors:
-            raise ValueError("; ".join(errors))
         return cls(path=os.path.abspath(path), data=data)
 
     def write_classification(self, result: dict[str, Any]) -> None:
-        classification = str(result.get("classification") or "UNCERTAIN")
+        classification = str(result["classification"])
         if classification not in VALID_CLASSIFICATIONS:
             raise ValueError(f"invalid classification: {classification}")
-        reason = str(result.get("reason") or "").strip()
+        reason = str(result["reason"]).strip()
         self.data["classification"] = classification
         self.data["reason"] = reason
         tmp = self.path + ".tmp"
@@ -113,12 +132,9 @@ class UnifiedAlert:
     def __init__(self, document: AlertDocument):
         self.document = document
         self.defect_type = document.data["category"]
-        self._source_loc = primary_location(document.data)
-        self.source_location = (
-            f"{self._source_loc['fl']}:{self._source_loc['ln']}"
-            if self._source_loc
-            else None
-        )
+        self.behavior = category_behavior(document.data)
+        self._source_loc = self.behavior.primary_location(document.data)
+        self.source_location = f"{self._source_loc['fl']}:{self._source_loc['ln']}"
 
     def get_source_loc(self):
         return self._source_loc
@@ -134,10 +150,8 @@ class UnifiedAlert:
             data["alert_id"] = agent_id
         payload = json.dumps(data, ensure_ascii=False, indent=2)
         return (
-            "Classify this Saber static-analysis alert. `path` is a pruned SVFG "
-            "value-flow witness; branch entries carry the required control outcome. "
-            "For MEMORY_LEAK, `paths` are possible safe freeing witnesses and "
-            "`leak_condition` is the complement that constitutes danger.\n\n"
+            "Classify this SVFmemplus static-analysis alert. "
+            f"{self.behavior.prompt_hint}\n\n"
             f"{payload}"
         )
 

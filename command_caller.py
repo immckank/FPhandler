@@ -36,13 +36,33 @@ class CommandCaller:
         self.setupbash_path = str(p)
         self.startup_timeout_sec = startup_timeout_sec
 
-        # 1) 在 setup.sh 所在目录下 source（与手动 cd 到 SVFmemplus 再 source 一致），并合并进当前进程环境
-        self._setup_env()
+        # docker 模式：graph-reader 在容器内 source setup.sh，勿向 Python 进程 merge SVF 环境
+        if self._uses_docker_graph_reader():
+            self._ensure_setup_sh_exists()
+        else:
+            self._setup_env()
 
         # graph-reader 在 ensure_bitcode_for_sar 或首次 send_query 时再启动（支持按 SAR 切换 .bc）
 
-        # 2) register cleanup
         atexit.register(self._cleanup_process)
+
+    def _uses_docker_graph_reader(self) -> bool:
+        return bool(self._graph_reader_docker_image())
+
+    def _ensure_setup_sh_exists(self) -> None:
+        setup = Path(self.setupbash_path)
+        if not setup.is_file():
+            raise FileNotFoundError(
+                f"未找到 setup.sh: {setup}（请确认 SVFmemplus 路径或传入 setupbash_path）"
+            )
+
+    def _subprocess_env(self):
+        if self._uses_docker_graph_reader():
+            env = os.environ.copy()
+            env.pop("LD_LIBRARY_PATH", None)
+            env.pop("DYLD_LIBRARY_PATH", None)
+            return env
+        return os.environ
 
     def _setup_env(self):
         setup = Path(self.setupbash_path)
@@ -146,7 +166,7 @@ class CommandCaller:
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
-            env=os.environ,
+            env=self._subprocess_env(),
         )
 
     def ensure_bitcode_for_sar(self, sar_path: str) -> str:

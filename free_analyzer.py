@@ -6,7 +6,6 @@ import os
 import logging
 import time
 
-import memory_defect
 
 from analysis_operators import *
 from config import *
@@ -110,18 +109,14 @@ class FreeAnalysisModel(ABC):
     def responseToAlter(self, alter_prompt, user_prompt=""):
         pass
 
-    def responseForAlter(self, alter: memory_defect.MemoryDefect):
+    def responseForAlter(self, alter):
         """
         返回 True 表示模型已调用 set_conclusion 并得到成功结论；
         run.py 仅在此时把 alter.get_source_loc() 规范化为 fl:ln 写入去重文件。
         去重键由各缺陷类构造时的 source_loc（警报发生位置）决定，与是否 MemoryLeak 无关。
         """
         self.last_result = None
-        if hasattr(alter, "document"):
-            conclusion_id = alter.document.data["alert_id"]
-        else:
-            source = alter.get_source_loc() if hasattr(alter, "get_source_loc") else None
-            conclusion_id = f"legacy:{source or getattr(alter, 'source_location', 'unknown')}"
+        conclusion_id = alter.document.data["alert_id"]
         allowed_tools = [
             set_conclusion_desc_free, dump_source_snippet_desc_free, dump_source_line_desc_free, 
             find_current_function_desc_free, find_function_body_desc_free, find_callers_desc_free
@@ -455,9 +450,6 @@ class DeepSeekFreeAnalyzer(FreeAnalysisModel):
     def responseToAlter(self, alter_prompt, user_prompt=""):
         return None
     
-    def responseForAlter(self, alter: memory_defect.MemoryDefect):
-        return super().responseForAlter(alter)
-
 class QwenFreeAnalyzer(FreeAnalysisModel):
     def __init__(self, model_name="qwen3-max"):
         super().__init__()
@@ -470,9 +462,6 @@ class QwenFreeAnalyzer(FreeAnalysisModel):
     def responseToAlter(self, alter_prompt, user_prompt=""):
         return None
     
-    def responseForAlter(self, alter: memory_defect.MemoryDefect):
-        return super().responseForAlter(alter)
-
 class ExampleFreeAnalyzer(FreeAnalysisModel):
     """Template analyzer: copy and adjust base_url / model_name / api key env for a new provider."""
 
@@ -487,10 +476,6 @@ class ExampleFreeAnalyzer(FreeAnalysisModel):
     def responseToAlter(self, alter_prompt, user_prompt=""):
         return None
 
-    def responseForAlter(self, alter: memory_defect.MemoryDefect):
-        return super().responseForAlter(alter)
-
-
 class HWFreeAnalyzer(FreeAnalysisModel):
     """OpenAI-compatible analyzer using HW_KEY and model auto."""
 
@@ -504,10 +489,6 @@ class HWFreeAnalyzer(FreeAnalysisModel):
 
     def responseToAlter(self, alter_prompt, user_prompt=""):
         return None
-
-    def responseForAlter(self, alter: memory_defect.MemoryDefect):
-        return super().responseForAlter(alter)
-
 
 def create_analyzer():
     """Create the free-form analyzer for the configured LLM_TYPE."""

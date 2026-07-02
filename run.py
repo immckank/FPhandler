@@ -29,7 +29,7 @@ def _bootstrap_config_from_cli() -> None:
 _bootstrap_config_from_cli()
 
 import config as _cfg
-from alert_document import AlertDocument, UnifiedAlert
+from alert_document import AlertDocument, UnifiedAlert, category_behavior
 from command_caller import CommandCaller
 from semantic_rule_repository import append_candidates
 from utils import setup_logger
@@ -46,14 +46,16 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def discover_alerts(root: str) -> list[str]:
+def discover_alerts(root: str, categories: list[str]) -> list[str]:
     found: list[str] = []
-    if not os.path.isdir(root):
-        return found
-    for directory, _, files in os.walk(root):
-        for filename in files:
-            if filename.endswith(".json"):
-                found.append(os.path.join(directory, filename))
+    for category in categories:
+        category_root = os.path.join(root, category.lower())
+        if not os.path.isdir(category_root):
+            continue
+        for directory, _, files in os.walk(category_root):
+            for filename in files:
+                if filename.endswith(".json"):
+                    found.append(os.path.join(directory, filename))
     return sorted(found)
 
 
@@ -67,17 +69,7 @@ def print_stats(documents: list[AlertDocument]) -> None:
 
 
 def _batch_key(document: AlertDocument) -> tuple:
-    data = document.data
-    category = data["category"]
-    if category == "UNINIT_USE":
-        memory = (data.get("evidence") or {}).get("memory_object") or {}
-        return category, memory.get("type") or memory.get("descriptor") or data["alert_id"]
-    if category == "USE_AFTER_FREE":
-        for node in data.get("path") or []:
-            if node.get("role") == "free":
-                location = node.get("location") or {}
-                return category, location.get("file"), int(location.get("line") or 0)
-    return category, data["alert_id"]
+    return category_behavior(document.data).batch_key(document.data)
 
 
 def make_batches(documents: list[AlertDocument], max_size: int) -> list[list[AlertDocument]]:
@@ -98,7 +90,7 @@ def main() -> int:
     alert_root = os.path.abspath(
         getattr(_cfg, "ALERT_DIR", os.path.join(_cfg.OUTPUT_DIR, "alerts"))
     )
-    paths = discover_alerts(alert_root)
+    paths = discover_alerts(alert_root, _cfg.ALERT_CATEGORIES)
     if not paths:
         print(f"error: no alert JSON found under {alert_root}", file=sys.stderr)
         return 1
@@ -108,7 +100,7 @@ def main() -> int:
     for path in paths:
         try:
             documents.append(AlertDocument.load(path))
-        except (OSError, ValueError) as error:
+        except (OSError, ValueError, KeyError, TypeError) as error:
             invalid += 1
             print(f"error: invalid alert {path}: {error}", file=sys.stderr)
     if invalid:
@@ -200,7 +192,7 @@ def main() -> int:
         failure_summary["by_kind"],
     )
     graph._cleanup_process()
-    return 0
+    return 1 if concluded != len(pending) else 0
 
 
 if __name__ == "__main__":
